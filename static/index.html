@@ -183,9 +183,10 @@
             background: #000;
             border-radius: 12px;
             overflow: hidden;
-            margin-bottom: 20px;
-            aspect-ratio: 4/5;
+            margin-bottom: 16px;
+            aspect-ratio: 4/3;
             max-width: 100%;
+            max-height: 45vh;
         }
 
         #cameraPreview {
@@ -304,15 +305,135 @@
 
         .thumbnail-preview {
             position: relative;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
+            text-align: center;
         }
 
         .thumbnail-image {
             width: 100%;
-            max-width: 300px;
+            max-width: 240px;
+            max-height: 35vh;
+            object-fit: contain;
             border-radius: 8px;
             box-shadow: var(--shadow);
+            margin-bottom: 8px;
+        }
+
+        /* Scan Processing Panel */
+        .scan-panel {
+            margin-top: 16px;
+        }
+
+        .scan-preview-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 16px;
+            justify-content: center;
+        }
+
+        .scan-preview-item {
+            flex: 1;
+            text-align: center;
+            max-width: 45%;
+        }
+
+        .scan-label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+
+        .scan-preview-img {
+            width: 100%;
+            max-height: 30vh;
+            object-fit: contain;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            background: #f8f8f8;
+        }
+
+        .scan-arrow {
+            font-size: 20px;
+            color: var(--text-secondary);
+            flex-shrink: 0;
+        }
+
+        .filter-options {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 4px 0;
             margin-bottom: 12px;
+        }
+
+        .filter-btn {
+            flex: 1;
+            min-width: 60px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            padding: 10px 8px;
+            border: 2px solid var(--border-color);
+            border-radius: 10px;
+            background: white;
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .filter-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .filter-btn.active {
+            border-color: var(--secondary-color);
+            background: linear-gradient(135deg, rgba(13,148,136,0.08), rgba(26,115,232,0.08));
+            color: var(--secondary-color);
+            font-weight: 600;
+        }
+
+        .filter-icon {
+            font-size: 20px;
+        }
+
+        .scan-status {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: #f0f7ff;
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--primary-color);
+            margin-bottom: 8px;
+        }
+
+        .loading-spinner.small {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #e0e0e0;
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .scan-info {
+            padding: 8px 12px;
+            background: #f0faf7;
+            border-radius: 8px;
+            font-size: 13px;
+            color: var(--secondary-color);
+            margin-bottom: 8px;
         }
 
         /* Step 2: Contact Selection */
@@ -966,6 +1087,63 @@
                         下一步 →
                     </button>
                 </div>
+
+                <!-- 掃描後處理面板 -->
+                <div class="card scan-panel" id="scanPanel" style="display: none;">
+                    <h3 style="margin-bottom: 12px; font-size: 16px;">✨ 文件掃描處理</h3>
+
+                    <!-- Before/After 預覽 -->
+                    <div class="scan-preview-row">
+                        <div class="scan-preview-item">
+                            <span class="scan-label">原始</span>
+                            <img id="scanOriginal" class="scan-preview-img" alt="原始">
+                        </div>
+                        <div class="scan-arrow">→</div>
+                        <div class="scan-preview-item">
+                            <span class="scan-label">處理後</span>
+                            <img id="scanProcessed" class="scan-preview-img" alt="處理後">
+                        </div>
+                    </div>
+
+                    <!-- 濾鏡選擇 -->
+                    <div class="filter-options" id="filterOptions">
+                        <button class="filter-btn active" data-filter="auto">
+                            <span class="filter-icon">🪄</span>
+                            <span>自動</span>
+                        </button>
+                        <button class="filter-btn" data-filter="document">
+                            <span class="filter-icon">📄</span>
+                            <span>文件</span>
+                        </button>
+                        <button class="filter-btn" data-filter="enhance">
+                            <span class="filter-icon">🔆</span>
+                            <span>增強</span>
+                        </button>
+                        <button class="filter-btn" data-filter="bw">
+                            <span class="filter-icon">◼️</span>
+                            <span>黑白</span>
+                        </button>
+                        <button class="filter-btn" data-filter="original">
+                            <span class="filter-icon">🖼️</span>
+                            <span>原圖</span>
+                        </button>
+                    </div>
+
+                    <!-- 處理狀態 -->
+                    <div class="scan-status" id="scanStatus" style="display: none;">
+                        <div class="loading-spinner small"></div>
+                        <span id="scanStatusText">正在處理...</span>
+                    </div>
+
+                    <!-- 邊界偵測資訊 -->
+                    <div class="scan-info" id="scanInfo" style="display: none;">
+                        <span id="scanInfoText"></span>
+                    </div>
+
+                    <button class="btn btn-primary" id="scanNextBtn" style="width: 100%; margin-top: 12px;">
+                        確認掃描結果，下一步 →
+                    </button>
+                </div>
             </section>
 
             <!-- Step 2: Contact Selection -->
@@ -1206,6 +1384,8 @@
             currentStep: 1,
             uploadedFile: null,
             uploadedFileData: null,
+            imageUploaded: false,
+            scanProcessedUrl: null,
             selectedContact: null,
             analyzeResult: null,
             editingField: null,
@@ -1231,6 +1411,16 @@
             retakeBtn: document.getElementById('retakeBtn'),
             retakeContainer: document.getElementById('retakeContainer'),
             nextStep1Btn: document.getElementById('nextStep1Btn'),
+            // Scan Panel
+            scanPanel: document.getElementById('scanPanel'),
+            scanOriginal: document.getElementById('scanOriginal'),
+            scanProcessed: document.getElementById('scanProcessed'),
+            filterOptions: document.getElementById('filterOptions'),
+            scanStatus: document.getElementById('scanStatus'),
+            scanStatusText: document.getElementById('scanStatusText'),
+            scanInfo: document.getElementById('scanInfo'),
+            scanInfoText: document.getElementById('scanInfoText'),
+            scanNextBtn: document.getElementById('scanNextBtn'),
             // Step 2
             addContactBtn: document.getElementById('addContactBtn'),
             addContactForm: document.getElementById('addContactForm'),
@@ -1343,7 +1533,9 @@
             elements.retakeContainer.style.display = 'block';
             elements.captureBtn.style.display = 'none';
             elements.uploadBtn.style.display = 'none';
-            elements.nextStep1Btn.style.display = 'block';
+            elements.nextStep1Btn.style.display = 'none';
+            // 自動啟動掃描處理
+            startScanProcessing(dataUrl);
         }
 
         function hideThumbnail() {
@@ -1353,6 +1545,116 @@
             elements.captureBtn.style.display = 'flex';
             elements.uploadBtn.style.display = 'flex';
             elements.nextStep1Btn.style.display = 'none';
+            // 隱藏掃描面板
+            elements.scanPanel.style.display = 'none';
+        }
+
+        // ==================== 文件掃描處理 ====================
+        async function startScanProcessing(originalDataUrl) {
+            // 顯示掃描面板
+            elements.scanPanel.style.display = 'block';
+            elements.scanOriginal.src = originalDataUrl;
+            elements.scanProcessed.src = originalDataUrl;  // 先顯示原圖
+            elements.scanStatus.style.display = 'flex';
+            elements.scanStatusText.textContent = '正在上傳並偵測文件邊界...';
+            elements.scanInfo.style.display = 'none';
+            elements.scanNextBtn.disabled = true;
+
+            // 重設濾鏡選擇
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector('.filter-btn[data-filter="auto"]').classList.add('active');
+
+            try {
+                // Step 1: 上傳圖片
+                await uploadDocument();
+
+                // Step 2: 呼叫掃描處理 API
+                elements.scanStatusText.textContent = '正在進行邊界偵測與智慧校正...';
+                const response = await fetch(`${API_BASE}/scan/process`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filter_name: 'auto',
+                        auto_detect: true
+                    })
+                });
+
+                if (!response.ok) throw new Error('掃描處理失敗');
+                const result = await response.json();
+
+                if (result.success && result.image_base64) {
+                    const processedUrl = 'data:image/jpeg;base64,' + result.image_base64;
+                    elements.scanProcessed.src = processedUrl;
+                    state.scanProcessedUrl = processedUrl;
+
+                    // 顯示資訊
+                    let infoText = '';
+                    if (result.auto_detected) {
+                        infoText = '✅ 已自動偵測文件邊界並校正透視';
+                    } else {
+                        infoText = 'ℹ️ 未偵測到明確邊界，已套用影像增強';
+                    }
+                    infoText += ` | 濾鏡: ${getFilterLabel(result.filter_applied)}`;
+                    elements.scanInfoText.textContent = infoText;
+                    elements.scanInfo.style.display = 'block';
+                }
+
+                elements.scanStatus.style.display = 'none';
+                elements.scanNextBtn.disabled = false;
+
+            } catch (error) {
+                console.error('Scan processing error:', error);
+                elements.scanStatusText.textContent = '掃描處理失敗，將使用原圖';
+                elements.scanNextBtn.disabled = false;
+                setTimeout(() => {
+                    elements.scanStatus.style.display = 'none';
+                }, 2000);
+            }
+        }
+
+        function getFilterLabel(filterName) {
+            const labels = {
+                'auto': '🪄 自動',
+                'document': '📄 文件',
+                'enhance': '🔆 增強',
+                'bw': '◼️ 黑白',
+                'original': '🖼️ 原圖'
+            };
+            return labels[filterName] || filterName;
+        }
+
+        async function switchFilter(filterName) {
+            elements.scanStatus.style.display = 'flex';
+            elements.scanStatusText.textContent = `正在套用${getFilterLabel(filterName)}濾鏡...`;
+            elements.scanNextBtn.disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE}/scan/filter`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ filter_name: filterName })
+                });
+
+                if (!response.ok) throw new Error('濾鏡套用失敗');
+                const result = await response.json();
+
+                if (result.success && result.image_base64) {
+                    const processedUrl = 'data:image/jpeg;base64,' + result.image_base64;
+                    elements.scanProcessed.src = processedUrl;
+                    state.scanProcessedUrl = processedUrl;
+                }
+
+                elements.scanStatus.style.display = 'none';
+                elements.scanNextBtn.disabled = false;
+
+            } catch (error) {
+                console.error('Filter error:', error);
+                elements.scanStatusText.textContent = '濾鏡套用失敗';
+                elements.scanNextBtn.disabled = false;
+                setTimeout(() => {
+                    elements.scanStatus.style.display = 'none';
+                }, 2000);
+            }
         }
 
         // ==================== Step Navigation ====================
@@ -1527,7 +1829,7 @@
             elements.emailBody.textContent = result.body || '(未辨識內容)';
             elements.confidenceBadge.textContent = `信心度: ${confidence}%`;
             elements.recipientDisplay.textContent = `${state.selectedContact.name} <${state.selectedContact.email}>`;
-            elements.filenameDisplay.textContent = state.uploadedFile || 'document.jpg';
+            elements.filenameDisplay.textContent = result.filename || state.uploadedFile || 'document.pdf';
 
             // Show warning if confidence < 30%
             if (confidence < 30) {
@@ -1583,6 +1885,7 @@
                 });
 
                 if (!response.ok) throw new Error('Upload failed');
+                state.imageUploaded = true;
                 return await response.json();
             } catch (error) {
                 console.error('Upload error:', error);
@@ -1607,12 +1910,22 @@
                     })
                 });
 
-                if (!response.ok) throw new Error('Send failed');
+                if (!response.ok) {
+                    const errData = await response.json().catch(() => ({}));
+                    throw new Error(errData.detail || '寄送失敗');
+                }
+
+                const result = await response.json();
+
+                // 檢查後端回傳的 success 欄位（SMTP 可能失敗但 HTTP 仍 200）
+                if (!result.success) {
+                    throw new Error(result.message || '郵件寄送失敗，請檢查 SMTP 設定');
+                }
 
                 // Show success
-                elements.resultSubject.textContent = subject;
-                elements.resultRecipient.textContent = state.selectedContact.email;
-                elements.resultFilename.textContent = filename;
+                elements.resultSubject.textContent = result.subject || subject;
+                elements.resultRecipient.textContent = result.recipient_email || state.selectedContact.email;
+                elements.resultFilename.textContent = result.filename || filename;
                 elements.successResult.style.display = 'block';
                 elements.errorResult.style.display = 'none';
                 goToStep(4);
@@ -1737,6 +2050,18 @@
             elements.retakeBtn.addEventListener('click', hideThumbnail);
             elements.nextStep1Btn.addEventListener('click', () => goToStep(2));
 
+            // Scan panel: filter buttons
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    switchFilter(btn.dataset.filter);
+                });
+            });
+
+            // Scan panel: next button
+            elements.scanNextBtn.addEventListener('click', () => goToStep(2));
+
             // Contacts
             elements.addContactBtn.addEventListener('click', () => {
                 elements.addContactForm.style.display = 'block';
@@ -1747,7 +2072,7 @@
             });
             elements.saveContactBtn.addEventListener('click', addNewContact);
 
-            // Step 2 → Step 3: 選好收件人後 → 上傳圖片 → AI 分析
+            // Step 2 → Step 3: 選好收件人後 → AI 分析（圖片已在掃描階段上傳+處理）
             document.getElementById('nextToAnalyzeBtn').addEventListener('click', async () => {
                 if (!state.selectedContact) {
                     alert('請先選擇一位收件人');
@@ -1755,12 +2080,15 @@
                 }
                 goToStep(3);
                 try {
-                    // 先上傳圖片到伺服器
-                    await uploadDocument();
-                    // 再觸發 AI 分析
+                    // 圖片已在 Step 1 掃描階段上傳到伺服器
+                    // 如果沒有經過掃描面板（理論上不應發生），補上傳
+                    if (!state.imageUploaded) {
+                        await uploadDocument();
+                    }
+                    // 觸發 AI 分析
                     await analyzeDocument();
                 } catch (error) {
-                    console.error('Upload/Analyze error:', error);
+                    console.error('Analyze error:', error);
                     elements.loadingState.style.display = 'none';
                     alert('處理失敗：' + (error.message || '請重試'));
                     goToStep(2);
@@ -1776,6 +2104,8 @@
             elements.restartBtn.addEventListener('click', () => {
                 state.uploadedFile = null;
                 state.uploadedFileData = null;
+                state.imageUploaded = false;
+                state.scanProcessedUrl = null;
                 state.selectedContact = null;
                 state.analyzeResult = null;
                 hideThumbnail();

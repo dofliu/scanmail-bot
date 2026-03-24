@@ -18,6 +18,7 @@ from app.models.sender import SenderModel
 from app.services.ai_analyzer import analyze_document
 from app.services.image_processor import image_to_pdf, validate_image
 from app.services.email_sender import send_email
+from app.services.doc_scanner import detect_document_edges, perspective_transform, apply_filter, scan_document
 
 # 設定 logging
 logging.basicConfig(
@@ -61,9 +62,11 @@ class SenderProfileRequest(BaseModel):
 class SessionData:
     def __init__(self):
         self.image_data: Optional[bytes] = None
+        self.image_original: Optional[bytes] = None  # 保留原始圖片（切換濾鏡用）
         self.image_media_type: str = "image/jpeg"
         self.ai_result: Optional[dict] = None
         self.selected_contact_id: Optional[int] = None
+        self.detected_corners: Optional[list] = None  # 偵測到的邊界角點
 
 _sessions: dict[str, SessionData] = {}
 
@@ -142,14 +145,110 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
         media_type = "image/jpeg"
 
     session.image_data = content
+    session.image_original = content  # 保留原始圖片
     session.image_media_type = media_type
     session.ai_result = None  # 重置舊的分析結果
+    session.detected_corners = None
 
     return {
         "success": True,
         "filename": file.filename,
         "size": len(content),
         "content_type": media_type,
+    }
+
+
+# ── 文件掃描後處理 ──
+
+class ScanRequest(BaseModel):
+    corners: Optional[list[list[int]]] = None
+    filter_name: str = "auto"
+    auto_detect: bool = True
+
+
+@app.post("/api/scan/detect")
+async def detect_edges(request: Request):
+    """偵測文件邊界，回傳四個角點"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if not session.image_data:
+        raise HTTPException(status_code=400, detail="請先上傳圖片")
+
+    corners = detect_document_edges(session.image_data)
+
+    return {
+        "success": True,
+        "corners": corners,
+        "detected": corners is not None,
+    }
+
+
+@app.post("/api/scan/process")
+async def process_scan(request: Request, body: ScanRequest):
+    """執行完整掃描處理（邊界校正 + 濾鏡）"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if not session.image_data:
+        raise HTTPException(status_code=400, detail="請先上傳圖片")
+
+    result = scan_document(
+        image_data=session.image_data,
+        corners=body.corners,
+        filter_name=body.filter_name,
+        auto_detect=body.auto_detect,
+    )
+
+    # 更新 session 中的圖片為處理後的版本
+    session.image_data = result["image"]
+    session.image_media_type = "image/jpeg"
+    if result["corners"]:
+        session.detected_corners = result["corners"]
+
+    # 回傳處理後的圖片（base64）
+    import base64
+    img_b64 = base64.b64encode(result["image"]).decode("utf-8")
+
+    return {
+        "success": True,
+        "image_base64": img_b64,
+        "corners": result["corners"],
+        "auto_detected": result["auto_detected"],
+        "filter_applied": result["filter_applied"],
+        "original_size": result["original_size"],
+        "processed_size": result["processed_size"],
+    }
+
+
+@app.post("/api/scan/filter")
+async def apply_scan_filter(request: Request, body: ScanRequest):
+    """切換濾鏡（從原始圖或已校正圖重新套用）"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if not session.image_data:
+        raise HTTPException(status_code=400, detail="請先上傳圖片")
+
+    # 如果有邊界角點 → 從原始圖重新校正+套濾鏡
+    # 否則從原始圖直接套濾鏡
+    source = session.image_original or session.image_data
+    if session.detected_corners:
+        source = perspective_transform(source, session.detected_corners)
+
+    processed = apply_filter(source, body.filter_name)
+
+    # 更新 session
+    session.image_data = processed
+    session.image_media_type = "image/jpeg"
+
+    import base64
+    img_b64 = base64.b64encode(processed).decode("utf-8")
+
+    return {
+        "success": True,
+        "image_base64": img_b64,
+        "filter_applied": body.filter_name,
     }
 
 

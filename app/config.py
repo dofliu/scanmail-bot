@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     # Gemini Vision API
     GEMINI_API_KEY: str = ""
     AI_MODEL: str = "gemini-2.0-flash"
-    AI_MAX_TOKENS: int = 1024
+    AI_MAX_TOKENS: int = 4096
     AI_TEMPERATURE: float = 0.3
     
     # SMTP
