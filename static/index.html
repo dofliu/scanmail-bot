@@ -1,0 +1,1830 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScanMail - 智慧掃描郵寄系統</title>
+    <style>
+        :root {
+            --primary-color: #1a73e8;
+            --secondary-color: #0d9488;
+            --gradient: linear-gradient(135deg, #1a73e8 0%, #0d9488 100%);
+            --bg-white: #ffffff;
+            --bg-light: #f5f5f5;
+            --text-primary: #202124;
+            --text-secondary: #5f6368;
+            --border-color: #dadce0;
+            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+            --transition: all 0.3s ease;
+            --exam-color: #1D9E75;
+            --official-color: #534AB7;
+            --receipt-color: #D85A30;
+            --contract-color: #185FA5;
+            --report-color: #993556;
+            --letter-color: #3B6D11;
+            --form-color: #854F0B;
+            --other-color: #5F5E5A;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "Noto Sans CJK TC", sans-serif;
+            background: var(--bg-light);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            max-width: 100%;
+        }
+
+        /* Header */
+        .header {
+            background: var(--gradient);
+            color: white;
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: var(--shadow);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-title {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .header-title h1 {
+            font-size: 24px;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .header-title p {
+            font-size: 12px;
+            opacity: 0.95;
+        }
+
+        .hamburger-menu {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Main Content */
+        .main-content {
+            flex: 1;
+            padding: 20px;
+            max-width: 100%;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        /* Step Indicator */
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            gap: 16px;
+            margin-bottom: 32px;
+            flex-wrap: wrap;
+        }
+
+        .step-dot {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--bg-white);
+            border: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            color: var(--text-secondary);
+            transition: var(--transition);
+            box-shadow: var(--shadow);
+        }
+
+        .step-dot.active {
+            background: var(--primary-color);
+            color: white;
+            border-color: var(--primary-color);
+            transform: scale(1.1);
+        }
+
+        .step-dot.completed {
+            background: var(--secondary-color);
+            color: white;
+            border-color: var(--secondary-color);
+        }
+
+        /* Step Content */
+        .step {
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        .step.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .step-title {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--text-primary);
+        }
+
+        /* Card Styles */
+        .card {
+            background: var(--bg-white);
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: var(--shadow);
+            margin-bottom: 20px;
+        }
+
+        .card.bordered {
+            border: 1px solid var(--border-color);
+        }
+
+        /* Step 1: Camera Upload */
+        .camera-preview-container {
+            position: relative;
+            background: #000;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            aspect-ratio: 4/5;
+            max-width: 100%;
+        }
+
+        #cameraPreview {
+            width: 100%;
+            height: 100%;
+            display: block;
+            object-fit: cover;
+        }
+
+        #cameraCanvas {
+            display: none;
+        }
+
+        .camera-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            height: 85%;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 8px;
+            pointer-events: none;
+        }
+
+        .capture-buttons {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            min-height: 44px;
+        }
+
+        .btn-primary {
+            background: var(--gradient);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: var(--bg-white);
+            color: var(--primary-color);
+            border: 2px solid var(--primary-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-light);
+        }
+
+        .btn-danger {
+            background: #d32f2f;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-success {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 13px;
+            min-height: 36px;
+        }
+
+        .btn-icon {
+            padding: 8px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        #fileInput {
+            display: none;
+        }
+
+        .thumbnail-preview {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .thumbnail-image {
+            width: 100%;
+            max-width: 300px;
+            border-radius: 8px;
+            box-shadow: var(--shadow);
+            margin-bottom: 12px;
+        }
+
+        /* Step 2: Contact Selection */
+        .contacts-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .contact-card {
+            background: var(--bg-white);
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .contact-card:hover {
+            border-color: var(--primary-color);
+            box-shadow: var(--shadow-lg);
+            transform: translateY(-4px);
+        }
+
+        .contact-card.selected {
+            border-color: var(--primary-color);
+            background: linear-gradient(135deg, rgba(26, 115, 232, 0.05) 0%, rgba(13, 148, 136, 0.05) 100%);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .contact-name {
+            font-weight: 600;
+            font-size: 15px;
+            margin-bottom: 4px;
+        }
+
+        .contact-email {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+
+        .contact-dept {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .add-contact-btn {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            transition: var(--transition);
+            font-family: inherit;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
+        }
+
+        .form-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .form-buttons .btn {
+            flex: 1;
+        }
+
+        /* Loading Spinner */
+        .loading-state {
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid var(--bg-light);
+            border-top-color: var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading-text {
+            font-size: 16px;
+            color: var(--text-secondary);
+        }
+
+        /* Step 3: Preview */
+        .email-preview {
+            background: var(--bg-white);
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: var(--shadow-lg);
+            margin-bottom: 20px;
+        }
+
+        .email-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .doc-type-badge {
+            padding: 8px 12px;
+            border-radius: 6px;
+            color: white;
+            font-size: 12px;
+            font-weight: 600;
+            white-space: nowrap;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .email-header-text {
+            flex: 1;
+        }
+
+        .confidence-badge {
+            background: var(--bg-light);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }
+
+        .email-subject {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            padding: 4px 0;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: var(--transition);
+            word-break: break-word;
+        }
+
+        .email-subject:hover {
+            background: var(--bg-light);
+        }
+
+        .email-subject.editable {
+            background: var(--bg-light);
+            outline: 2px solid var(--primary-color);
+        }
+
+        .email-body {
+            padding: 20px;
+            background: var(--bg-white);
+            font-size: 14px;
+            line-height: 1.8;
+            color: var(--text-primary);
+            white-space: pre-wrap;
+            word-break: break-word;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: var(--transition);
+        }
+
+        .email-body:hover {
+            background: var(--bg-light);
+        }
+
+        .email-body.editable {
+            background: var(--bg-light);
+            outline: 2px solid var(--primary-color);
+        }
+
+        .email-meta {
+            padding: 16px 20px;
+            background: var(--bg-light);
+            border-top: 1px solid var(--border-color);
+            display: grid;
+            gap: 12px;
+        }
+
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+            font-size: 14px;
+        }
+
+        .meta-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+            min-width: 80px;
+        }
+
+        .meta-value {
+            flex: 1;
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: var(--transition);
+            word-break: break-word;
+        }
+
+        .meta-value:hover {
+            background: var(--bg-white);
+        }
+
+        .meta-value.editable {
+            background: white;
+            outline: 2px solid var(--primary-color);
+        }
+
+        .warning-banner {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            color: #856404;
+        }
+
+        .warning-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+        }
+
+        .preview-buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        .preview-buttons .btn {
+            flex: 1;
+        }
+
+        /* Step 4: Result */
+        .result-container {
+            text-align: center;
+            padding: 40px 20px;
+        }
+
+        .result-icon {
+            font-size: 64px;
+            margin-bottom: 20px;
+            animation: bounce 0.6s ease;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .result-title {
+            font-size: 28px;
+            font-weight: 600;
+            margin-bottom: 12px;
+            color: var(--text-primary);
+        }
+
+        .result-message {
+            font-size: 16px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+
+        .result-summary {
+            background: var(--bg-light);
+            border-radius: 8px;
+            padding: 16px;
+            margin-bottom: 24px;
+            text-align: left;
+        }
+
+        .summary-item {
+            font-size: 14px;
+            margin-bottom: 8px;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .summary-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .summary-label {
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .summary-value {
+            color: var(--text-primary);
+            word-break: break-word;
+            text-align: right;
+            flex: 1;
+        }
+
+        .result-buttons {
+            display: flex;
+            gap: 12px;
+            flex-direction: column;
+        }
+
+        .result-buttons .btn {
+            width: 100%;
+        }
+
+        /* Side Panel */
+        .side-panel {
+            position: fixed;
+            top: 0;
+            right: -360px;
+            width: 360px;
+            height: 100vh;
+            background: var(--bg-white);
+            box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
+            transition: right 0.3s ease;
+            z-index: 1000;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .side-panel.open {
+            right: 0;
+        }
+
+        .panel-header {
+            background: var(--gradient);
+            color: white;
+            padding: 20px;
+            font-size: 18px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .panel-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .panel-section {
+            margin-bottom: 24px;
+        }
+
+        .panel-tabs {
+            display: flex;
+            gap: 8px;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 16px;
+        }
+
+        .panel-tab {
+            padding: 12px 16px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: var(--transition);
+        }
+
+        .panel-tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+
+        .panel-tab:hover {
+            color: var(--text-primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .contact-item {
+            background: var(--bg-light);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .contact-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .contact-name-small {
+            font-weight: 600;
+            font-size: 13px;
+            margin-bottom: 2px;
+        }
+
+        .contact-email-small {
+            font-size: 12px;
+            color: var(--text-secondary);
+            word-break: break-all;
+        }
+
+        .history-item {
+            background: var(--bg-light);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 12px;
+        }
+
+        .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+
+        .history-subject {
+            font-weight: 600;
+            font-size: 13px;
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .history-date {
+            font-size: 11px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .history-recipient {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .settings-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .settings-form .btn {
+            width: 100%;
+        }
+
+        /* Overlay */
+        .overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 999;
+        }
+
+        .overlay.open {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .main-content {
+                padding: 12px;
+            }
+
+            .card {
+                padding: 16px;
+            }
+
+            .step-indicator {
+                gap: 12px;
+            }
+
+            .step-dot {
+                width: 36px;
+                height: 36px;
+                font-size: 14px;
+            }
+
+            .header-title h1 {
+                font-size: 20px;
+            }
+
+            .contacts-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .side-panel {
+                width: 100%;
+                right: -100%;
+            }
+
+            .preview-buttons {
+                flex-direction: column;
+            }
+
+            .result-buttons {
+                flex-direction: column;
+            }
+
+            .capture-buttons {
+                flex-direction: column;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .header {
+                padding: 12px 16px;
+            }
+
+            .main-content {
+                padding: 8px;
+            }
+
+            .step-title {
+                font-size: 20px;
+            }
+
+            .email-subject {
+                font-size: 16px;
+            }
+
+            .result-icon {
+                font-size: 48px;
+            }
+
+            .result-title {
+                font-size: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-title">
+                <h1>ScanMail</h1>
+                <p>智慧掃描郵寄系統</p>
+            </div>
+            <button class="hamburger-menu" id="hamburgerBtn" title="功能菜單">☰</button>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Step Indicator -->
+            <div class="step-indicator">
+                <div class="step-dot active" data-step="1">1</div>
+                <div class="step-dot" data-step="2">2</div>
+                <div class="step-dot" data-step="3">3</div>
+                <div class="step-dot" data-step="4">4</div>
+            </div>
+
+            <!-- Step 1: Camera & Upload -->
+            <section class="step active" data-step="1">
+                <h2 class="step-title">📷 拍照 / 上傳</h2>
+                <div class="card">
+                    <div class="camera-preview-container" id="cameraContainer">
+                        <video id="cameraPreview" playsinline></video>
+                        <canvas id="cameraCanvas"></canvas>
+                        <div class="camera-overlay"></div>
+                    </div>
+                    <div class="thumbnail-preview" id="thumbnailPreview" style="display: none;">
+                        <img id="thumbnailImage" class="thumbnail-image" alt="Preview">
+                    </div>
+                    <div class="capture-buttons">
+                        <button class="btn btn-primary" id="captureBtn">
+                            📷 拍照
+                        </button>
+                        <button class="btn btn-secondary" id="uploadBtn">
+                            📁 上傳檔案
+                        </button>
+                    </div>
+                    <div id="retakeContainer" style="display: none;">
+                        <button class="btn btn-secondary" id="retakeBtn" style="width: 100%; margin-bottom: 12px;">
+                            🔄 重新拍照
+                        </button>
+                    </div>
+                    <button class="btn btn-primary" id="nextStep1Btn" style="width: 100%; display: none;">
+                        下一步 →
+                    </button>
+                </div>
+            </section>
+
+            <!-- Step 2: Contact Selection -->
+            <section class="step" data-step="2">
+                <h2 class="step-title">選擇收件人</h2>
+                <div class="card">
+                    <button class="btn btn-primary add-contact-btn" id="addContactBtn">
+                        ➕ 新增收件人
+                    </button>
+
+                    <!-- Add Contact Form -->
+                    <div id="addContactForm" style="display: none; margin-bottom: 20px; padding: 20px; background: var(--bg-light); border-radius: 8px;">
+                        <h3 style="margin-bottom: 16px;">新增收件人</h3>
+                        <div class="form-group">
+                            <label class="form-label">姓名</label>
+                            <input type="text" class="form-input" id="contactName" placeholder="例: 王經理">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-input" id="contactEmail" placeholder="例: wang@company.com">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">部門</label>
+                            <input type="text" class="form-input" id="contactDept" placeholder="例: 行政部">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">職稱</label>
+                            <input type="text" class="form-input" id="contactTitle" placeholder="例: 經理">
+                        </div>
+                        <div class="form-buttons">
+                            <button class="btn btn-secondary" id="cancelContactBtn">取消</button>
+                            <button class="btn btn-primary" id="saveContactBtn">儲存</button>
+                        </div>
+                    </div>
+
+                    <!-- Contacts Grid -->
+                    <div class="contacts-grid" id="contactsGrid">
+                        <!-- Contacts will be loaded here -->
+                    </div>
+
+                    <div id="noContactsMsg" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                        尚無聯絡人，請新增一個
+                    </div>
+
+                    <!-- 下一步按鈕 -->
+                    <button class="btn btn-primary" id="nextToAnalyzeBtn"
+                            style="display: none; width: 100%; margin-top: 20px; padding: 16px; font-size: 18px;">
+                        🤖 開始 AI 辨識 →
+                    </button>
+                </div>
+            </section>
+
+            <!-- Step 3: Preview & Confirm -->
+            <section class="step" data-step="3">
+                <h2 class="step-title">預覽確認</h2>
+                <div class="card">
+                    <!-- Loading State -->
+                    <div id="loadingState" class="loading-state">
+                        <div class="spinner"></div>
+                        <div class="loading-text">🤖 AI 辨識中...</div>
+                    </div>
+
+                    <!-- Preview Content -->
+                    <div id="previewContent" style="display: none;">
+                        <!-- Warning Banner -->
+                        <div id="confidenceWarning" style="display: none;" class="warning-banner">
+                            <span class="warning-icon">⚠️</span>
+                            <div>
+                                <strong>低可信度警告</strong><br>
+                                AI 辨識信心度低於 30%，建議確認文件內容無誤
+                            </div>
+                        </div>
+
+                        <!-- Email Preview -->
+                        <div class="email-preview">
+                            <div class="email-header">
+                                <div class="doc-type-badge" id="docTypeBadge">
+                                    <span id="docTypeIcon">📎</span>
+                                    <span id="docTypeText">其他</span>
+                                </div>
+                                <div class="email-header-text">
+                                    <div class="email-subject" id="emailSubject" contenteditable="false">主旨</div>
+                                    <div class="confidence-badge" id="confidenceBadge">信心度: 100%</div>
+                                </div>
+                            </div>
+
+                            <div class="email-body" id="emailBody" contenteditable="false">
+                                Email body content
+                            </div>
+
+                            <div class="email-meta">
+                                <div class="meta-row">
+                                    <div class="meta-label">收件人</div>
+                                    <div class="meta-value" id="recipientDisplay"></div>
+                                </div>
+                                <div class="meta-row">
+                                    <div class="meta-label">檔名</div>
+                                    <div class="meta-value" id="filenameDisplay" contenteditable="false"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Preview Buttons -->
+                        <div class="preview-buttons" style="margin-top: 20px;">
+                            <button class="btn btn-secondary" id="cancelBtn">取消</button>
+                            <button class="btn btn-secondary" id="editBtn">編輯</button>
+                            <button class="btn btn-success" id="sendBtn">確認寄出 ✓</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Step 4: Result -->
+            <section class="step" data-step="4">
+                <div class="card">
+                    <div id="successResult" class="result-container" style="display: none;">
+                        <div class="result-icon">✓</div>
+                        <h2 class="result-title">寄送成功</h2>
+                        <p class="result-message">您的掃描文件已成功發送</p>
+                        <div class="result-summary">
+                            <div class="summary-item">
+                                <span class="summary-label">主旨:</span>
+                                <span class="summary-value" id="resultSubject"></span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">收件人:</span>
+                                <span class="summary-value" id="resultRecipient"></span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-label">檔名:</span>
+                                <span class="summary-value" id="resultFilename"></span>
+                            </div>
+                        </div>
+                        <div class="result-buttons">
+                            <button class="btn btn-primary" id="restartBtn">
+                                📷 繼續掃描
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="errorResult" class="result-container" style="display: none;">
+                        <div class="result-icon" style="color: #d32f2f;">✕</div>
+                        <h2 class="result-title">寄送失敗</h2>
+                        <p class="result-message" id="errorMessage"></p>
+                        <div class="result-buttons">
+                            <button class="btn btn-danger" id="retryBtn">重試</button>
+                            <button class="btn btn-secondary" id="backBtn">返回編輯</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Side Panel -->
+    <div class="overlay" id="overlay"></div>
+    <aside class="side-panel" id="sidePanel">
+        <div class="panel-header">
+            <span id="panelTitle">功能菜單</span>
+            <button class="panel-close" id="panelCloseBtn">✕</button>
+        </div>
+        <div class="panel-tabs">
+            <button class="panel-tab active" data-tab="contacts">聯絡人</button>
+            <button class="panel-tab" data-tab="history">寄件歷史</button>
+            <button class="panel-tab" data-tab="settings">設定</button>
+        </div>
+        <div class="panel-content">
+            <!-- Contacts Tab -->
+            <div class="tab-content active" data-content="contacts">
+                <div class="panel-section">
+                    <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">我的聯絡人</h3>
+                    <div id="panelContactsList"></div>
+                    <div id="panelNoContacts" class="empty-state" style="padding: 20px;">
+                        尚無聯絡人
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Tab -->
+            <div class="tab-content" data-content="history">
+                <div class="panel-section">
+                    <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">最近寄件</h3>
+                    <div id="panelHistoryList"></div>
+                    <div id="panelNoHistory" class="empty-state" style="padding: 20px;">
+                        尚無寄件紀錄
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div class="tab-content" data-content="settings">
+                <div class="panel-section">
+                    <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">寄件人資料</h3>
+                    <form class="settings-form" id="settingsForm">
+                        <div class="form-group">
+                            <label class="form-label">姓名</label>
+                            <input type="text" class="form-input" id="senderName" placeholder="您的姓名">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-input" id="senderEmail" placeholder="您的 Email">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">職稱</label>
+                            <input type="text" class="form-input" id="senderTitle" placeholder="職稱">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">部門</label>
+                            <input type="text" class="form-input" id="senderDept" placeholder="部門">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">公司</label>
+                            <input type="text" class="form-input" id="senderOrg" placeholder="公司名稱">
+                        </div>
+                        <button type="submit" class="btn btn-primary">儲存設定</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <script>
+        // ==================== Constants ====================
+        const API_BASE = '/api';
+        const DOC_TYPES = {
+            exam: { label: '試卷', icon: '📝', color: '#1D9E75' },
+            official: { label: '公文', icon: '📋', color: '#534AB7' },
+            receipt: { label: '收據', icon: '🧾', color: '#D85A30' },
+            contract: { label: '合約', icon: '📄', color: '#185FA5' },
+            report: { label: '報告', icon: '📊', color: '#993556' },
+            letter: { label: '信件', icon: '✉️', color: '#3B6D11' },
+            form: { label: '表單', icon: '📑', color: '#854F0B' },
+            other: { label: '其他', icon: '📎', color: '#5F5E5A' }
+        };
+
+        // ==================== State ====================
+        let state = {
+            currentStep: 1,
+            uploadedFile: null,
+            uploadedFileData: null,
+            selectedContact: null,
+            analyzeResult: null,
+            editingField: null,
+            contacts: [],
+            history: [],
+            settings: {}
+        };
+
+        // ==================== DOM Elements ====================
+        const elements = {
+            // Steps
+            steps: document.querySelectorAll('.step'),
+            stepDots: document.querySelectorAll('.step-dot'),
+            // Step 1
+            cameraPreview: document.getElementById('cameraPreview'),
+            cameraCanvas: document.getElementById('cameraCanvas'),
+            cameraContainer: document.getElementById('cameraContainer'),
+            captureBtn: document.getElementById('captureBtn'),
+            uploadBtn: document.getElementById('uploadBtn'),
+            fileInput: document.getElementById('fileInput'),
+            thumbnailPreview: document.getElementById('thumbnailPreview'),
+            thumbnailImage: document.getElementById('thumbnailImage'),
+            retakeBtn: document.getElementById('retakeBtn'),
+            retakeContainer: document.getElementById('retakeContainer'),
+            nextStep1Btn: document.getElementById('nextStep1Btn'),
+            // Step 2
+            addContactBtn: document.getElementById('addContactBtn'),
+            addContactForm: document.getElementById('addContactForm'),
+            contactName: document.getElementById('contactName'),
+            contactEmail: document.getElementById('contactEmail'),
+            contactDept: document.getElementById('contactDept'),
+            contactTitle: document.getElementById('contactTitle'),
+            cancelContactBtn: document.getElementById('cancelContactBtn'),
+            saveContactBtn: document.getElementById('saveContactBtn'),
+            contactsGrid: document.getElementById('contactsGrid'),
+            noContactsMsg: document.getElementById('noContactsMsg'),
+            // Step 3
+            loadingState: document.getElementById('loadingState'),
+            previewContent: document.getElementById('previewContent'),
+            confidenceWarning: document.getElementById('confidenceWarning'),
+            docTypeBadge: document.getElementById('docTypeBadge'),
+            docTypeIcon: document.getElementById('docTypeIcon'),
+            docTypeText: document.getElementById('docTypeText'),
+            emailSubject: document.getElementById('emailSubject'),
+            emailBody: document.getElementById('emailBody'),
+            confidenceBadge: document.getElementById('confidenceBadge'),
+            recipientDisplay: document.getElementById('recipientDisplay'),
+            filenameDisplay: document.getElementById('filenameDisplay'),
+            cancelBtn: document.getElementById('cancelBtn'),
+            editBtn: document.getElementById('editBtn'),
+            sendBtn: document.getElementById('sendBtn'),
+            // Step 4
+            successResult: document.getElementById('successResult'),
+            errorResult: document.getElementById('errorResult'),
+            resultSubject: document.getElementById('resultSubject'),
+            resultRecipient: document.getElementById('resultRecipient'),
+            resultFilename: document.getElementById('resultFilename'),
+            restartBtn: document.getElementById('restartBtn'),
+            retryBtn: document.getElementById('retryBtn'),
+            backBtn: document.getElementById('backBtn'),
+            errorMessage: document.getElementById('errorMessage'),
+            // Side Panel
+            hamburgerBtn: document.getElementById('hamburgerBtn'),
+            sidePanel: document.getElementById('sidePanel'),
+            panelCloseBtn: document.getElementById('panelCloseBtn'),
+            overlay: document.getElementById('overlay'),
+            panelTabs: document.querySelectorAll('.panel-tab'),
+            tabContents: document.querySelectorAll('.tab-content'),
+            panelContactsList: document.getElementById('panelContactsList'),
+            panelNoContacts: document.getElementById('panelNoContacts'),
+            panelHistoryList: document.getElementById('panelHistoryList'),
+            panelNoHistory: document.getElementById('panelNoHistory'),
+            settingsForm: document.getElementById('settingsForm'),
+            senderName: document.getElementById('senderName'),
+            senderEmail: document.getElementById('senderEmail'),
+            senderTitle: document.getElementById('senderTitle'),
+            senderDept: document.getElementById('senderDept'),
+            senderOrg: document.getElementById('senderOrg')
+        };
+
+        // Create file input for upload
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.id = 'fileInput';
+        fileInput.accept = 'image/*';
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+
+        // ==================== Camera & Upload Functions ====================
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: { ideal: 'environment' }
+                    },
+                    audio: false
+                });
+                elements.cameraPreview.srcObject = stream;
+                elements.cameraPreview.play();
+            } catch (error) {
+                console.error('Camera error:', error);
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: { facingMode: 'user' },
+                        audio: false
+                    });
+                    elements.cameraPreview.srcObject = stream;
+                    elements.cameraPreview.play();
+                } catch (fallbackError) {
+                    alert('無法啟用相機');
+                }
+            }
+        }
+
+        function capturePhoto() {
+            const video = elements.cameraPreview;
+            const canvas = elements.cameraCanvas;
+            const ctx = canvas.getContext('2d');
+
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+
+            canvas.toBlob(blob => {
+                state.uploadedFileData = blob;
+                state.uploadedFile = 'captured_' + Date.now() + '.jpg';
+                showThumbnail(canvas.toDataURL('image/jpeg'));
+            }, 'image/jpeg', 0.95);
+        }
+
+        function showThumbnail(dataUrl) {
+            elements.thumbnailImage.src = dataUrl;
+            elements.thumbnailPreview.style.display = 'block';
+            elements.cameraContainer.style.display = 'none';
+            elements.retakeContainer.style.display = 'block';
+            elements.captureBtn.style.display = 'none';
+            elements.uploadBtn.style.display = 'none';
+            elements.nextStep1Btn.style.display = 'block';
+        }
+
+        function hideThumbnail() {
+            elements.thumbnailPreview.style.display = 'none';
+            elements.cameraContainer.style.display = 'block';
+            elements.retakeContainer.style.display = 'none';
+            elements.captureBtn.style.display = 'flex';
+            elements.uploadBtn.style.display = 'flex';
+            elements.nextStep1Btn.style.display = 'none';
+        }
+
+        // ==================== Step Navigation ====================
+        function goToStep(step) {
+            if (step < 1 || step > 4) return;
+
+            // Hide all steps
+            elements.steps.forEach(s => s.classList.remove('active'));
+            elements.stepDots.forEach(d => d.classList.remove('active', 'completed'));
+
+            // Show current step
+            document.querySelector(`.step[data-step="${step}"]`).classList.add('active');
+
+            // Update step indicators
+            for (let i = 1; i <= 4; i++) {
+                const dot = document.querySelector(`.step-dot[data-step="${i}"]`);
+                if (i < step) {
+                    dot.classList.add('completed');
+                } else if (i === step) {
+                    dot.classList.add('active');
+                }
+            }
+
+            state.currentStep = step;
+
+            // Step-specific initialization
+            if (step === 1) {
+                initCamera();
+            } else if (step === 2) {
+                loadContacts();
+                // 重置下一步按鈕（需重新選擇聯絡人才會顯示）
+                const nextBtn = document.getElementById('nextToAnalyzeBtn');
+                if (nextBtn) nextBtn.style.display = state.selectedContact ? 'block' : 'none';
+            }
+
+            window.scrollTo(0, 0);
+        }
+
+        // ==================== Contacts Management ====================
+        async function loadContacts() {
+            try {
+                const response = await fetch(`${API_BASE}/contacts`);
+                if (!response.ok) throw new Error('Failed to load contacts');
+                state.contacts = await response.json();
+                renderContacts();
+            } catch (error) {
+                console.error('Error loading contacts:', error);
+                state.contacts = [];
+                renderContacts();
+            }
+        }
+
+        function renderContacts() {
+            if (state.contacts.length === 0) {
+                elements.contactsGrid.innerHTML = '';
+                elements.noContactsMsg.style.display = 'block';
+                return;
+            }
+
+            elements.noContactsMsg.style.display = 'none';
+            elements.contactsGrid.innerHTML = state.contacts.map((contact, index) => `
+                <div class="contact-card" data-id="${contact.id || index}">
+                    <div class="contact-name">${contact.name}</div>
+                    <div class="contact-email">${contact.email}</div>
+                    <div class="contact-dept">${contact.department || 'N/A'}</div>
+                </div>
+            `).join('');
+
+            // Add click handlers
+            document.querySelectorAll('.contact-card').forEach(card => {
+                card.addEventListener('click', () => selectContact(card));
+            });
+        }
+
+        function selectContact(card) {
+            document.querySelectorAll('.contact-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+            const index = Array.from(elements.contactsGrid.children).indexOf(card);
+            state.selectedContact = state.contacts[index];
+            // 顯示「下一步」按鈕
+            document.getElementById('nextToAnalyzeBtn').style.display = 'block';
+        }
+
+        async function addNewContact() {
+            const name = elements.contactName.value.trim();
+            const email = elements.contactEmail.value.trim();
+            const dept = elements.contactDept.value.trim();
+            const title = elements.contactTitle.value.trim();
+
+            if (!name || !email) {
+                alert('請填入姓名和 Email');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/contacts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name,
+                        email,
+                        department: dept,
+                        title
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to add contact');
+
+                // Clear form and reload
+                elements.contactName.value = '';
+                elements.contactEmail.value = '';
+                elements.contactDept.value = '';
+                elements.contactTitle.value = '';
+                elements.addContactForm.style.display = 'none';
+                loadContacts();
+            } catch (error) {
+                console.error('Error adding contact:', error);
+                alert('新增聯絡人失敗');
+            }
+        }
+
+        // ==================== Document Analysis ====================
+        async function analyzeDocument() {
+            if (!state.selectedContact) {
+                goToStep(2);
+                return;
+            }
+
+            elements.loadingState.style.display = 'block';
+            elements.previewContent.style.display = 'none';
+
+            try {
+                const response = await fetch(`${API_BASE}/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contact_id: state.selectedContact.id || 0
+                    })
+                });
+
+                if (!response.ok) {
+                    const err = await response.json().catch(() => ({}));
+                    throw new Error(err.detail || `伺服器錯誤 (${response.status})`);
+                }
+                const data = await response.json();
+                state.analyzeResult = data.result || data;
+
+                renderPreview();
+                elements.loadingState.style.display = 'none';
+                elements.previewContent.style.display = 'block';
+            } catch (error) {
+                console.error('Analysis error:', error);
+                elements.loadingState.style.display = 'none';
+                alert('AI 辨識失敗：' + error.message + '\n\n請確認 .env 中已設定 ANTHROPIC_API_KEY');
+                goToStep(2);
+            }
+        }
+
+        function renderPreview() {
+            const result = state.analyzeResult;
+            const docType = result.doc_type || 'other';
+            const typeInfo = DOC_TYPES[docType] || DOC_TYPES.other;
+            const confidence = Math.round((result.confidence || 0) * 100);
+
+            // Update header
+            elements.docTypeIcon.textContent = typeInfo.icon;
+            elements.docTypeText.textContent = typeInfo.label;
+            elements.docTypeBadge.style.backgroundColor = typeInfo.color;
+
+            // Update content
+            elements.emailSubject.textContent = result.subject || '(未辨識主旨)';
+            elements.emailBody.textContent = result.body || '(未辨識內容)';
+            elements.confidenceBadge.textContent = `信心度: ${confidence}%`;
+            elements.recipientDisplay.textContent = `${state.selectedContact.name} <${state.selectedContact.email}>`;
+            elements.filenameDisplay.textContent = state.uploadedFile || 'document.jpg';
+
+            // Show warning if confidence < 30%
+            if (confidence < 30) {
+                elements.confidenceWarning.style.display = 'flex';
+            } else {
+                elements.confidenceWarning.style.display = 'none';
+            }
+
+            // Reset contenteditable
+            elements.emailSubject.contentEditable = 'false';
+            elements.emailBody.contentEditable = 'false';
+            elements.filenameDisplay.contentEditable = 'false';
+            state.editingField = null;
+        }
+
+        function enableEditing() {
+            elements.emailSubject.contentEditable = 'true';
+            elements.emailBody.contentEditable = 'true';
+            elements.filenameDisplay.contentEditable = 'true';
+
+            elements.emailSubject.focus();
+            elements.editBtn.style.display = 'none';
+
+            // Add click handlers for editing
+            elements.emailSubject.addEventListener('click', () => {
+                elements.emailSubject.contentEditable = 'true';
+                elements.emailSubject.focus();
+            });
+            elements.emailBody.addEventListener('click', () => {
+                elements.emailBody.contentEditable = 'true';
+                elements.emailBody.focus();
+            });
+            elements.filenameDisplay.addEventListener('click', () => {
+                elements.filenameDisplay.contentEditable = 'true';
+                elements.filenameDisplay.focus();
+            });
+        }
+
+        // ==================== Upload & Send ====================
+        async function uploadDocument() {
+            if (!state.uploadedFileData) {
+                alert('請先拍照或上傳檔案');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', state.uploadedFileData, state.uploadedFile);
+
+            try {
+                const response = await fetch(`${API_BASE}/upload`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error('Upload failed');
+                return await response.json();
+            } catch (error) {
+                console.error('Upload error:', error);
+                throw error;
+            }
+        }
+
+        async function sendEmail() {
+            try {
+                const subject = elements.emailSubject.textContent.trim();
+                const body = elements.emailBody.textContent.trim();
+                const filename = elements.filenameDisplay.textContent.trim();
+
+                const response = await fetch(`${API_BASE}/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contact_id: state.selectedContact.id,
+                        subject,
+                        body,
+                        filename
+                    })
+                });
+
+                if (!response.ok) throw new Error('Send failed');
+
+                // Show success
+                elements.resultSubject.textContent = subject;
+                elements.resultRecipient.textContent = state.selectedContact.email;
+                elements.resultFilename.textContent = filename;
+                elements.successResult.style.display = 'block';
+                elements.errorResult.style.display = 'none';
+                goToStep(4);
+            } catch (error) {
+                console.error('Send error:', error);
+                elements.errorMessage.textContent = error.message || '寄送失敗，請重試';
+                elements.successResult.style.display = 'none';
+                elements.errorResult.style.display = 'block';
+                goToStep(4);
+            }
+        }
+
+        // ==================== Side Panel ====================
+        function openPanel() {
+            elements.sidePanel.classList.add('open');
+            elements.overlay.classList.add('open');
+        }
+
+        function closePanel() {
+            elements.sidePanel.classList.remove('open');
+            elements.overlay.classList.remove('open');
+        }
+
+        async function loadHistory() {
+            try {
+                const response = await fetch(`${API_BASE}/history`);
+                if (!response.ok) throw new Error('Failed to load history');
+                state.history = await response.json();
+                renderHistory();
+            } catch (error) {
+                console.error('Error loading history:', error);
+                state.history = [];
+                renderHistory();
+            }
+        }
+
+        function renderHistory() {
+            if (state.history.length === 0) {
+                elements.panelHistoryList.innerHTML = '';
+                elements.panelNoHistory.style.display = 'block';
+                return;
+            }
+
+            elements.panelNoHistory.style.display = 'none';
+            elements.panelHistoryList.innerHTML = state.history.map(item => {
+                const typeInfo = DOC_TYPES[item.doc_type] || DOC_TYPES.other;
+                const date = new Date(item.date).toLocaleDateString('zh-TW');
+                return `
+                    <div class="history-item">
+                        <div class="history-header">
+                            <div class="history-subject">${item.subject}</div>
+                            <span class="doc-type-badge" style="background-color: ${typeInfo.color}; margin: 0;">
+                                ${typeInfo.icon} ${typeInfo.label}
+                            </span>
+                        </div>
+                        <div class="history-recipient">${item.recipient}</div>
+                        <div class="history-date">${date}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function loadSettings() {
+            try {
+                const response = await fetch(`${API_BASE}/settings`);
+                if (!response.ok) throw new Error('Failed to load settings');
+                state.settings = await response.json();
+
+                elements.senderName.value = state.settings.name || '';
+                elements.senderEmail.value = state.settings.email || '';
+                elements.senderTitle.value = state.settings.title || '';
+                elements.senderDept.value = state.settings.department || '';
+                elements.senderOrg.value = state.settings.organization || '';
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+        }
+
+        async function saveSettings(e) {
+            e.preventDefault();
+
+            const settings = {
+                name: elements.senderName.value.trim(),
+                email: elements.senderEmail.value.trim(),
+                title: elements.senderTitle.value.trim(),
+                department: elements.senderDept.value.trim(),
+                organization: elements.senderOrg.value.trim()
+            };
+
+            try {
+                const response = await fetch(`${API_BASE}/settings`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(settings)
+                });
+
+                if (!response.ok) throw new Error('Failed to save settings');
+                alert('設定已儲存');
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                alert('儲存失敗');
+            }
+        }
+
+        // ==================== Event Listeners ====================
+        function setupEventListeners() {
+            // Camera and Upload
+            elements.captureBtn.addEventListener('click', capturePhoto);
+            elements.uploadBtn.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        state.uploadedFileData = file;
+                        state.uploadedFile = file.name;
+                        showThumbnail(event.target.result);
+                    };
+                    reader.readAsDataURL(file);
+                }
+            });
+            elements.retakeBtn.addEventListener('click', hideThumbnail);
+            elements.nextStep1Btn.addEventListener('click', () => goToStep(2));
+
+            // Contacts
+            elements.addContactBtn.addEventListener('click', () => {
+                elements.addContactForm.style.display = 'block';
+                elements.contactName.focus();
+            });
+            elements.cancelContactBtn.addEventListener('click', () => {
+                elements.addContactForm.style.display = 'none';
+            });
+            elements.saveContactBtn.addEventListener('click', addNewContact);
+
+            // Step 2 → Step 3: 選好收件人後 → 上傳圖片 → AI 分析
+            document.getElementById('nextToAnalyzeBtn').addEventListener('click', async () => {
+                if (!state.selectedContact) {
+                    alert('請先選擇一位收件人');
+                    return;
+                }
+                goToStep(3);
+                try {
+                    // 先上傳圖片到伺服器
+                    await uploadDocument();
+                    // 再觸發 AI 分析
+                    await analyzeDocument();
+                } catch (error) {
+                    console.error('Upload/Analyze error:', error);
+                    elements.loadingState.style.display = 'none';
+                    alert('處理失敗：' + (error.message || '請重試'));
+                    goToStep(2);
+                }
+            });
+
+            // Preview
+            elements.editBtn.addEventListener('click', enableEditing);
+            elements.cancelBtn.addEventListener('click', () => goToStep(2));
+            elements.sendBtn.addEventListener('click', sendEmail);
+
+            // Results
+            elements.restartBtn.addEventListener('click', () => {
+                state.uploadedFile = null;
+                state.uploadedFileData = null;
+                state.selectedContact = null;
+                state.analyzeResult = null;
+                hideThumbnail();
+                goToStep(1);
+            });
+            elements.retryBtn.addEventListener('click', () => goToStep(3));
+            elements.backBtn.addEventListener('click', () => goToStep(3));
+
+            // Side Panel
+            elements.hamburgerBtn.addEventListener('click', openPanel);
+            elements.panelCloseBtn.addEventListener('click', closePanel);
+            elements.overlay.addEventListener('click', closePanel);
+
+            elements.panelTabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    const tabName = tab.dataset.tab;
+
+                    // Update active tab
+                    elements.panelTabs.forEach(t => t.classList.remove('active'));
+                    tab.classList.add('active');
+
+                    // Update active content
+                    elements.tabContents.forEach(content => {
+                        content.classList.remove('active');
+                    });
+                    document.querySelector(`.tab-content[data-content="${tabName}"]`)?.classList.add('active');
+
+                    // Load data
+                    if (tabName === 'history') loadHistory();
+                    if (tabName === 'settings') loadSettings();
+                });
+            });
+
+            elements.settingsForm.addEventListener('submit', saveSettings);
+        }
+
+        // ==================== Initialize ====================
+        function init() {
+            setupEventListeners();
+            loadContacts();
+            goToStep(1);
+        }
+
+        // Start app
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>
