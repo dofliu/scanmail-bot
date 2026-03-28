@@ -168,7 +168,7 @@ class ScanRequest(BaseModel):
 
 @app.post("/api/scan/detect")
 async def detect_edges(request: Request):
-    """偵測文件邊界，回傳四個角點"""
+    """偵測文件邊界，回傳四個角點與原圖尺寸"""
     user_id = get_user_id(request)
     session = get_session(user_id)
 
@@ -177,10 +177,16 @@ async def detect_edges(request: Request):
 
     corners = detect_document_edges(session.image_data)
 
+    # 回傳原圖尺寸（前端 canvas 需要）
+    from app.services.image_processor import get_image_info
+    info = get_image_info(session.image_data)
+
     return {
         "success": True,
         "corners": corners,
         "detected": corners is not None,
+        "image_width": info.get("width", 0),
+        "image_height": info.get("height", 0),
     }
 
 
@@ -218,6 +224,7 @@ async def process_scan(request: Request, body: ScanRequest):
         "filter_applied": result["filter_applied"],
         "original_size": result["original_size"],
         "processed_size": result["processed_size"],
+        "distortion": result.get("distortion"),
     }
 
 
