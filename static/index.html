@@ -313,11 +313,154 @@
             <!-- Tool Placeholders (後續 Phase 實作)          -->
             <!-- ════════════════════════════════════════════ -->
             <div class="tool-page" data-tool="image-tools">
-                <div class="card"><div class="tool-placeholder">
-                    <div class="placeholder-icon">🖼️</div>
-                    <h3>圖片工具</h3>
-                    <p>批次縮放、格式轉換、壓縮、浮水印 — 即將推出</p>
-                </div></div>
+                <h2 class="step-title">🖼️ 圖片工具</h2>
+
+                <!-- 動作選擇 -->
+                <div class="card" style="padding:12px;">
+                    <div style="display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch;">
+                        <button class="filter-btn active img-action-tab" data-action="resize">
+                            <span class="filter-icon">📐</span><span>縮放</span>
+                        </button>
+                        <button class="filter-btn img-action-tab" data-action="convert">
+                            <span class="filter-icon">🔄</span><span>轉檔</span>
+                        </button>
+                        <button class="filter-btn img-action-tab" data-action="compress">
+                            <span class="filter-icon">📦</span><span>壓縮</span>
+                        </button>
+                        <button class="filter-btn img-action-tab" data-action="watermark">
+                            <span class="filter-icon">💧</span><span>浮水印</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 上傳區 -->
+                <div class="card">
+                    <div id="imgDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
+                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">📁</div>
+                        <div style="font-size:14px; color:var(--text-secondary);">拖放圖片到此處，或點擊選擇檔案</div>
+                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">支援 JPG, PNG, WebP, BMP, GIF（最多 50 個，單檔 20MB）</div>
+                    </div>
+                    <input type="file" id="imgFileInput" multiple accept="image/*" style="display:none;">
+
+                    <!-- 檔案列表 -->
+                    <div id="imgFileList" style="display:none; margin-top:12px;"></div>
+
+                    <!-- 選項面板 -->
+                    <div id="imgOpts_resize" class="img-options-panel" style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">縮放選項</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">寬度 (px)</label>
+                                <input type="number" class="form-input" id="imgResizeW" value="800" min="1" max="10000">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">高度 (px)</label>
+                                <input type="number" class="form-input" id="imgResizeH" value="600" min="1" max="10000">
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">模式</label>
+                                <select class="form-input" id="imgResizeMode">
+                                    <option value="fit">等比縮放（白底填充）</option>
+                                    <option value="cover">等比裁切（填滿）</option>
+                                    <option value="stretch">強制拉伸</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">輸出格式</label>
+                                <select class="form-input" id="imgResizeFmt">
+                                    <option value="JPEG">JPEG</option>
+                                    <option value="PNG">PNG</option>
+                                    <option value="WEBP">WebP</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin:8px 0 0;">
+                            <label class="form-label">品質 (1-100)</label>
+                            <input type="range" id="imgResizeQ" min="1" max="100" value="85" style="width:100%;">
+                        </div>
+                    </div>
+
+                    <div id="imgOpts_convert" class="img-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">轉檔選項</div>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label class="form-label">目標格式</label>
+                            <select class="form-input" id="imgConvertFmt">
+                                <option value="PNG">PNG</option>
+                                <option value="JPEG">JPEG</option>
+                                <option value="WEBP">WebP</option>
+                                <option value="BMP">BMP</option>
+                                <option value="GIF">GIF</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label class="form-label">品質 (JPEG/WebP)</label>
+                            <input type="range" id="imgConvertQ" min="1" max="100" value="85" style="width:100%;">
+                        </div>
+                    </div>
+
+                    <div id="imgOpts_compress" class="img-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">壓縮選項</div>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label class="form-label">品質 (越低檔案越小)</label>
+                            <input type="range" id="imgCompressQ" min="1" max="100" value="70" style="width:100%;">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label class="form-label">最大邊長 (px，0=不限)</label>
+                            <input type="number" class="form-input" id="imgCompressMax" value="0" min="0" max="10000">
+                        </div>
+                    </div>
+
+                    <div id="imgOpts_watermark" class="img-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">浮水印選項</div>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label class="form-label">浮水印文字</label>
+                            <input type="text" class="form-input" id="imgWmText" value="CONFIDENTIAL" placeholder="浮水印文字">
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">字體大小</label>
+                                <input type="number" class="form-input" id="imgWmSize" value="36" min="8" max="200">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">透明度 (%)</label>
+                                <input type="range" id="imgWmOpacity" min="10" max="100" value="80" style="width:100%;">
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">位置</label>
+                                <select class="form-input" id="imgWmPos">
+                                    <option value="center">置中</option>
+                                    <option value="tile">平鋪</option>
+                                    <option value="top-left">左上</option>
+                                    <option value="top-right">右上</option>
+                                    <option value="bottom-left">左下</option>
+                                    <option value="bottom-right">右下</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">顏色</label>
+                                <input type="color" id="imgWmColor" value="#000000" style="width:100%; height:36px; border:1px solid var(--border-color); border-radius:6px;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 進度條 -->
+                    <div id="imgProgress" style="display:none; margin-top:12px;"></div>
+
+                    <!-- 結果下載 -->
+                    <div id="imgResult" style="display:none; margin-top:12px;"></div>
+
+                    <!-- 操作按鈕 -->
+                    <div style="display:flex; gap:8px; margin-top:16px;">
+                        <button class="crop-btn" id="imgClearBtn" style="display:none;">🗑️ 清除</button>
+                        <button class="btn btn-primary" id="imgProcessBtn" style="display:none; flex:1;">
+                            ⚡ 開始處理
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <div class="tool-page" data-tool="gif-tools">
@@ -424,5 +567,6 @@
     <!-- Scripts (模組化) -->
     <script src="/static/js/app.js"></script>
     <script src="/static/js/scanmail.js"></script>
+    <script src="/static/js/image-tools.js"></script>
 </body>
 </html>

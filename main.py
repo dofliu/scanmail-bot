@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db
 from app.core.file_manager import cleanup_temp_files
 from app.routers import scanmail
+from app.routers import image_tools
 
 # Logging
 logging.basicConfig(
@@ -50,8 +51,8 @@ app.add_middleware(
 
 # ── 路由掛載 ──
 app.include_router(scanmail.router, prefix="/api", tags=["scanmail"])
+app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"])
 # 後續 Phase 會在此加入更多 router:
-# app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"])
 # app.include_router(pdf_tools.router, prefix="/api/tools/pdf", tags=["pdf-tools"])
 # ...
 
