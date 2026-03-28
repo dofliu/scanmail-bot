@@ -480,19 +480,108 @@
             </div>
 
             <div class="tool-page" data-tool="pdf-tools">
-                <div class="card"><div class="tool-placeholder">
-                    <div class="placeholder-icon">📕</div>
-                    <h3>PDF 工具</h3>
-                    <p>PDF 合併、浮水印、密碼保護 — 即將推出</p>
-                </div></div>
+                <h2 class="step-title">📕 PDF 工具</h2>
+                <div class="card" style="padding:12px;">
+                    <div style="display:flex; gap:6px; overflow-x:auto;">
+                        <button class="filter-btn active pdf-action-tab" data-action="merge">
+                            <span class="filter-icon">📎</span><span>合併</span>
+                        </button>
+                        <button class="filter-btn pdf-action-tab" data-action="watermark">
+                            <span class="filter-icon">💧</span><span>浮水印</span>
+                        </button>
+                        <button class="filter-btn pdf-action-tab" data-action="protect">
+                            <span class="filter-icon">🔒</span><span>加密</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div id="pdfDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
+                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">📕</div>
+                        <div id="pdfDropHint" style="font-size:14px; color:var(--text-secondary);">拖放多個 PDF 檔案到此處</div>
+                    </div>
+                    <input type="file" id="pdfFileInput" multiple accept=".pdf" style="display:none;">
+                    <div id="pdfFileList" style="display:none; margin-top:12px;"></div>
+
+                    <!-- 合併選項 -->
+                    <div id="pdfOpts_merge" class="pdf-options-panel" style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                            <input type="checkbox" id="pdfMergeToc"> 自動產生書籤目錄
+                        </label>
+                    </div>
+
+                    <!-- 浮水印選項 -->
+                    <div id="pdfOpts_watermark" class="pdf-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">文字浮水印</div>
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label class="form-label">浮水印文字</label>
+                            <input type="text" class="form-input" id="pdfWmText" value="CONFIDENTIAL">
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">字體大小</label>
+                                <input type="number" class="form-input" id="pdfWmSize" value="48" min="12" max="200">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">透明度 (%)</label>
+                                <input type="number" class="form-input" id="pdfWmOpacity" value="15" min="5" max="100">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">旋轉角度</label>
+                                <input type="number" class="form-input" id="pdfWmRotation" value="45" min="0" max="360">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 加密選項 -->
+                    <div id="pdfOpts_protect" class="pdf-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label class="form-label">設定密碼</label>
+                            <input type="password" class="form-input" id="pdfPassword" placeholder="輸入 PDF 開啟密碼">
+                        </div>
+                    </div>
+
+                    <div id="pdfProgress" style="display:none; margin-top:12px;"></div>
+                    <div id="pdfResult" style="display:none; margin-top:12px;"></div>
+                    <div style="display:flex; gap:8px; margin-top:16px;">
+                        <button class="crop-btn" id="pdfClearBtn" style="display:none;">🗑️ 清除</button>
+                        <button class="btn btn-primary" id="pdfProcessBtn" style="display:none; flex:1;">⚡ 開始處理</button>
+                    </div>
+                </div>
             </div>
 
             <div class="tool-page" data-tool="doc-convert">
-                <div class="card"><div class="tool-placeholder">
-                    <div class="placeholder-icon">🔄</div>
-                    <h3>文件轉檔</h3>
-                    <p>Word、PDF、Markdown 雙向轉換 — 即將推出</p>
-                </div></div>
+                <h2 class="step-title">🔄 文件轉檔</h2>
+                <div class="card" style="padding:12px;">
+                    <div style="display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch;">
+                        <button class="filter-btn active doc-conv-tab" data-conv="word-to-pdf">
+                            <span class="filter-icon">📄</span><span>Word→PDF</span>
+                        </button>
+                        <button class="filter-btn doc-conv-tab" data-conv="pdf-to-word">
+                            <span class="filter-icon">📕</span><span>PDF→Word</span>
+                        </button>
+                        <button class="filter-btn doc-conv-tab" data-conv="md-to-pdf">
+                            <span class="filter-icon">📝</span><span>MD→PDF</span>
+                        </button>
+                        <button class="filter-btn doc-conv-tab" data-conv="md-to-word">
+                            <span class="filter-icon">📝</span><span>MD→Word</span>
+                        </button>
+                        <button class="filter-btn doc-conv-tab" data-conv="word-to-md">
+                            <span class="filter-icon">📄</span><span>Word→MD</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div id="docDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
+                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">🔄</div>
+                        <div id="docDropHint" style="font-size:14px; color:var(--text-secondary);">拖放 .docx 檔案到此處</div>
+                    </div>
+                    <input type="file" id="docFileInput" accept=".docx" style="display:none;">
+                    <div id="docProgress" style="display:none; margin-top:12px;"></div>
+                    <div id="docResult" style="display:none; margin-top:12px;"></div>
+                    <button class="btn btn-primary" id="docConvertBtn" style="display:none; width:100%; margin-top:16px;">
+                        ⚡ Word → PDF
+                    </button>
+                </div>
             </div>
 
             <div class="tool-page" data-tool="batch-rename">
@@ -568,5 +657,7 @@
     <script src="/static/js/app.js"></script>
     <script src="/static/js/scanmail.js"></script>
     <script src="/static/js/image-tools.js"></script>
+    <script src="/static/js/pdf-tools.js"></script>
+    <script src="/static/js/doc-convert.js"></script>
 </body>
 </html>
