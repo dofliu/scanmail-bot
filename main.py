@@ -1,4 +1,5 @@
 """ScanMail Bot — FastAPI Web App 主程式入口"""
+import io
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -16,9 +17,9 @@ from app.models.contact import ContactModel
 from app.models.history import HistoryModel
 from app.models.sender import SenderModel
 from app.services.ai_analyzer import analyze_document
-from app.services.image_processor import image_to_pdf, validate_image
+from app.services.image_processor import image_to_pdf, images_to_pdf, validate_image
 from app.services.email_sender import send_email
-from app.services.doc_scanner import detect_document_edges, perspective_transform, apply_filter, scan_document
+from app.services.doc_scanner import detect_document_edges, perspective_transform, apply_filter, scan_document, rotate_image
 
 # 設定 logging
 logging.basicConfig(
@@ -67,6 +68,8 @@ class SessionData:
         self.ai_result: Optional[dict] = None
         self.selected_contact_id: Optional[int] = None
         self.detected_corners: Optional[list] = None  # 偵測到的邊界角點
+        # 多頁掃描
+        self.pages: list[bytes] = []  # 已確認的頁面列表（處理後的 JPEG bytes）
 
 _sessions: dict[str, SessionData] = {}
 
@@ -149,6 +152,7 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     session.image_media_type = media_type
     session.ai_result = None  # 重置舊的分析結果
     session.detected_corners = None
+    # 不清除 pages — 上傳新頁面時保留既有頁面（多頁模式）
 
     return {
         "success": True,
@@ -164,6 +168,12 @@ class ScanRequest(BaseModel):
     corners: Optional[list[list[int]]] = None
     filter_name: str = "auto"
     auto_detect: bool = True
+
+class RotateRequest(BaseModel):
+    angle: int = 90  # 90, 180, 270, -90
+
+class PageReorderRequest(BaseModel):
+    order: list[int]  # 新的頁面順序索引，例如 [2, 0, 1]
 
 
 @app.post("/api/scan/detect")
@@ -259,6 +269,143 @@ async def apply_scan_filter(request: Request, body: ScanRequest):
     }
 
 
+# ── 圖片旋轉 ──
+
+@app.post("/api/scan/rotate")
+async def rotate_scan(request: Request, body: RotateRequest):
+    """旋轉目前圖片（90° 的整數倍）"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if not session.image_data:
+        raise HTTPException(status_code=400, detail="請先上傳圖片")
+
+    # 旋轉原始圖片和處理後圖片
+    session.image_original = rotate_image(
+        session.image_original or session.image_data, body.angle
+    )
+    session.image_data = rotate_image(session.image_data, body.angle)
+    session.detected_corners = None  # 旋轉後角點失效
+
+    import base64
+    img_b64 = base64.b64encode(session.image_data).decode("utf-8")
+
+    # 回傳新尺寸
+    from app.services.image_processor import get_image_info
+    info = get_image_info(session.image_data)
+
+    return {
+        "success": True,
+        "image_base64": img_b64,
+        "image_width": info.get("width", 0),
+        "image_height": info.get("height", 0),
+        "angle": body.angle,
+    }
+
+
+# ── 多頁掃描管理 ──
+
+@app.post("/api/pages/add")
+async def add_page(request: Request):
+    """將目前處理後的圖片加入頁面列表"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if not session.image_data:
+        raise HTTPException(status_code=400, detail="沒有可新增的頁面")
+
+    session.pages.append(session.image_data)
+    page_index = len(session.pages) - 1
+
+    return {
+        "success": True,
+        "page_index": page_index,
+        "total_pages": len(session.pages),
+    }
+
+
+@app.get("/api/pages")
+async def list_pages(request: Request):
+    """取得目前所有頁面列表（含縮圖）"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    import base64
+    pages_info = []
+    for i, page_data in enumerate(session.pages):
+        from app.services.image_processor import get_image_info
+        info = get_image_info(page_data)
+        # 產生小縮圖
+        thumb = _make_thumbnail(page_data, max_dim=200)
+        thumb_b64 = base64.b64encode(thumb).decode("utf-8")
+        pages_info.append({
+            "index": i,
+            "width": info.get("width", 0),
+            "height": info.get("height", 0),
+            "size": len(page_data),
+            "thumbnail": thumb_b64,
+        })
+
+    return {
+        "success": True,
+        "pages": pages_info,
+        "total_pages": len(session.pages),
+    }
+
+
+@app.delete("/api/pages/{page_index}")
+async def remove_page(request: Request, page_index: int):
+    """移除指定頁面"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if page_index < 0 or page_index >= len(session.pages):
+        raise HTTPException(status_code=400, detail="頁面索引無效")
+
+    session.pages.pop(page_index)
+    return {
+        "success": True,
+        "total_pages": len(session.pages),
+    }
+
+
+@app.post("/api/pages/reorder")
+async def reorder_pages(request: Request, body: PageReorderRequest):
+    """重新排序頁面"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if sorted(body.order) != list(range(len(session.pages))):
+        raise HTTPException(status_code=400, detail="排序索引無效")
+
+    session.pages = [session.pages[i] for i in body.order]
+    return {
+        "success": True,
+        "total_pages": len(session.pages),
+    }
+
+
+@app.post("/api/pages/clear")
+async def clear_pages(request: Request):
+    """清除所有頁面"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+    session.pages.clear()
+    return {"success": True, "total_pages": 0}
+
+
+def _make_thumbnail(image_data: bytes, max_dim: int = 200) -> bytes:
+    """產生小縮圖"""
+    from PIL import Image
+    img = Image.open(io.BytesIO(image_data))
+    img.thumbnail((max_dim, max_dim), Image.LANCZOS)
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=70)
+    return buf.getvalue()
+
+
 # ── AI 分析 ──
 
 @app.post("/api/analyze")
@@ -334,9 +481,12 @@ async def send_email_api(request: Request, body: SendRequest):
     if not filename.endswith(".pdf"):
         filename += ".pdf"
 
-    # 圖片轉 PDF
+    # 圖片轉 PDF（多頁優先）
     try:
-        pdf_bytes = image_to_pdf(session.image_data)
+        if session.pages:
+            pdf_bytes = images_to_pdf(session.pages)
+        else:
+            pdf_bytes = image_to_pdf(session.image_data)
     except Exception as e:
         logger.error("圖片轉 PDF 失敗: %s", e)
         raise HTTPException(status_code=500, detail="圖片轉 PDF 失敗")
@@ -371,8 +521,11 @@ async def send_email_api(request: Request, body: SendRequest):
         )
         # 重置 session
         session.image_data = None
+        session.image_original = None
         session.ai_result = None
         session.selected_contact_id = None
+        session.detected_corners = None
+        session.pages.clear()
 
     return {
         "success": result["success"],

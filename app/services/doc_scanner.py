@@ -874,7 +874,58 @@ def _filter_enhance(img: np.ndarray) -> np.ndarray:
 
 
 # ══════════════════════════════════════════════════════════════
-# 6. 完整掃描流水線
+# 6. 圖片旋轉
+# ══════════════════════════════════════════════════════════════
+
+def rotate_image(image_data: bytes, angle: int) -> bytes:
+    """旋轉圖片（90° 的整數倍）
+
+    Args:
+        image_data: JPEG/PNG bytes
+        angle: 旋轉角度，正值=順時針。支援 90, 180, 270, -90, -180, -270
+
+    Returns:
+        旋轉後的 JPEG bytes
+    """
+    # 正規化角度到 0, 90, 180, 270
+    normalized = angle % 360
+    if normalized == 0:
+        return image_data
+
+    nparr = np.frombuffer(image_data, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    if normalized == 90:
+        rotated = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    elif normalized == 180:
+        rotated = cv2.rotate(img, cv2.ROTATE_180)
+    elif normalized == 270:
+        rotated = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    else:
+        # 任意角度旋轉（保留完整畫面）
+        h, w = img.shape[:2]
+        center = (w // 2, h // 2)
+        M = cv2.getRotationMatrix2D(center, -normalized, 1.0)
+        cos_a = abs(M[0, 0])
+        sin_a = abs(M[0, 1])
+        new_w = int(h * sin_a + w * cos_a)
+        new_h = int(h * cos_a + w * sin_a)
+        M[0, 2] += (new_w - w) / 2
+        M[1, 2] += (new_h - h) / 2
+        rotated = cv2.warpAffine(img, M, (new_w, new_h),
+                                  flags=cv2.INTER_LANCZOS4,
+                                  borderMode=cv2.BORDER_REPLICATE)
+
+    _, buf = cv2.imencode(".jpg", rotated, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    result = buf.tobytes()
+    logger.info("圖片旋轉 %d° 完成: %dx%d → %dx%d",
+                normalized, img.shape[1], img.shape[0],
+                rotated.shape[1], rotated.shape[0])
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
+# 7. 完整掃描流水線
 # ══════════════════════════════════════════════════════════════
 
 def scan_document(image_data: bytes,
