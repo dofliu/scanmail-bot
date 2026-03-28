@@ -125,12 +125,16 @@ async def process_scan(request: Request, body: ScanRequest):
     if not session.image_data:
         raise HTTPException(status_code=400, detail="請先上傳圖片")
 
-    result = scan_document(
-        image_data=session.image_data,
-        corners=body.corners,
-        filter_name=body.filter_name,
-        auto_detect=body.auto_detect,
-    )
+    try:
+        result = scan_document(
+            image_data=session.image_data,
+            corners=body.corners,
+            filter_name=body.filter_name,
+            auto_detect=body.auto_detect,
+        )
+    except Exception as e:
+        logger.error("掃描處理失敗: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"掃描處理失敗: {e}")
 
     session.image_data = result["image"]
     session.image_media_type = "image/jpeg"

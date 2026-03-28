@@ -240,7 +240,14 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
         all_candidates.append((score, result, "Adaptive"))
         logger.info("Adaptive 候選: score=%.3f", score)
 
-    # ── 策略 5：GrabCut 前景分離 ──
+    # ── 策略 5：中央區域銳利邊緣（手持文件專用）──
+    result = _detect_by_contour_in_center(img_s, w, h)
+    if result is not None:
+        score = _score_quad(result, w, h, prefer_smaller=True)
+        all_candidates.append((score, result, "CenterContour"))
+        logger.info("CenterContour 候選: score=%.3f", score)
+
+    # ── 策略 6：GrabCut 前景分離 ──
     result = _detect_by_grabcut(img_s, w, h)
     if result is not None:
         score = _score_quad(result, w, h, prefer_smaller=True)
@@ -270,27 +277,22 @@ def _detect_by_hough_lines(img: np.ndarray, w: int, h: int) -> Optional[np.ndarr
 
     專為複雜背景設計：文件邊緣通常是清晰的直線，
     而背景（人臉、衣服、牆壁裝飾）不太有規則直線。
-    找到水平和垂直的直線群後，取交叉點作為四個角。
     """
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-
-    # 用 Canny 找邊緣
     edged = cv2.Canny(blurred, 40, 120)
 
-    # Hough 線段偵測
     lines = cv2.HoughLinesP(
         edged, 1, np.pi / 180,
-        threshold=60,
-        minLineLength=min(w, h) // 6,
+        threshold=50,
+        minLineLength=min(w, h) // 8,
         maxLineGap=15,
     )
     if lines is None or len(lines) < 4:
         return None
 
-    # 分類直線：水平（角度 < 30°）和垂直（角度 > 60°）
-    h_lines = []  # 接近水平
-    v_lines = []  # 接近垂直
+    h_lines = []
+    v_lines = []
 
     for line in lines:
         x1, y1, x2, y2 = line[0]
@@ -298,24 +300,20 @@ def _detect_by_hough_lines(img: np.ndarray, w: int, h: int) -> Optional[np.ndarr
         length = math.hypot(x2 - x1, y2 - y1)
 
         if angle < 35 or angle > 145:
-            h_lines.append((y1, y2, x1, y1, x2, y2, length))
+            h_lines.append(((y1 + y2) / 2, length))
         elif 55 < angle < 125:
-            v_lines.append((x1, x2, x1, y1, x2, y2, length))
+            v_lines.append(((x1 + x2) / 2, length))
 
     if len(h_lines) < 2 or len(v_lines) < 2:
         return None
 
-    # 依 y 位置聚類水平線 → 找頂邊和底邊
-    h_lines.sort(key=lambda l: (l[0] + l[1]) / 2)
-    top_y = np.mean([(l[0] + l[1]) / 2 for l in h_lines[:max(1, len(h_lines)//3)]])
-    bot_y = np.mean([(l[0] + l[1]) / 2 for l in h_lines[-max(1, len(h_lines)//3):]])
+    # 用 K-means 風格的聚類找出兩條主要水平線和兩條主要垂直線
+    top_y, bot_y = _cluster_two_groups([l[0] for l in h_lines])
+    left_x, right_x = _cluster_two_groups([l[0] for l in v_lines])
 
-    # 依 x 位置聚類垂直線 → 找左邊和右邊
-    v_lines.sort(key=lambda l: (l[0] + l[1]) / 2)
-    left_x = np.mean([(l[0] + l[1]) / 2 for l in v_lines[:max(1, len(v_lines)//3)]])
-    right_x = np.mean([(l[0] + l[1]) / 2 for l in v_lines[-max(1, len(v_lines)//3):]])
+    if top_y is None or left_x is None:
+        return None
 
-    # 組成四邊形
     if right_x - left_x < w * 0.1 or bot_y - top_y < h * 0.1:
         return None
 
@@ -329,6 +327,61 @@ def _detect_by_hough_lines(img: np.ndarray, w: int, h: int) -> Optional[np.ndarr
     if _is_valid_quad(corners, w, h):
         return corners
     return None
+
+
+def _cluster_two_groups(values: list[float]) -> tuple:
+    """將一組值聚類為兩個群組，回傳兩個中心值"""
+    if len(values) < 2:
+        return None, None
+    arr = sorted(values)
+    # 找最大間隔作為分割點
+    max_gap = 0
+    split_idx = 0
+    for i in range(len(arr) - 1):
+        gap = arr[i + 1] - arr[i]
+        if gap > max_gap:
+            max_gap = gap
+            split_idx = i + 1
+
+    if split_idx == 0 or split_idx >= len(arr):
+        return None, None
+
+    group1 = arr[:split_idx]
+    group2 = arr[split_idx:]
+    return np.mean(group1), np.mean(group2)
+
+
+def _detect_by_contour_in_center(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
+    """專門偵測圖片中央區域的矩形文件
+
+    針對手持文件場景：文件通常在圖片中央偏左/偏右的位置。
+    先用 Canny 找邊緣，然後只在中央 80% 區域找輪廓。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # 用 Laplacian + 閾值找出銳利邊緣（文件邊緣比背景邊緣更銳利）
+    lap = cv2.Laplacian(blurred, cv2.CV_64F)
+    lap = np.uint8(np.absolute(lap))
+    _, sharp_edges = cv2.threshold(lap, 20, 255, cv2.THRESH_BINARY)
+
+    # 結合 Canny
+    canny = cv2.Canny(blurred, 30, 100)
+    combined = cv2.bitwise_or(sharp_edges, canny)
+
+    # 膨脹 + 閉合
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    combined = cv2.dilate(combined, kernel, iterations=2)
+    combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel, iterations=3)
+
+    # 遮罩：只保留中央 85% 區域（排除圖片邊緣的雜訊）
+    margin_x = int(w * 0.075)
+    margin_y = int(h * 0.075)
+    border_mask = np.zeros_like(combined)
+    border_mask[margin_y:h-margin_y, margin_x:w-margin_x] = 255
+    combined = cv2.bitwise_and(combined, border_mask)
+
+    return _find_contour_quad(combined, w, h, prefer_smaller=True)
 
 
 def _detect_by_color(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
@@ -550,6 +603,8 @@ def perspective_transform(image_data: bytes,
     """
     nparr = np.frombuffer(image_data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("無法解碼圖片進行透視校正")
 
     pts = np.array(corners, dtype="float32")
     rect = _order_points(pts)
@@ -1111,9 +1166,11 @@ def scan_document(image_data: bytes,
                   corners: Optional[list[list[int]]] = None,
                   filter_name: str = "auto",
                   auto_detect: bool = True) -> dict:
-    """完整文件掃描處理流水線"""
+    """完整文件掃描處理流水線（加強錯誤處理）"""
     nparr = np.frombuffer(image_data, np.uint8)
     orig = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if orig is None:
+        raise ValueError("無法解碼圖片")
     orig_h, orig_w = orig.shape[:2]
 
     processed = image_data
@@ -1123,26 +1180,43 @@ def scan_document(image_data: bytes,
 
     # Step 1: 邊界偵測 + 透視校正
     if corners:
-        distortion_info = _estimate_distortion_level(
-            np.array(corners, dtype="float32"))
-        processed = perspective_transform(processed, corners)
+        try:
+            distortion_info = _estimate_distortion_level(
+                np.array(corners, dtype="float32"))
+            processed = perspective_transform(processed, corners)
+        except Exception as e:
+            logger.error("透視校正失敗（手動角點）: %s", e, exc_info=True)
+            # 失敗時跳過透視校正，繼續處理原圖
     elif auto_detect:
         detected_corners = detect_document_edges(image_data)
         if detected_corners:
-            auto_detected = True
-            distortion_info = _estimate_distortion_level(
-                np.array(detected_corners, dtype="float32"))
-            processed = perspective_transform(processed, detected_corners)
-            logger.info("自動邊界偵測 + 透視校正完成")
+            try:
+                auto_detected = True
+                distortion_info = _estimate_distortion_level(
+                    np.array(detected_corners, dtype="float32"))
+                processed = perspective_transform(processed, detected_corners)
+                logger.info("自動邊界偵測 + 透視校正完成")
+            except Exception as e:
+                logger.error("透視校正失敗（自動偵測）: %s", e, exc_info=True)
+                processed = image_data  # fallback 到原圖
         else:
             logger.info("未偵測到邊界，跳過透視校正")
 
     # Step 2: 套用濾鏡
-    processed = apply_filter(processed, filter_name)
+    try:
+        processed = apply_filter(processed, filter_name)
+    except Exception as e:
+        logger.error("濾鏡套用失敗: %s", e, exc_info=True)
+        # 濾鏡失敗時使用未經濾鏡的版本
 
     proc_arr = np.frombuffer(processed, np.uint8)
     proc_img = cv2.imdecode(proc_arr, cv2.IMREAD_COLOR)
-    proc_h, proc_w = proc_img.shape[:2]
+    if proc_img is None:
+        # 最終 fallback：使用原圖
+        processed = image_data
+        proc_w, proc_h = orig_w, orig_h
+    else:
+        proc_h, proc_w = proc_img.shape[:2]
 
     return {
         "image": processed,
