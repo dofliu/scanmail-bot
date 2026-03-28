@@ -1984,11 +1984,22 @@
                     elements.scanProcessed.src = processedUrl;
                     state.scanProcessedUrl = processedUrl;
 
-                    // 顯示資訊
+                    // 顯示資訊（含變形等級與品質提示）
                     let infoText = '✅ 文件裁切完成';
                     infoText += ` | 濾鏡: ${getFilterLabel(result.filter_applied)}`;
                     if (result.processed_size) {
                         infoText += ` | ${result.processed_size[0]}x${result.processed_size[1]}`;
+                    }
+                    if (result.distortion) {
+                        const d = result.distortion;
+                        const angle = Math.round(d.estimated_angle);
+                        if (d.level === 'extreme') {
+                            infoText += ` | ⚠️ 傾斜角度過大(~${angle}°)，文字可能略有模糊，建議重新拍攝`;
+                        } else if (d.level === 'high') {
+                            infoText += ` | ⚠️ 傾斜較大(~${angle}°)，已自動補償`;
+                        } else if (d.level === 'medium') {
+                            infoText += ` | 傾斜 ~${angle}°，已校正`;
+                        }
                     }
                     elements.scanInfoText.textContent = infoText;
                     elements.scanInfo.style.display = 'block';

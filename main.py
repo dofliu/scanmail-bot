@@ -224,6 +224,7 @@ async def process_scan(request: Request, body: ScanRequest):
         "filter_applied": result["filter_applied"],
         "original_size": result["original_size"],
         "processed_size": result["processed_size"],
+        "distortion": result.get("distortion"),
     }
 
 
