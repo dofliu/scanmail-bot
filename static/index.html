@@ -3,1542 +3,363 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScanMail - 智慧掃描郵寄系統</title>
-    <style>
-        :root {
-            --primary-color: #1a73e8;
-            --secondary-color: #0d9488;
-            --gradient: linear-gradient(135deg, #1a73e8 0%, #0d9488 100%);
-            --bg-white: #ffffff;
-            --bg-light: #f5f5f5;
-            --text-primary: #202124;
-            --text-secondary: #5f6368;
-            --border-color: #dadce0;
-            --shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-            --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
-            --transition: all 0.3s ease;
-            --exam-color: #1D9E75;
-            --official-color: #534AB7;
-            --receipt-color: #D85A30;
-            --contract-color: #185FA5;
-            --report-color: #993556;
-            --letter-color: #3B6D11;
-            --form-color: #854F0B;
-            --other-color: #5F5E5A;
-        }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", "Noto Sans CJK TC", sans-serif;
-            background: var(--bg-light);
-            color: var(--text-primary);
-            line-height: 1.6;
-        }
-
-        .app-container {
-            display: flex;
-            flex-direction: column;
-            min-height: 100vh;
-            max-width: 100%;
-        }
-
-        /* Header */
-        .header {
-            background: var(--gradient);
-            color: white;
-            padding: 16px 20px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: var(--shadow);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .header-title {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-
-        .header-title h1 {
-            font-size: 24px;
-            font-weight: 600;
-            margin: 0;
-        }
-
-        .header-title p {
-            font-size: 12px;
-            opacity: 0.95;
-        }
-
-        .hamburger-menu {
-            background: none;
-            border: none;
-            color: white;
-            font-size: 24px;
-            cursor: pointer;
-            padding: 4px 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            padding: 20px;
-            max-width: 100%;
-            margin: 0 auto;
-            width: 100%;
-        }
-
-        /* Step Indicator */
-        .step-indicator {
-            display: flex;
-            justify-content: center;
-            gap: 16px;
-            margin-bottom: 32px;
-            flex-wrap: wrap;
-        }
-
-        .step-dot {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background: var(--bg-white);
-            border: 2px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            color: var(--text-secondary);
-            transition: var(--transition);
-            box-shadow: var(--shadow);
-        }
-
-        .step-dot.active {
-            background: var(--primary-color);
-            color: white;
-            border-color: var(--primary-color);
-            transform: scale(1.1);
-        }
-
-        .step-dot.completed {
-            background: var(--secondary-color);
-            color: white;
-            border-color: var(--secondary-color);
-        }
-
-        /* Step Content */
-        .step {
-            display: none;
-            animation: fadeIn 0.3s ease;
-        }
-
-        .step.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .step-title {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 20px;
-            color: var(--text-primary);
-        }
-
-        /* Card Styles */
-        .card {
-            background: var(--bg-white);
-            border-radius: 12px;
-            padding: 24px;
-            box-shadow: var(--shadow);
-            margin-bottom: 20px;
-        }
-
-        .card.bordered {
-            border: 1px solid var(--border-color);
-        }
-
-        /* Step 1: Camera Upload */
-        .camera-preview-container {
-            position: relative;
-            background: #000;
-            border-radius: 12px;
-            overflow: hidden;
-            margin-bottom: 16px;
-            aspect-ratio: 4/3;
-            max-width: 100%;
-            max-height: 45vh;
-        }
-
-        #cameraPreview {
-            width: 100%;
-            height: 100%;
-            display: block;
-            object-fit: cover;
-        }
-
-        #cameraCanvas {
-            display: none;
-        }
-
-        .camera-overlay {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 85%;
-            height: 85%;
-            border: 2px solid rgba(255, 255, 255, 0.3);
-            border-radius: 8px;
-            pointer-events: none;
-        }
-
-        .capture-buttons {
-            display: flex;
-            gap: 12px;
-            margin-bottom: 20px;
-        }
-
-        .btn {
-            flex: 1;
-            padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: var(--transition);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            min-height: 44px;
-        }
-
-        .btn-primary {
-            background: var(--gradient);
-            color: white;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .btn-primary:active {
-            transform: translateY(0);
-        }
-
-        .btn-secondary {
-            background: var(--bg-white);
-            color: var(--primary-color);
-            border: 2px solid var(--primary-color);
-        }
-
-        .btn-secondary:hover {
-            background: var(--bg-light);
-        }
-
-        .btn-danger {
-            background: #d32f2f;
-            color: white;
-        }
-
-        .btn-danger:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .btn-success {
-            background: var(--secondary-color);
-            color: white;
-        }
-
-        .btn-success:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .btn-small {
-            padding: 8px 16px;
-            font-size: 13px;
-            min-height: 36px;
-        }
-
-        .btn-icon {
-            padding: 8px;
-            width: 36px;
-            height: 36px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 50%;
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        #fileInput {
-            display: none;
-        }
-
-        .thumbnail-preview {
-            position: relative;
-            margin-bottom: 16px;
-            text-align: center;
-        }
-
-        .thumbnail-image {
-            width: 100%;
-            max-width: 240px;
-            max-height: 35vh;
-            object-fit: contain;
-            border-radius: 8px;
-            box-shadow: var(--shadow);
-            margin-bottom: 8px;
-        }
-
-        /* Scan Processing Panel */
-        .scan-panel {
-            margin-top: 16px;
-        }
-
-        .scan-preview-row {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 16px;
-            justify-content: center;
-        }
-
-        .scan-preview-item {
-            flex: 1;
-            text-align: center;
-            max-width: 45%;
-        }
-
-        .scan-label {
-            display: block;
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-bottom: 4px;
-            font-weight: 500;
-        }
-
-        .scan-preview-img {
-            width: 100%;
-            max-height: 30vh;
-            object-fit: contain;
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            background: #f8f8f8;
-        }
-
-        .scan-arrow {
-            font-size: 20px;
-            color: var(--text-secondary);
-            flex-shrink: 0;
-        }
-
-        /* 裁切編輯器 */
-        .crop-editor {
-            position: relative;
-            margin-bottom: 16px;
-            text-align: center;
-        }
-
-        .crop-canvas-wrapper {
-            position: relative;
-            display: inline-block;
-            max-width: 100%;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid var(--border-color);
-            background: #1a1a1a;
-            touch-action: none;
-        }
-
-        .crop-canvas-wrapper canvas {
-            display: block;
-            max-width: 100%;
-            max-height: 50vh;
-        }
-
-        .crop-controls {
-            display: flex;
-            gap: 8px;
-            justify-content: center;
-            margin-top: 10px;
-            flex-wrap: wrap;
-        }
-
-        .crop-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 8px 14px;
-            border: 1.5px solid var(--border-color);
-            border-radius: 8px;
-            background: white;
-            cursor: pointer;
-            font-size: 13px;
-            color: var(--text-secondary);
-            transition: var(--transition);
-        }
-
-        .crop-btn:hover {
-            border-color: var(--primary-color);
-            color: var(--primary-color);
-        }
-
-        .crop-btn.primary {
-            background: var(--secondary-color);
-            border-color: var(--secondary-color);
-            color: white;
-            font-weight: 600;
-        }
-
-        .crop-btn.primary:hover {
-            background: #0b8a7d;
-        }
-
-        .crop-hint {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-top: 6px;
-        }
-
-        .filter-options {
-            display: flex;
-            gap: 6px;
-            overflow-x: auto;
-            padding: 4px 0;
-            margin-bottom: 12px;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        .filter-btn {
-            flex: 0 0 auto;
-            min-width: 56px;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 4px;
-            padding: 10px 8px;
-            border: 2px solid var(--border-color);
-            border-radius: 10px;
-            background: white;
-            cursor: pointer;
-            transition: var(--transition);
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-
-        .filter-btn:hover {
-            border-color: var(--primary-color);
-            color: var(--primary-color);
-        }
-
-        .filter-btn.active {
-            border-color: var(--secondary-color);
-            background: linear-gradient(135deg, rgba(13,148,136,0.08), rgba(26,115,232,0.08));
-            color: var(--secondary-color);
-            font-weight: 600;
-        }
-
-        .filter-icon {
-            font-size: 20px;
-        }
-
-        .scan-status {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 12px;
-            background: #f0f7ff;
-            border-radius: 8px;
-            font-size: 13px;
-            color: var(--primary-color);
-            margin-bottom: 8px;
-        }
-
-        .loading-spinner.small {
-            width: 16px;
-            height: 16px;
-            border: 2px solid #e0e0e0;
-            border-top-color: var(--primary-color);
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .scan-info {
-            padding: 8px 12px;
-            background: #f0faf7;
-            border-radius: 8px;
-            font-size: 13px;
-            color: var(--secondary-color);
-            margin-bottom: 8px;
-        }
-
-        /* 旋轉按鈕 */
-        .rotate-controls {
-            display: flex;
-            gap: 6px;
-            justify-content: center;
-            margin-top: 6px;
-        }
-
-        .rotate-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 6px 12px;
-            border: 1.5px solid var(--border-color);
-            border-radius: 8px;
-            background: white;
-            cursor: pointer;
-            font-size: 13px;
-            color: var(--text-secondary);
-            transition: var(--transition);
-        }
-
-        .rotate-btn:hover {
-            border-color: var(--primary-color);
-            color: var(--primary-color);
-        }
-
-        /* 多頁掃描 */
-        .pages-strip {
-            margin-top: 16px;
-            padding: 12px;
-            background: var(--bg-light);
-            border-radius: 10px;
-            border: 1px solid var(--border-color);
-        }
-
-        .pages-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-
-        .pages-header h4 {
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .pages-count {
-            font-size: 12px;
-            color: var(--text-secondary);
-            background: white;
-            padding: 2px 10px;
-            border-radius: 12px;
-            border: 1px solid var(--border-color);
-        }
-
-        .pages-list {
-            display: flex;
-            gap: 10px;
-            overflow-x: auto;
-            padding: 4px 0;
-            -webkit-overflow-scrolling: touch;
-        }
-
-        .page-thumb {
-            position: relative;
-            flex: 0 0 auto;
-            width: 72px;
-            cursor: grab;
-            user-select: none;
-        }
-
-        .page-thumb.dragging {
-            opacity: 0.4;
-        }
-
-        .page-thumb.drag-over {
-            transform: scale(1.05);
-        }
-
-        .page-thumb img {
-            width: 72px;
-            height: 96px;
-            object-fit: cover;
-            border-radius: 6px;
-            border: 2px solid var(--border-color);
-            background: white;
-        }
-
-        .page-thumb .page-number {
-            position: absolute;
-            bottom: 18px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.6);
-            color: white;
-            font-size: 10px;
-            padding: 1px 6px;
-            border-radius: 4px;
-        }
-
-        .page-thumb .page-remove {
-            position: absolute;
-            top: -6px;
-            right: -6px;
-            width: 20px;
-            height: 20px;
-            border-radius: 50%;
-            background: #d32f2f;
-            color: white;
-            border: none;
-            font-size: 12px;
-            line-height: 20px;
-            text-align: center;
-            cursor: pointer;
-            display: none;
-        }
-
-        .page-thumb:hover .page-remove {
-            display: block;
-        }
-
-        .pages-actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 10px;
-        }
-
-        /* Step 2: Contact Selection */
-        .contacts-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-            gap: 16px;
-            margin-bottom: 20px;
-        }
-
-        .contact-card {
-            background: var(--bg-white);
-            border: 2px solid var(--border-color);
-            border-radius: 12px;
-            padding: 16px;
-            cursor: pointer;
-            transition: var(--transition);
-        }
-
-        .contact-card:hover {
-            border-color: var(--primary-color);
-            box-shadow: var(--shadow-lg);
-            transform: translateY(-4px);
-        }
-
-        .contact-card.selected {
-            border-color: var(--primary-color);
-            background: linear-gradient(135deg, rgba(26, 115, 232, 0.05) 0%, rgba(13, 148, 136, 0.05) 100%);
-            box-shadow: var(--shadow-lg);
-        }
-
-        .contact-name {
-            font-weight: 600;
-            font-size: 15px;
-            margin-bottom: 4px;
-        }
-
-        .contact-email {
-            font-size: 13px;
-            color: var(--text-secondary);
-            margin-bottom: 4px;
-            word-break: break-all;
-        }
-
-        .contact-dept {
-            font-size: 12px;
-            color: var(--text-secondary);
-        }
-
-        .add-contact-btn {
-            width: 100%;
-            margin-bottom: 20px;
-        }
-
-        .form-group {
-            margin-bottom: 16px;
-        }
-
-        .form-label {
-            display: block;
-            font-size: 14px;
-            font-weight: 500;
-            margin-bottom: 6px;
-            color: var(--text-primary);
-        }
-
-        .form-input {
-            width: 100%;
-            padding: 10px 12px;
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            font-size: 14px;
-            transition: var(--transition);
-            font-family: inherit;
-        }
-
-        .form-input:focus {
-            outline: none;
-            border-color: var(--primary-color);
-            box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.1);
-        }
-
-        .form-buttons {
-            display: flex;
-            gap: 12px;
-        }
-
-        .form-buttons .btn {
-            flex: 1;
-        }
-
-        /* Loading Spinner */
-        .loading-state {
-            text-align: center;
-            padding: 40px 20px;
-        }
-
-        .spinner {
-            width: 48px;
-            height: 48px;
-            border: 4px solid var(--bg-light);
-            border-top-color: var(--primary-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        .loading-text {
-            font-size: 16px;
-            color: var(--text-secondary);
-        }
-
-        /* Step 3: Preview */
-        .email-preview {
-            background: var(--bg-white);
-            border-radius: 12px;
-            overflow: hidden;
-            box-shadow: var(--shadow-lg);
-            margin-bottom: 20px;
-        }
-
-        .email-header {
-            padding: 20px;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-        }
-
-        .doc-type-badge {
-            padding: 8px 12px;
-            border-radius: 6px;
-            color: white;
-            font-size: 12px;
-            font-weight: 600;
-            white-space: nowrap;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .email-header-text {
-            flex: 1;
-        }
-
-        .confidence-badge {
-            background: var(--bg-light);
-            padding: 6px 12px;
-            border-radius: 20px;
-            font-size: 12px;
-            color: var(--text-secondary);
-            font-weight: 600;
-        }
-
-        .email-subject {
-            font-size: 18px;
-            font-weight: 600;
-            color: var(--text-primary);
-            margin-bottom: 8px;
-            padding: 4px 0;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: var(--transition);
-            word-break: break-word;
-        }
-
-        .email-subject:hover {
-            background: var(--bg-light);
-        }
-
-        .email-subject.editable {
-            background: var(--bg-light);
-            outline: 2px solid var(--primary-color);
-        }
-
-        .email-body {
-            padding: 20px;
-            background: var(--bg-white);
-            font-size: 14px;
-            line-height: 1.8;
-            color: var(--text-primary);
-            white-space: pre-wrap;
-            word-break: break-word;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: var(--transition);
-        }
-
-        .email-body:hover {
-            background: var(--bg-light);
-        }
-
-        .email-body.editable {
-            background: var(--bg-light);
-            outline: 2px solid var(--primary-color);
-        }
-
-        .email-meta {
-            padding: 16px 20px;
-            background: var(--bg-light);
-            border-top: 1px solid var(--border-color);
-            display: grid;
-            gap: 12px;
-        }
-
-        .meta-row {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 12px;
-            font-size: 14px;
-        }
-
-        .meta-label {
-            font-weight: 600;
-            color: var(--text-secondary);
-            min-width: 80px;
-        }
-
-        .meta-value {
-            flex: 1;
-            color: var(--text-primary);
-            cursor: pointer;
-            padding: 4px;
-            border-radius: 4px;
-            transition: var(--transition);
-            word-break: break-word;
-        }
-
-        .meta-value:hover {
-            background: var(--bg-white);
-        }
-
-        .meta-value.editable {
-            background: white;
-            outline: 2px solid var(--primary-color);
-        }
-
-        .warning-banner {
-            background: #fff3cd;
-            border: 1px solid #ffc107;
-            border-radius: 8px;
-            padding: 12px 16px;
-            margin-bottom: 16px;
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            color: #856404;
-        }
-
-        .warning-icon {
-            font-size: 20px;
-            flex-shrink: 0;
-        }
-
-        .preview-buttons {
-            display: flex;
-            gap: 12px;
-        }
-
-        .preview-buttons .btn {
-            flex: 1;
-        }
-
-        /* Step 4: Result */
-        .result-container {
-            text-align: center;
-            padding: 40px 20px;
-        }
-
-        .result-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-            animation: bounce 0.6s ease;
-        }
-
-        @keyframes bounce {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-
-        .result-title {
-            font-size: 28px;
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: var(--text-primary);
-        }
-
-        .result-message {
-            font-size: 16px;
-            color: var(--text-secondary);
-            margin-bottom: 24px;
-            line-height: 1.6;
-        }
-
-        .result-summary {
-            background: var(--bg-light);
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 24px;
-            text-align: left;
-        }
-
-        .summary-item {
-            font-size: 14px;
-            margin-bottom: 8px;
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-        }
-
-        .summary-item:last-child {
-            margin-bottom: 0;
-        }
-
-        .summary-label {
-            font-weight: 600;
-            color: var(--text-secondary);
-        }
-
-        .summary-value {
-            color: var(--text-primary);
-            word-break: break-word;
-            text-align: right;
-            flex: 1;
-        }
-
-        .result-buttons {
-            display: flex;
-            gap: 12px;
-            flex-direction: column;
-        }
-
-        .result-buttons .btn {
-            width: 100%;
-        }
-
-        /* Side Panel */
-        .side-panel {
-            position: fixed;
-            top: 0;
-            right: -360px;
-            width: 360px;
-            height: 100vh;
-            background: var(--bg-white);
-            box-shadow: -4px 0 16px rgba(0, 0, 0, 0.15);
-            transition: right 0.3s ease;
-            z-index: 1000;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .side-panel.open {
-            right: 0;
-        }
-
-        .panel-header {
-            background: var(--gradient);
-            color: white;
-            padding: 20px;
-            font-size: 18px;
-            font-weight: 600;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-shrink: 0;
-        }
-
-        .panel-close {
-            background: none;
-            border: none;
-            color: white;
-            font-size: 24px;
-            cursor: pointer;
-            padding: 0;
-            width: 32px;
-            height: 32px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .panel-content {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px;
-        }
-
-        .panel-section {
-            margin-bottom: 24px;
-        }
-
-        .panel-tabs {
-            display: flex;
-            gap: 8px;
-            border-bottom: 1px solid var(--border-color);
-            margin-bottom: 16px;
-        }
-
-        .panel-tab {
-            padding: 12px 16px;
-            background: none;
-            border: none;
-            color: var(--text-secondary);
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            border-bottom: 3px solid transparent;
-            transition: var(--transition);
-        }
-
-        .panel-tab.active {
-            color: var(--primary-color);
-            border-bottom-color: var(--primary-color);
-        }
-
-        .panel-tab:hover {
-            color: var(--text-primary);
-        }
-
-        .tab-content {
-            display: none;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        .contact-item {
-            background: var(--bg-light);
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 12px;
-        }
-
-        .contact-info {
-            flex: 1;
-            min-width: 0;
-        }
-
-        .contact-name-small {
-            font-weight: 600;
-            font-size: 13px;
-            margin-bottom: 2px;
-        }
-
-        .contact-email-small {
-            font-size: 12px;
-            color: var(--text-secondary);
-            word-break: break-all;
-        }
-
-        .history-item {
-            background: var(--bg-light);
-            border-radius: 8px;
-            padding: 12px;
-            margin-bottom: 12px;
-        }
-
-        .history-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            gap: 8px;
-            margin-bottom: 8px;
-        }
-
-        .history-subject {
-            font-weight: 600;
-            font-size: 13px;
-            flex: 1;
-            word-break: break-word;
-        }
-
-        .history-date {
-            font-size: 11px;
-            color: var(--text-secondary);
-            white-space: nowrap;
-        }
-
-        .history-recipient {
-            font-size: 12px;
-            color: var(--text-secondary);
-            margin-bottom: 6px;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 40px 20px;
-            color: var(--text-secondary);
-        }
-
-        .settings-form {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        .settings-form .btn {
-            width: 100%;
-        }
-
-        /* Overlay */
-        .overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.5);
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-            z-index: 999;
-        }
-
-        .overlay.open {
-            opacity: 1;
-            pointer-events: all;
-        }
-
-        /* Responsive Design */
-        @media (max-width: 768px) {
-            .main-content {
-                padding: 12px;
-            }
-
-            .card {
-                padding: 16px;
-            }
-
-            .step-indicator {
-                gap: 12px;
-            }
-
-            .step-dot {
-                width: 36px;
-                height: 36px;
-                font-size: 14px;
-            }
-
-            .header-title h1 {
-                font-size: 20px;
-            }
-
-            .contacts-grid {
-                grid-template-columns: 1fr;
-            }
-
-            .side-panel {
-                width: 100%;
-                right: -100%;
-            }
-
-            .preview-buttons {
-                flex-direction: column;
-            }
-
-            .result-buttons {
-                flex-direction: column;
-            }
-
-            .capture-buttons {
-                flex-direction: column;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .header {
-                padding: 12px 16px;
-            }
-
-            .main-content {
-                padding: 8px;
-            }
-
-            .step-title {
-                font-size: 20px;
-            }
-
-            .email-subject {
-                font-size: 16px;
-            }
-
-            .result-icon {
-                font-size: 48px;
-            }
-
-            .result-title {
-                font-size: 24px;
-            }
-        }
-    </style>
+    <title>ScanMail+ — 智慧文件處理平台</title>
+    <link rel="stylesheet" href="/static/css/common.css">
 </head>
 <body>
     <div class="app-container">
         <!-- Header -->
         <header class="header">
             <div class="header-title">
-                <h1>ScanMail</h1>
-                <p>智慧掃描郵寄系統</p>
+                <h1>ScanMail+</h1>
+                <p>智慧文件處理平台</p>
             </div>
             <button class="hamburger-menu" id="hamburgerBtn" title="功能菜單">☰</button>
         </header>
 
+        <!-- 工具導航列 -->
+        <nav class="tool-nav" id="toolNav"></nav>
+
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Step Indicator -->
-            <div class="step-indicator">
-                <div class="step-dot active" data-step="1">1</div>
-                <div class="step-dot" data-step="2">2</div>
-                <div class="step-dot" data-step="3">3</div>
-                <div class="step-dot" data-step="4">4</div>
+
+            <!-- ════════════════════════════════════════════ -->
+            <!-- Tool: 掃描郵寄 (ScanMail)                   -->
+            <!-- ════════════════════════════════════════════ -->
+            <div class="tool-page active" data-tool="scanmail">
+                <!-- Step Indicator -->
+                <div class="step-indicator">
+                    <div class="step-dot active" data-step="1">1</div>
+                    <div class="step-dot" data-step="2">2</div>
+                    <div class="step-dot" data-step="3">3</div>
+                    <div class="step-dot" data-step="4">4</div>
+                </div>
+
+                <!-- Step 1: Camera & Upload -->
+                <section class="step active" data-step="1">
+                    <h2 class="step-title">拍照 / 上傳</h2>
+                    <div class="card">
+                        <div class="camera-preview-container" id="cameraContainer">
+                            <video id="cameraPreview" playsinline></video>
+                            <canvas id="cameraCanvas"></canvas>
+                            <div class="camera-overlay"></div>
+                        </div>
+                        <div class="thumbnail-preview" id="thumbnailPreview" style="display: none;">
+                            <img id="thumbnailImage" class="thumbnail-image" alt="Preview">
+                        </div>
+                        <div class="capture-buttons">
+                            <button class="btn btn-primary" id="captureBtn">
+                                📷 拍照
+                            </button>
+                            <button class="btn btn-secondary" id="uploadBtn">
+                                📁 上傳檔案
+                            </button>
+                        </div>
+                        <div id="retakeContainer" style="display: none;">
+                            <button class="btn btn-secondary" id="retakeBtn" style="width: 100%; margin-bottom: 12px;">
+                                🔄 重新拍照
+                            </button>
+                        </div>
+                        <button class="btn btn-primary" id="nextStep1Btn" style="width: 100%; display: none;">
+                            下一步 →
+                        </button>
+                    </div>
+
+                    <!-- 掃描後處理面板 -->
+                    <div class="card scan-panel" id="scanPanel" style="display: none;">
+                        <h3 style="margin-bottom: 12px; font-size: 16px;">✨ 文件掃描處理</h3>
+
+                        <!-- 裁切編輯器 -->
+                        <div id="cropEditorSection">
+                            <span class="scan-label">拖曳四個角點調整文件邊界，裁切掉背景</span>
+                            <div class="crop-editor">
+                                <div class="crop-canvas-wrapper" id="cropCanvasWrapper">
+                                    <canvas id="cropCanvas"></canvas>
+                                </div>
+                                <div class="rotate-controls">
+                                    <button class="rotate-btn" id="rotateCCWBtn">↺ 左轉 90°</button>
+                                    <button class="rotate-btn" id="rotateCWBtn">↻ 右轉 90°</button>
+                                </div>
+                                <div class="crop-controls">
+                                    <button class="crop-btn" id="cropAutoDetectBtn">🔍 自動偵測</button>
+                                    <button class="crop-btn" id="cropResetBtn">↩️ 重設</button>
+                                    <button class="crop-btn primary" id="cropApplyBtn">✂️ 裁切並處理</button>
+                                </div>
+                                <p class="crop-hint" id="cropHint">自動偵測文件邊界中...</p>
+                            </div>
+                        </div>
+
+                        <!-- 處理結果預覽 -->
+                        <div id="scanResultSection" style="display: none;">
+                            <div class="scan-preview-row">
+                                <div class="scan-preview-item">
+                                    <span class="scan-label">原始</span>
+                                    <img id="scanOriginal" class="scan-preview-img" alt="原始">
+                                </div>
+                                <div class="scan-arrow">→</div>
+                                <div class="scan-preview-item">
+                                    <span class="scan-label">處理後</span>
+                                    <img id="scanProcessed" class="scan-preview-img" alt="處理後">
+                                </div>
+                            </div>
+
+                            <!-- 濾鏡選擇 -->
+                            <div class="filter-options" id="filterOptions">
+                                <button class="filter-btn active" data-filter="auto">
+                                    <span class="filter-icon">🪄</span>
+                                    <span>自動</span>
+                                </button>
+                                <button class="filter-btn" data-filter="scan">
+                                    <span class="filter-icon">🖨️</span>
+                                    <span>專業掃描</span>
+                                </button>
+                                <button class="filter-btn" data-filter="color_doc">
+                                    <span class="filter-icon">🔴</span>
+                                    <span>彩色公文</span>
+                                </button>
+                                <button class="filter-btn" data-filter="document">
+                                    <span class="filter-icon">📄</span>
+                                    <span>文件</span>
+                                </button>
+                                <button class="filter-btn" data-filter="enhance">
+                                    <span class="filter-icon">🔆</span>
+                                    <span>增強</span>
+                                </button>
+                                <button class="filter-btn" data-filter="bw">
+                                    <span class="filter-icon">◼️</span>
+                                    <span>黑白</span>
+                                </button>
+                                <button class="filter-btn" data-filter="original">
+                                    <span class="filter-icon">🖼️</span>
+                                    <span>原圖</span>
+                                </button>
+                            </div>
+
+                            <button class="crop-btn" id="cropEditAgainBtn" style="margin-bottom: 10px;">✏️ 重新調整裁切範圍</button>
+                        </div>
+
+                        <!-- 多頁掃描面板 -->
+                        <div class="pages-strip" id="pagesStrip" style="display: none;">
+                            <div class="pages-header">
+                                <h4>📄 已掃描頁面</h4>
+                                <span class="pages-count" id="pagesCount">0 頁</span>
+                            </div>
+                            <div class="pages-list" id="pagesList"></div>
+                            <div class="pages-actions">
+                                <button class="crop-btn primary" id="addPageBtn">➕ 加入此頁</button>
+                                <button class="crop-btn" id="addMorePageBtn">📷 繼續掃描下一頁</button>
+                            </div>
+                        </div>
+
+                        <!-- 處理狀態 -->
+                        <div class="scan-status" id="scanStatus" style="display: none;">
+                            <div class="loading-spinner small"></div>
+                            <span id="scanStatusText">正在處理...</span>
+                        </div>
+
+                        <!-- 邊界偵測資訊 -->
+                        <div class="scan-info" id="scanInfo" style="display: none;">
+                            <span id="scanInfoText"></span>
+                        </div>
+
+                        <button class="btn btn-primary" id="scanNextBtn" style="width: 100%; margin-top: 12px;">
+                            確認掃描結果，選擇收件人 →
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Step 2: Contact Selection -->
+                <section class="step" data-step="2">
+                    <h2 class="step-title">選擇收件人</h2>
+                    <div class="card">
+                        <button class="btn btn-primary add-contact-btn" id="addContactBtn">
+                            ➕ 新增收件人
+                        </button>
+
+                        <div id="addContactForm" style="display: none; margin-bottom: 20px; padding: 20px; background: var(--bg-light); border-radius: 8px;">
+                            <h3 style="margin-bottom: 16px;">新增收件人</h3>
+                            <div class="form-group">
+                                <label class="form-label">姓名</label>
+                                <input type="text" class="form-input" id="contactName" placeholder="例: 王經理">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Email</label>
+                                <input type="email" class="form-input" id="contactEmail" placeholder="例: wang@company.com">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">部門</label>
+                                <input type="text" class="form-input" id="contactDept" placeholder="例: 行政部">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">職稱</label>
+                                <input type="text" class="form-input" id="contactTitle" placeholder="例: 經理">
+                            </div>
+                            <div class="form-buttons">
+                                <button class="btn btn-secondary" id="cancelContactBtn">取消</button>
+                                <button class="btn btn-primary" id="saveContactBtn">儲存</button>
+                            </div>
+                        </div>
+
+                        <div class="contacts-grid" id="contactsGrid"></div>
+
+                        <div id="noContactsMsg" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
+                            尚無聯絡人，請新增一個
+                        </div>
+
+                        <button class="btn btn-primary" id="nextToAnalyzeBtn"
+                                style="display: none; width: 100%; margin-top: 20px; padding: 16px; font-size: 18px;">
+                            🤖 開始 AI 辨識 →
+                        </button>
+                    </div>
+                </section>
+
+                <!-- Step 3: Preview & Confirm -->
+                <section class="step" data-step="3">
+                    <h2 class="step-title">預覽確認</h2>
+                    <div class="card">
+                        <div id="loadingState" class="loading-state">
+                            <div class="spinner"></div>
+                            <div class="loading-text">🤖 AI 辨識中...</div>
+                        </div>
+
+                        <div id="previewContent" style="display: none;">
+                            <div id="confidenceWarning" style="display: none;" class="warning-banner">
+                                <span class="warning-icon">⚠️</span>
+                                <div>
+                                    <strong>低可信度警告</strong><br>
+                                    AI 辨識信心度低於 30%，建議確認文件內容無誤
+                                </div>
+                            </div>
+
+                            <div class="email-preview">
+                                <div class="email-header">
+                                    <div class="doc-type-badge" id="docTypeBadge">
+                                        <span id="docTypeIcon">📎</span>
+                                        <span id="docTypeText">其他</span>
+                                    </div>
+                                    <div class="email-header-text">
+                                        <div class="email-subject" id="emailSubject" contenteditable="false">主旨</div>
+                                        <div class="confidence-badge" id="confidenceBadge">信心度: 100%</div>
+                                    </div>
+                                </div>
+
+                                <div class="email-body" id="emailBody" contenteditable="false">
+                                    Email body content
+                                </div>
+
+                                <div class="email-meta">
+                                    <div class="meta-row">
+                                        <div class="meta-label">收件人</div>
+                                        <div class="meta-value" id="recipientDisplay"></div>
+                                    </div>
+                                    <div class="meta-row">
+                                        <div class="meta-label">檔名</div>
+                                        <div class="meta-value" id="filenameDisplay" contenteditable="false"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="preview-buttons" style="margin-top: 20px;">
+                                <button class="btn btn-secondary" id="cancelBtn">取消</button>
+                                <button class="btn btn-secondary" id="editBtn">編輯</button>
+                                <button class="btn btn-success" id="sendBtn">確認寄出 ✓</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Step 4: Result -->
+                <section class="step" data-step="4">
+                    <div class="card">
+                        <div id="successResult" class="result-container" style="display: none;">
+                            <div class="result-icon">✓</div>
+                            <h2 class="result-title">寄送成功</h2>
+                            <p class="result-message">您的掃描文件已成功發送</p>
+                            <div class="result-summary">
+                                <div class="summary-item">
+                                    <span class="summary-label">主旨:</span>
+                                    <span class="summary-value" id="resultSubject"></span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="summary-label">收件人:</span>
+                                    <span class="summary-value" id="resultRecipient"></span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="summary-label">檔名:</span>
+                                    <span class="summary-value" id="resultFilename"></span>
+                                </div>
+                            </div>
+                            <div class="result-buttons">
+                                <button class="btn btn-primary" id="restartBtn">
+                                    📷 繼續掃描
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="errorResult" class="result-container" style="display: none;">
+                            <div class="result-icon" style="color: #d32f2f;">✕</div>
+                            <h2 class="result-title">寄送失敗</h2>
+                            <p class="result-message" id="errorMessage"></p>
+                            <div class="result-buttons">
+                                <button class="btn btn-danger" id="retryBtn">重試</button>
+                                <button class="btn btn-secondary" id="backBtn">返回編輯</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div><!-- /tool: scanmail -->
+
+            <!-- ════════════════════════════════════════════ -->
+            <!-- Tool Placeholders (後續 Phase 實作)          -->
+            <!-- ════════════════════════════════════════════ -->
+            <div class="tool-page" data-tool="image-tools">
+                <div class="card"><div class="tool-placeholder">
+                    <div class="placeholder-icon">🖼️</div>
+                    <h3>圖片工具</h3>
+                    <p>批次縮放、格式轉換、壓縮、浮水印 — 即將推出</p>
+                </div></div>
             </div>
 
-            <!-- Step 1: Camera & Upload -->
-            <section class="step active" data-step="1">
-                <h2 class="step-title">📷 拍照 / 上傳</h2>
-                <div class="card">
-                    <div class="camera-preview-container" id="cameraContainer">
-                        <video id="cameraPreview" playsinline></video>
-                        <canvas id="cameraCanvas"></canvas>
-                        <div class="camera-overlay"></div>
-                    </div>
-                    <div class="thumbnail-preview" id="thumbnailPreview" style="display: none;">
-                        <img id="thumbnailImage" class="thumbnail-image" alt="Preview">
-                    </div>
-                    <div class="capture-buttons">
-                        <button class="btn btn-primary" id="captureBtn">
-                            📷 拍照
-                        </button>
-                        <button class="btn btn-secondary" id="uploadBtn">
-                            📁 上傳檔案
-                        </button>
-                    </div>
-                    <div id="retakeContainer" style="display: none;">
-                        <button class="btn btn-secondary" id="retakeBtn" style="width: 100%; margin-bottom: 12px;">
-                            🔄 重新拍照
-                        </button>
-                    </div>
-                    <button class="btn btn-primary" id="nextStep1Btn" style="width: 100%; display: none;">
-                        下一步 →
-                    </button>
-                </div>
+            <div class="tool-page" data-tool="gif-tools">
+                <div class="card"><div class="tool-placeholder">
+                    <div class="placeholder-icon">🎞️</div>
+                    <h3>GIF 製作</h3>
+                    <p>圖片序列轉 GIF、影片轉 GIF — 即將推出</p>
+                </div></div>
+            </div>
 
-                <!-- 掃描後處理面板 -->
-                <div class="card scan-panel" id="scanPanel" style="display: none;">
-                    <h3 style="margin-bottom: 12px; font-size: 16px;">✨ 文件掃描處理</h3>
+            <div class="tool-page" data-tool="video-tools">
+                <div class="card"><div class="tool-placeholder">
+                    <div class="placeholder-icon">🎬</div>
+                    <h3>影片工具</h3>
+                    <p>影片合併、壓縮、轉 GIF — 即將推出</p>
+                </div></div>
+            </div>
 
-                    <!-- 裁切編輯器（Step A：調整文件邊界）-->
-                    <div id="cropEditorSection">
-                        <span class="scan-label">拖曳四個角點調整文件邊界，裁切掉背景</span>
-                        <div class="crop-editor">
-                            <div class="crop-canvas-wrapper" id="cropCanvasWrapper">
-                                <canvas id="cropCanvas"></canvas>
-                            </div>
-                            <div class="rotate-controls">
-                                <button class="rotate-btn" id="rotateCCWBtn">↺ 左轉 90°</button>
-                                <button class="rotate-btn" id="rotateCWBtn">↻ 右轉 90°</button>
-                            </div>
-                            <div class="crop-controls">
-                                <button class="crop-btn" id="cropAutoDetectBtn">🔍 自動偵測</button>
-                                <button class="crop-btn" id="cropResetBtn">↩️ 重設</button>
-                                <button class="crop-btn primary" id="cropApplyBtn">✂️ 裁切並處理</button>
-                            </div>
-                            <p class="crop-hint" id="cropHint">自動偵測文件邊界中...</p>
-                        </div>
-                    </div>
+            <div class="tool-page" data-tool="pdf-tools">
+                <div class="card"><div class="tool-placeholder">
+                    <div class="placeholder-icon">📕</div>
+                    <h3>PDF 工具</h3>
+                    <p>PDF 合併、浮水印、密碼保護 — 即將推出</p>
+                </div></div>
+            </div>
 
-                    <!-- 處理結果預覽（Step B：顯示濾鏡結果）-->
-                    <div id="scanResultSection" style="display: none;">
-                        <div class="scan-preview-row">
-                            <div class="scan-preview-item">
-                                <span class="scan-label">原始</span>
-                                <img id="scanOriginal" class="scan-preview-img" alt="原始">
-                            </div>
-                            <div class="scan-arrow">→</div>
-                            <div class="scan-preview-item">
-                                <span class="scan-label">處理後</span>
-                                <img id="scanProcessed" class="scan-preview-img" alt="處理後">
-                            </div>
-                        </div>
+            <div class="tool-page" data-tool="doc-convert">
+                <div class="card"><div class="tool-placeholder">
+                    <div class="placeholder-icon">🔄</div>
+                    <h3>文件轉檔</h3>
+                    <p>Word、PDF、Markdown 雙向轉換 — 即將推出</p>
+                </div></div>
+            </div>
 
-                        <!-- 濾鏡選擇 -->
-                        <div class="filter-options" id="filterOptions">
-                            <button class="filter-btn active" data-filter="auto">
-                                <span class="filter-icon">🪄</span>
-                                <span>自動</span>
-                            </button>
-                            <button class="filter-btn" data-filter="scan">
-                                <span class="filter-icon">🖨️</span>
-                                <span>專業掃描</span>
-                            </button>
-                            <button class="filter-btn" data-filter="color_doc">
-                                <span class="filter-icon">🔴</span>
-                                <span>彩色公文</span>
-                            </button>
-                            <button class="filter-btn" data-filter="document">
-                                <span class="filter-icon">📄</span>
-                                <span>文件</span>
-                            </button>
-                            <button class="filter-btn" data-filter="enhance">
-                                <span class="filter-icon">🔆</span>
-                                <span>增強</span>
-                            </button>
-                            <button class="filter-btn" data-filter="bw">
-                                <span class="filter-icon">◼️</span>
-                                <span>黑白</span>
-                            </button>
-                            <button class="filter-btn" data-filter="original">
-                                <span class="filter-icon">🖼️</span>
-                                <span>原圖</span>
-                            </button>
-                        </div>
+            <div class="tool-page" data-tool="batch-rename">
+                <div class="card"><div class="tool-placeholder">
+                    <div class="placeholder-icon">✏️</div>
+                    <h3>批次改名</h3>
+                    <p>前綴、後綴、編號規則批次重命名 — 即將推出</p>
+                </div></div>
+            </div>
 
-                        <button class="crop-btn" id="cropEditAgainBtn" style="margin-bottom: 10px;">✏️ 重新調整裁切範圍</button>
-                    </div>
-
-                    <!-- 多頁掃描面板 -->
-                    <div class="pages-strip" id="pagesStrip" style="display: none;">
-                        <div class="pages-header">
-                            <h4>📄 已掃描頁面</h4>
-                            <span class="pages-count" id="pagesCount">0 頁</span>
-                        </div>
-                        <div class="pages-list" id="pagesList"></div>
-                        <div class="pages-actions">
-                            <button class="crop-btn primary" id="addPageBtn">➕ 加入此頁</button>
-                            <button class="crop-btn" id="addMorePageBtn">📷 繼續掃描下一頁</button>
-                        </div>
-                    </div>
-
-                    <!-- 處理狀態 -->
-                    <div class="scan-status" id="scanStatus" style="display: none;">
-                        <div class="loading-spinner small"></div>
-                        <span id="scanStatusText">正在處理...</span>
-                    </div>
-
-                    <!-- 邊界偵測資訊 -->
-                    <div class="scan-info" id="scanInfo" style="display: none;">
-                        <span id="scanInfoText"></span>
-                    </div>
-
-                    <button class="btn btn-primary" id="scanNextBtn" style="width: 100%; margin-top: 12px;">
-                        確認掃描結果，選擇收件人 →
-                    </button>
-                </div>
-            </section>
-
-            <!-- Step 2: Contact Selection -->
-            <section class="step" data-step="2">
-                <h2 class="step-title">選擇收件人</h2>
-                <div class="card">
-                    <button class="btn btn-primary add-contact-btn" id="addContactBtn">
-                        ➕ 新增收件人
-                    </button>
-
-                    <!-- Add Contact Form -->
-                    <div id="addContactForm" style="display: none; margin-bottom: 20px; padding: 20px; background: var(--bg-light); border-radius: 8px;">
-                        <h3 style="margin-bottom: 16px;">新增收件人</h3>
-                        <div class="form-group">
-                            <label class="form-label">姓名</label>
-                            <input type="text" class="form-input" id="contactName" placeholder="例: 王經理">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Email</label>
-                            <input type="email" class="form-input" id="contactEmail" placeholder="例: wang@company.com">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">部門</label>
-                            <input type="text" class="form-input" id="contactDept" placeholder="例: 行政部">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">職稱</label>
-                            <input type="text" class="form-input" id="contactTitle" placeholder="例: 經理">
-                        </div>
-                        <div class="form-buttons">
-                            <button class="btn btn-secondary" id="cancelContactBtn">取消</button>
-                            <button class="btn btn-primary" id="saveContactBtn">儲存</button>
-                        </div>
-                    </div>
-
-                    <!-- Contacts Grid -->
-                    <div class="contacts-grid" id="contactsGrid">
-                        <!-- Contacts will be loaded here -->
-                    </div>
-
-                    <div id="noContactsMsg" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                        尚無聯絡人，請新增一個
-                    </div>
-
-                    <!-- 下一步按鈕 -->
-                    <button class="btn btn-primary" id="nextToAnalyzeBtn"
-                            style="display: none; width: 100%; margin-top: 20px; padding: 16px; font-size: 18px;">
-                        🤖 開始 AI 辨識 →
-                    </button>
-                </div>
-            </section>
-
-            <!-- Step 3: Preview & Confirm -->
-            <section class="step" data-step="3">
-                <h2 class="step-title">預覽確認</h2>
-                <div class="card">
-                    <!-- Loading State -->
-                    <div id="loadingState" class="loading-state">
-                        <div class="spinner"></div>
-                        <div class="loading-text">🤖 AI 辨識中...</div>
-                    </div>
-
-                    <!-- Preview Content -->
-                    <div id="previewContent" style="display: none;">
-                        <!-- Warning Banner -->
-                        <div id="confidenceWarning" style="display: none;" class="warning-banner">
-                            <span class="warning-icon">⚠️</span>
-                            <div>
-                                <strong>低可信度警告</strong><br>
-                                AI 辨識信心度低於 30%，建議確認文件內容無誤
-                            </div>
-                        </div>
-
-                        <!-- Email Preview -->
-                        <div class="email-preview">
-                            <div class="email-header">
-                                <div class="doc-type-badge" id="docTypeBadge">
-                                    <span id="docTypeIcon">📎</span>
-                                    <span id="docTypeText">其他</span>
-                                </div>
-                                <div class="email-header-text">
-                                    <div class="email-subject" id="emailSubject" contenteditable="false">主旨</div>
-                                    <div class="confidence-badge" id="confidenceBadge">信心度: 100%</div>
-                                </div>
-                            </div>
-
-                            <div class="email-body" id="emailBody" contenteditable="false">
-                                Email body content
-                            </div>
-
-                            <div class="email-meta">
-                                <div class="meta-row">
-                                    <div class="meta-label">收件人</div>
-                                    <div class="meta-value" id="recipientDisplay"></div>
-                                </div>
-                                <div class="meta-row">
-                                    <div class="meta-label">檔名</div>
-                                    <div class="meta-value" id="filenameDisplay" contenteditable="false"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Preview Buttons -->
-                        <div class="preview-buttons" style="margin-top: 20px;">
-                            <button class="btn btn-secondary" id="cancelBtn">取消</button>
-                            <button class="btn btn-secondary" id="editBtn">編輯</button>
-                            <button class="btn btn-success" id="sendBtn">確認寄出 ✓</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- Step 4: Result -->
-            <section class="step" data-step="4">
-                <div class="card">
-                    <div id="successResult" class="result-container" style="display: none;">
-                        <div class="result-icon">✓</div>
-                        <h2 class="result-title">寄送成功</h2>
-                        <p class="result-message">您的掃描文件已成功發送</p>
-                        <div class="result-summary">
-                            <div class="summary-item">
-                                <span class="summary-label">主旨:</span>
-                                <span class="summary-value" id="resultSubject"></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">收件人:</span>
-                                <span class="summary-value" id="resultRecipient"></span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-label">檔名:</span>
-                                <span class="summary-value" id="resultFilename"></span>
-                            </div>
-                        </div>
-                        <div class="result-buttons">
-                            <button class="btn btn-primary" id="restartBtn">
-                                📷 繼續掃描
-                            </button>
-                        </div>
-                    </div>
-
-                    <div id="errorResult" class="result-container" style="display: none;">
-                        <div class="result-icon" style="color: #d32f2f;">✕</div>
-                        <h2 class="result-title">寄送失敗</h2>
-                        <p class="result-message" id="errorMessage"></p>
-                        <div class="result-buttons">
-                            <button class="btn btn-danger" id="retryBtn">重試</button>
-                            <button class="btn btn-secondary" id="backBtn">返回編輯</button>
-                        </div>
-                    </div>
-                </div>
-            </section>
         </main>
     </div>
 
@@ -1555,29 +376,20 @@
             <button class="panel-tab" data-tab="settings">設定</button>
         </div>
         <div class="panel-content">
-            <!-- Contacts Tab -->
             <div class="tab-content active" data-content="contacts">
                 <div class="panel-section">
                     <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">我的聯絡人</h3>
                     <div id="panelContactsList"></div>
-                    <div id="panelNoContacts" class="empty-state" style="padding: 20px;">
-                        尚無聯絡人
-                    </div>
+                    <div id="panelNoContacts" class="empty-state" style="padding: 20px;">尚無聯絡人</div>
                 </div>
             </div>
-
-            <!-- History Tab -->
             <div class="tab-content" data-content="history">
                 <div class="panel-section">
                     <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">最近寄件</h3>
                     <div id="panelHistoryList"></div>
-                    <div id="panelNoHistory" class="empty-state" style="padding: 20px;">
-                        尚無寄件紀錄
-                    </div>
+                    <div id="panelNoHistory" class="empty-state" style="padding: 20px;">尚無寄件紀錄</div>
                 </div>
             </div>
-
-            <!-- Settings Tab -->
             <div class="tab-content" data-content="settings">
                 <div class="panel-section">
                     <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">寄件人資料</h3>
@@ -1609,1396 +421,8 @@
         </div>
     </aside>
 
-    <script>
-        // ==================== Constants ====================
-        const API_BASE = '/api';
-        const DOC_TYPES = {
-            exam: { label: '試卷', icon: '📝', color: '#1D9E75' },
-            official: { label: '公文', icon: '📋', color: '#534AB7' },
-            receipt: { label: '收據', icon: '🧾', color: '#D85A30' },
-            contract: { label: '合約', icon: '📄', color: '#185FA5' },
-            report: { label: '報告', icon: '📊', color: '#993556' },
-            letter: { label: '信件', icon: '✉️', color: '#3B6D11' },
-            form: { label: '表單', icon: '📑', color: '#854F0B' },
-            other: { label: '其他', icon: '📎', color: '#5F5E5A' }
-        };
-
-        // ==================== State ====================
-        let state = {
-            currentStep: 1,
-            uploadedFile: null,
-            uploadedFileData: null,
-            imageUploaded: false,
-            scanProcessedUrl: null,
-            selectedContact: null,
-            analyzeResult: null,
-            editingField: null,
-            contacts: [],
-            history: [],
-            settings: {},
-            // 裁切相關
-            cropCorners: null,       // 四個角點 [[x,y], ...]（原圖座標）
-            cropImageWidth: 0,       // 原圖寬度
-            cropImageHeight: 0,      // 原圖高度
-            cropDragging: -1,        // 正在拖曳的角點 index（-1=無）
-            cropOriginalDataUrl: null, // 原圖 data URL（用於 canvas 繪製）
-            // 多頁掃描
-            pages: [],               // [{thumbnail: base64, index: number}, ...]
-            multiPageMode: false     // 是否已進入多頁模式
-        };
-
-        // ==================== DOM Elements ====================
-        const elements = {
-            // Steps
-            steps: document.querySelectorAll('.step'),
-            stepDots: document.querySelectorAll('.step-dot'),
-            // Step 1
-            cameraPreview: document.getElementById('cameraPreview'),
-            cameraCanvas: document.getElementById('cameraCanvas'),
-            cameraContainer: document.getElementById('cameraContainer'),
-            captureBtn: document.getElementById('captureBtn'),
-            uploadBtn: document.getElementById('uploadBtn'),
-            fileInput: document.getElementById('fileInput'),
-            thumbnailPreview: document.getElementById('thumbnailPreview'),
-            thumbnailImage: document.getElementById('thumbnailImage'),
-            retakeBtn: document.getElementById('retakeBtn'),
-            retakeContainer: document.getElementById('retakeContainer'),
-            nextStep1Btn: document.getElementById('nextStep1Btn'),
-            // Scan Panel
-            scanPanel: document.getElementById('scanPanel'),
-            scanOriginal: document.getElementById('scanOriginal'),
-            scanProcessed: document.getElementById('scanProcessed'),
-            filterOptions: document.getElementById('filterOptions'),
-            scanStatus: document.getElementById('scanStatus'),
-            scanStatusText: document.getElementById('scanStatusText'),
-            scanInfo: document.getElementById('scanInfo'),
-            scanInfoText: document.getElementById('scanInfoText'),
-            scanNextBtn: document.getElementById('scanNextBtn'),
-            // Crop Editor
-            cropEditorSection: document.getElementById('cropEditorSection'),
-            scanResultSection: document.getElementById('scanResultSection'),
-            cropCanvas: document.getElementById('cropCanvas'),
-            cropCanvasWrapper: document.getElementById('cropCanvasWrapper'),
-            cropAutoDetectBtn: document.getElementById('cropAutoDetectBtn'),
-            cropResetBtn: document.getElementById('cropResetBtn'),
-            cropApplyBtn: document.getElementById('cropApplyBtn'),
-            cropHint: document.getElementById('cropHint'),
-            cropEditAgainBtn: document.getElementById('cropEditAgainBtn'),
-            // Rotation
-            rotateCCWBtn: document.getElementById('rotateCCWBtn'),
-            rotateCWBtn: document.getElementById('rotateCWBtn'),
-            // Multi-page
-            pagesStrip: document.getElementById('pagesStrip'),
-            pagesCount: document.getElementById('pagesCount'),
-            pagesList: document.getElementById('pagesList'),
-            addPageBtn: document.getElementById('addPageBtn'),
-            addMorePageBtn: document.getElementById('addMorePageBtn'),
-            // Step 2
-            addContactBtn: document.getElementById('addContactBtn'),
-            addContactForm: document.getElementById('addContactForm'),
-            contactName: document.getElementById('contactName'),
-            contactEmail: document.getElementById('contactEmail'),
-            contactDept: document.getElementById('contactDept'),
-            contactTitle: document.getElementById('contactTitle'),
-            cancelContactBtn: document.getElementById('cancelContactBtn'),
-            saveContactBtn: document.getElementById('saveContactBtn'),
-            contactsGrid: document.getElementById('contactsGrid'),
-            noContactsMsg: document.getElementById('noContactsMsg'),
-            // Step 3
-            loadingState: document.getElementById('loadingState'),
-            previewContent: document.getElementById('previewContent'),
-            confidenceWarning: document.getElementById('confidenceWarning'),
-            docTypeBadge: document.getElementById('docTypeBadge'),
-            docTypeIcon: document.getElementById('docTypeIcon'),
-            docTypeText: document.getElementById('docTypeText'),
-            emailSubject: document.getElementById('emailSubject'),
-            emailBody: document.getElementById('emailBody'),
-            confidenceBadge: document.getElementById('confidenceBadge'),
-            recipientDisplay: document.getElementById('recipientDisplay'),
-            filenameDisplay: document.getElementById('filenameDisplay'),
-            cancelBtn: document.getElementById('cancelBtn'),
-            editBtn: document.getElementById('editBtn'),
-            sendBtn: document.getElementById('sendBtn'),
-            // Step 4
-            successResult: document.getElementById('successResult'),
-            errorResult: document.getElementById('errorResult'),
-            resultSubject: document.getElementById('resultSubject'),
-            resultRecipient: document.getElementById('resultRecipient'),
-            resultFilename: document.getElementById('resultFilename'),
-            restartBtn: document.getElementById('restartBtn'),
-            retryBtn: document.getElementById('retryBtn'),
-            backBtn: document.getElementById('backBtn'),
-            errorMessage: document.getElementById('errorMessage'),
-            // Side Panel
-            hamburgerBtn: document.getElementById('hamburgerBtn'),
-            sidePanel: document.getElementById('sidePanel'),
-            panelCloseBtn: document.getElementById('panelCloseBtn'),
-            overlay: document.getElementById('overlay'),
-            panelTabs: document.querySelectorAll('.panel-tab'),
-            tabContents: document.querySelectorAll('.tab-content'),
-            panelContactsList: document.getElementById('panelContactsList'),
-            panelNoContacts: document.getElementById('panelNoContacts'),
-            panelHistoryList: document.getElementById('panelHistoryList'),
-            panelNoHistory: document.getElementById('panelNoHistory'),
-            settingsForm: document.getElementById('settingsForm'),
-            senderName: document.getElementById('senderName'),
-            senderEmail: document.getElementById('senderEmail'),
-            senderTitle: document.getElementById('senderTitle'),
-            senderDept: document.getElementById('senderDept'),
-            senderOrg: document.getElementById('senderOrg')
-        };
-
-        // Create file input for upload
-        const fileInput = document.createElement('input');
-        fileInput.type = 'file';
-        fileInput.id = 'fileInput';
-        fileInput.accept = 'image/*';
-        fileInput.style.display = 'none';
-        document.body.appendChild(fileInput);
-
-        // ==================== Camera & Upload Functions ====================
-        async function initCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { ideal: 'environment' }
-                    },
-                    audio: false
-                });
-                elements.cameraPreview.srcObject = stream;
-                elements.cameraPreview.play();
-            } catch (error) {
-                console.error('Camera error:', error);
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: 'user' },
-                        audio: false
-                    });
-                    elements.cameraPreview.srcObject = stream;
-                    elements.cameraPreview.play();
-                } catch (fallbackError) {
-                    alert('無法啟用相機');
-                }
-            }
-        }
-
-        function capturePhoto() {
-            const video = elements.cameraPreview;
-            const canvas = elements.cameraCanvas;
-            const ctx = canvas.getContext('2d');
-
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
-
-            canvas.toBlob(blob => {
-                state.uploadedFileData = blob;
-                state.uploadedFile = 'captured_' + Date.now() + '.jpg';
-                showThumbnail(canvas.toDataURL('image/jpeg'));
-            }, 'image/jpeg', 0.95);
-        }
-
-        function showThumbnail(dataUrl) {
-            elements.thumbnailImage.src = dataUrl;
-            elements.thumbnailPreview.style.display = 'block';
-            elements.cameraContainer.style.display = 'none';
-            elements.retakeContainer.style.display = 'block';
-            elements.captureBtn.style.display = 'none';
-            elements.uploadBtn.style.display = 'none';
-            elements.nextStep1Btn.style.display = 'none';
-            // 自動啟動掃描處理
-            startScanProcessing(dataUrl);
-        }
-
-        function hideThumbnail() {
-            elements.thumbnailPreview.style.display = 'none';
-            elements.cameraContainer.style.display = 'block';
-            elements.retakeContainer.style.display = 'none';
-            elements.captureBtn.style.display = 'flex';
-            elements.uploadBtn.style.display = 'flex';
-            elements.nextStep1Btn.style.display = 'none';
-            // 隱藏掃描面板 & 重設裁切狀態
-            elements.scanPanel.style.display = 'none';
-            state.cropCorners = null;
-            state.cropDragging = -1;
-            state.cropOriginalDataUrl = null;
-            _cropImage = null;
-        }
-
-        // ==================== 文件裁切與掃描處理 ====================
-
-        // ── 裁切 Canvas 繪製 ──
-
-        let _cropImage = null; // 快取的 Image 物件
-
-        function drawCropCanvas() {
-            const canvas = elements.cropCanvas;
-            const ctx = canvas.getContext('2d');
-            if (!_cropImage || !_cropImage.complete) return;
-
-            // 計算 canvas 顯示尺寸（適配容器寬度，最大高度 50vh）
-            const wrapper = elements.cropCanvasWrapper;
-            const maxW = wrapper.parentElement.clientWidth - 2;
-            const maxH = window.innerHeight * 0.5;
-            const imgW = _cropImage.naturalWidth;
-            const imgH = _cropImage.naturalHeight;
-
-            let dispW = imgW;
-            let dispH = imgH;
-            if (dispW > maxW) {
-                dispH = dispH * (maxW / dispW);
-                dispW = maxW;
-            }
-            if (dispH > maxH) {
-                dispW = dispW * (maxH / dispH);
-                dispH = maxH;
-            }
-            dispW = Math.round(dispW);
-            dispH = Math.round(dispH);
-
-            // 設定高解析度 canvas（支援 Retina）
-            const dpr = window.devicePixelRatio || 1;
-            canvas.width = dispW * dpr;
-            canvas.height = dispH * dpr;
-            canvas.style.width = dispW + 'px';
-            canvas.style.height = dispH + 'px';
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-            // 繪製圖片
-            ctx.drawImage(_cropImage, 0, 0, dispW, dispH);
-
-            // 繪製半透明遮罩（裁切區域外變暗）
-            if (state.cropCorners && state.cropCorners.length === 4) {
-                const corners = state.cropCorners;
-                const scaleX = dispW / state.cropImageWidth;
-                const scaleY = dispH / state.cropImageHeight;
-
-                // 畫暗色遮罩
-                ctx.save();
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
-                ctx.beginPath();
-                ctx.rect(0, 0, dispW, dispH);
-                // 挖出裁切區域
-                ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
-                for (let i = 1; i < 4; i++) {
-                    ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
-                }
-                ctx.closePath();
-                ctx.fill('evenodd');
-                ctx.restore();
-
-                // 畫邊界線
-                ctx.save();
-                ctx.strokeStyle = '#0d9488';
-                ctx.lineWidth = 2;
-                ctx.setLineDash([6, 3]);
-                ctx.beginPath();
-                ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
-                for (let i = 1; i < 4; i++) {
-                    ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
-                }
-                ctx.closePath();
-                ctx.stroke();
-                ctx.restore();
-
-                // 畫角點拖曳把手
-                const labels = ['TL', 'TR', 'BR', 'BL'];
-                for (let i = 0; i < 4; i++) {
-                    const cx = corners[i][0] * scaleX;
-                    const cy = corners[i][1] * scaleY;
-                    const isActive = (state.cropDragging === i);
-
-                    // 外圈
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, isActive ? 14 : 11, 0, Math.PI * 2);
-                    ctx.fillStyle = isActive ? 'rgba(13,148,136,0.9)' : 'rgba(13,148,136,0.7)';
-                    ctx.fill();
-                    ctx.strokeStyle = 'white';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-
-                    // 內圈
-                    ctx.beginPath();
-                    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-                    ctx.fillStyle = 'white';
-                    ctx.fill();
-                }
-            }
-        }
-
-        function getCropCanvasScale() {
-            const canvas = elements.cropCanvas;
-            const dispW = parseInt(canvas.style.width);
-            const dispH = parseInt(canvas.style.height);
-            return {
-                x: dispW / state.cropImageWidth,
-                y: dispH / state.cropImageHeight,
-                dispW, dispH
-            };
-        }
-
-        function getCanvasPointerPos(e) {
-            const canvas = elements.cropCanvas;
-            const rect = canvas.getBoundingClientRect();
-            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            return {
-                x: clientX - rect.left,
-                y: clientY - rect.top
-            };
-        }
-
-        function findNearestCorner(pos, threshold) {
-            if (!state.cropCorners) return -1;
-            const scale = getCropCanvasScale();
-            let minDist = Infinity;
-            let minIdx = -1;
-            for (let i = 0; i < 4; i++) {
-                const cx = state.cropCorners[i][0] * scale.x;
-                const cy = state.cropCorners[i][1] * scale.y;
-                const dist = Math.hypot(pos.x - cx, pos.y - cy);
-                if (dist < threshold && dist < minDist) {
-                    minDist = dist;
-                    minIdx = i;
-                }
-            }
-            return minIdx;
-        }
-
-        // ── 拖曳事件 ──
-
-        function onCropPointerDown(e) {
-            if (!state.cropCorners) return;
-            const pos = getCanvasPointerPos(e);
-            const idx = findNearestCorner(pos, 30);
-            if (idx >= 0) {
-                state.cropDragging = idx;
-                drawCropCanvas();
-                e.preventDefault();
-            }
-        }
-
-        function onCropPointerMove(e) {
-            if (state.cropDragging < 0) return;
-            e.preventDefault();
-            const pos = getCanvasPointerPos(e);
-            const scale = getCropCanvasScale();
-            // 轉回原圖座標
-            let newX = Math.round(pos.x / scale.x);
-            let newY = Math.round(pos.y / scale.y);
-            // 限制在圖片範圍內
-            newX = Math.max(0, Math.min(state.cropImageWidth, newX));
-            newY = Math.max(0, Math.min(state.cropImageHeight, newY));
-            state.cropCorners[state.cropDragging] = [newX, newY];
-            drawCropCanvas();
-        }
-
-        function onCropPointerUp(e) {
-            if (state.cropDragging >= 0) {
-                state.cropDragging = -1;
-                drawCropCanvas();
-            }
-        }
-
-        function initCropCanvasEvents() {
-            const canvas = elements.cropCanvas;
-            // 滑鼠
-            canvas.addEventListener('mousedown', onCropPointerDown);
-            canvas.addEventListener('mousemove', onCropPointerMove);
-            canvas.addEventListener('mouseup', onCropPointerUp);
-            canvas.addEventListener('mouseleave', onCropPointerUp);
-            // 觸控
-            canvas.addEventListener('touchstart', onCropPointerDown, { passive: false });
-            canvas.addEventListener('touchmove', onCropPointerMove, { passive: false });
-            canvas.addEventListener('touchend', onCropPointerUp);
-            canvas.addEventListener('touchcancel', onCropPointerUp);
-        }
-
-        function setDefaultCorners() {
-            // 預設裁切範圍：圖片邊緣內縮 5%
-            const m = 0.05;
-            const w = state.cropImageWidth;
-            const h = state.cropImageHeight;
-            state.cropCorners = [
-                [Math.round(w * m), Math.round(h * m)],             // 左上
-                [Math.round(w * (1 - m)), Math.round(h * m)],       // 右上
-                [Math.round(w * (1 - m)), Math.round(h * (1 - m))], // 右下
-                [Math.round(w * m), Math.round(h * (1 - m))]        // 左下
-            ];
-        }
-
-        // ── 主流程 ──
-
-        async function startScanProcessing(originalDataUrl) {
-            // 顯示掃描面板，進入裁切模式
-            elements.scanPanel.style.display = 'block';
-            elements.cropEditorSection.style.display = 'block';
-            elements.scanResultSection.style.display = 'none';
-            elements.scanStatus.style.display = 'flex';
-            elements.scanStatusText.textContent = '正在上傳並偵測文件邊界...';
-            elements.scanInfo.style.display = 'none';
-            elements.scanNextBtn.disabled = true;
-            elements.cropHint.textContent = '正在自動偵測文件邊界...';
-
-            // 儲存原圖 data URL
-            state.cropOriginalDataUrl = originalDataUrl;
-
-            // 重設濾鏡選擇
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            document.querySelector('.filter-btn[data-filter="auto"]').classList.add('active');
-
-            try {
-                // Step 1: 上傳圖片
-                await uploadDocument();
-
-                // Step 2: 偵測邊界（不套用濾鏡，只取得角點）
-                elements.scanStatusText.textContent = '正在偵測文件邊界...';
-                const detectRes = await fetch(`${API_BASE}/scan/detect`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-
-                if (!detectRes.ok) throw new Error('邊界偵測失敗');
-                const detectResult = await detectRes.json();
-
-                state.cropImageWidth = detectResult.image_width;
-                state.cropImageHeight = detectResult.image_height;
-
-                if (detectResult.detected && detectResult.corners) {
-                    state.cropCorners = detectResult.corners;
-                    elements.cropHint.textContent = '✅ 已自動偵測到文件邊界，可拖曳角點微調';
-                } else {
-                    // 未偵測到邊界，設定預設裁切框
-                    setDefaultCorners();
-                    elements.cropHint.textContent = 'ℹ️ 未偵測到明確邊界，請手動拖曳角點選取文件範圍';
-                }
-
-                // 載入原圖到 canvas
-                _cropImage = new Image();
-                _cropImage.onload = () => {
-                    drawCropCanvas();
-                    initCropCanvasEvents();
-                };
-                _cropImage.src = originalDataUrl;
-
-                elements.scanStatus.style.display = 'none';
-
-            } catch (error) {
-                console.error('Scan detect error:', error);
-                elements.scanStatusText.textContent = '邊界偵測失敗';
-                elements.cropHint.textContent = '偵測失敗，請手動選取或直接裁切處理';
-
-                // 用預設值
-                state.cropImageWidth = 1000;
-                state.cropImageHeight = 1000;
-                setDefaultCorners();
-
-                _cropImage = new Image();
-                _cropImage.onload = () => {
-                    state.cropImageWidth = _cropImage.naturalWidth;
-                    state.cropImageHeight = _cropImage.naturalHeight;
-                    setDefaultCorners();
-                    drawCropCanvas();
-                    initCropCanvasEvents();
-                };
-                _cropImage.src = originalDataUrl;
-
-                elements.scanStatus.style.display = 'none';
-            }
-        }
-
-        async function applyCropAndProcess() {
-            if (!state.cropCorners) return;
-
-            elements.scanStatus.style.display = 'flex';
-            elements.scanStatusText.textContent = '正在裁切並處理文件...';
-            elements.cropApplyBtn.disabled = true;
-
-            try {
-                // 取得目前選取的濾鏡
-                const activeFilter = document.querySelector('.filter-btn.active');
-                const filterName = activeFilter ? activeFilter.dataset.filter : 'auto';
-
-                // 呼叫 process API，帶入手動角點
-                const response = await fetch(`${API_BASE}/scan/process`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        corners: state.cropCorners,
-                        filter_name: filterName,
-                        auto_detect: false
-                    })
-                });
-
-                if (!response.ok) throw new Error('裁切處理失敗');
-                const result = await response.json();
-
-                if (result.success && result.image_base64) {
-                    const processedUrl = 'data:image/jpeg;base64,' + result.image_base64;
-
-                    // 切換到結果預覽
-                    elements.cropEditorSection.style.display = 'none';
-                    elements.scanResultSection.style.display = 'block';
-                    elements.scanOriginal.src = state.cropOriginalDataUrl;
-                    elements.scanProcessed.src = processedUrl;
-                    state.scanProcessedUrl = processedUrl;
-
-                    // 顯示資訊（含變形等級與品質提示）
-                    let infoText = '✅ 文件裁切完成';
-                    infoText += ` | 濾鏡: ${getFilterLabel(result.filter_applied)}`;
-                    if (result.processed_size) {
-                        infoText += ` | ${result.processed_size[0]}x${result.processed_size[1]}`;
-                    }
-                    if (result.distortion) {
-                        const d = result.distortion;
-                        const angle = Math.round(d.estimated_angle);
-                        if (d.level === 'extreme') {
-                            infoText += ` | ⚠️ 傾斜角度過大(~${angle}°)，文字可能略有模糊，建議重新拍攝`;
-                        } else if (d.level === 'high') {
-                            infoText += ` | ⚠️ 傾斜較大(~${angle}°)，已自動補償`;
-                        } else if (d.level === 'medium') {
-                            infoText += ` | 傾斜 ~${angle}°，已校正`;
-                        }
-                    }
-                    elements.scanInfoText.textContent = infoText;
-                    elements.scanInfo.style.display = 'block';
-                    elements.scanNextBtn.disabled = false;
-                }
-
-                elements.scanStatus.style.display = 'none';
-                elements.cropApplyBtn.disabled = false;
-
-                // 顯示多頁面板（含「加入此頁」按鈕）
-                elements.pagesStrip.style.display = 'block';
-                // 如果已有頁面，載入顯示
-                if (state.multiPageMode) {
-                    await loadPages();
-                }
-
-            } catch (error) {
-                console.error('Crop process error:', error);
-                elements.scanStatusText.textContent = '裁切處理失敗';
-                elements.cropApplyBtn.disabled = false;
-                setTimeout(() => elements.scanStatus.style.display = 'none', 2000);
-            }
-        }
-
-        function showCropEditor() {
-            elements.cropEditorSection.style.display = 'block';
-            elements.scanResultSection.style.display = 'none';
-            elements.scanNextBtn.disabled = true;
-            drawCropCanvas();
-        }
-
-        function getFilterLabel(filterName) {
-            const labels = {
-                'auto': '🪄 自動',
-                'scan': '🖨️ 專業掃描',
-                'color_doc': '🔴 彩色公文',
-                'document': '📄 文件',
-                'enhance': '🔆 增強',
-                'bw': '◼️ 黑白',
-                'original': '🖼️ 原圖'
-            };
-            return labels[filterName] || filterName;
-        }
-
-        async function switchFilter(filterName) {
-            elements.scanStatus.style.display = 'flex';
-            elements.scanStatusText.textContent = `正在套用${getFilterLabel(filterName)}濾鏡...`;
-            elements.scanNextBtn.disabled = true;
-
-            try {
-                const response = await fetch(`${API_BASE}/scan/filter`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ filter_name: filterName })
-                });
-
-                if (!response.ok) throw new Error('濾鏡套用失敗');
-                const result = await response.json();
-
-                if (result.success && result.image_base64) {
-                    const processedUrl = 'data:image/jpeg;base64,' + result.image_base64;
-                    elements.scanProcessed.src = processedUrl;
-                    state.scanProcessedUrl = processedUrl;
-                }
-
-                elements.scanStatus.style.display = 'none';
-                elements.scanNextBtn.disabled = false;
-
-            } catch (error) {
-                console.error('Filter error:', error);
-                elements.scanStatusText.textContent = '濾鏡套用失敗';
-                elements.scanNextBtn.disabled = false;
-                setTimeout(() => {
-                    elements.scanStatus.style.display = 'none';
-                }, 2000);
-            }
-        }
-
-        // ==================== 圖片旋轉 ====================
-
-        async function rotateImage(angle) {
-            elements.scanStatus.style.display = 'flex';
-            elements.scanStatusText.textContent = `正在旋轉 ${angle > 0 ? '右' : '左'}轉 ${Math.abs(angle)}°...`;
-
-            try {
-                const response = await fetch(`${API_BASE}/scan/rotate`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ angle })
-                });
-
-                if (!response.ok) throw new Error('旋轉失敗');
-                const result = await response.json();
-
-                if (result.success) {
-                    // 更新 crop canvas 的原圖
-                    const newDataUrl = 'data:image/jpeg;base64,' + result.image_base64;
-                    state.cropOriginalDataUrl = newDataUrl;
-                    state.cropImageWidth = result.image_width;
-                    state.cropImageHeight = result.image_height;
-                    state.cropCorners = null;
-                    state.cropDragging = -1;
-
-                    // 重新載入 canvas 圖片
-                    _cropImage = new Image();
-                    _cropImage.onload = () => {
-                        setDefaultCorners();
-                        drawCropCanvas();
-                        elements.cropHint.textContent = '已旋轉，請重新調整裁切範圍或自動偵測';
-                    };
-                    _cropImage.src = newDataUrl;
-
-                    // 同時更新縮圖
-                    elements.thumbnailImage.src = newDataUrl;
-                }
-
-                elements.scanStatus.style.display = 'none';
-            } catch (error) {
-                console.error('Rotate error:', error);
-                elements.scanStatusText.textContent = '旋轉失敗';
-                setTimeout(() => elements.scanStatus.style.display = 'none', 2000);
-            }
-        }
-
-        // ==================== 多頁掃描 ====================
-
-        function renderPagesStrip() {
-            if (state.pages.length === 0) {
-                elements.pagesStrip.style.display = 'none';
-                return;
-            }
-
-            elements.pagesStrip.style.display = 'block';
-            elements.pagesCount.textContent = `${state.pages.length} 頁`;
-
-            elements.pagesList.innerHTML = state.pages.map((page, i) => `
-                <div class="page-thumb" draggable="true" data-page-index="${i}">
-                    <img src="data:image/jpeg;base64,${page.thumbnail}" alt="第 ${i + 1} 頁">
-                    <span class="page-number">${i + 1}</span>
-                    <button class="page-remove" data-remove-index="${i}">&times;</button>
-                </div>
-            `).join('');
-
-            // 刪除按鈕事件
-            elements.pagesList.querySelectorAll('.page-remove').forEach(btn => {
-                btn.addEventListener('click', async (e) => {
-                    e.stopPropagation();
-                    const idx = parseInt(btn.dataset.removeIndex);
-                    await removePage(idx);
-                });
-            });
-
-            // 拖曳排序事件
-            setupPageDragAndDrop();
-        }
-
-        function setupPageDragAndDrop() {
-            const thumbs = elements.pagesList.querySelectorAll('.page-thumb');
-            let dragIdx = -1;
-
-            thumbs.forEach(thumb => {
-                thumb.addEventListener('dragstart', (e) => {
-                    dragIdx = parseInt(thumb.dataset.pageIndex);
-                    thumb.classList.add('dragging');
-                    e.dataTransfer.effectAllowed = 'move';
-                });
-
-                thumb.addEventListener('dragend', () => {
-                    thumb.classList.remove('dragging');
-                    thumbs.forEach(t => t.classList.remove('drag-over'));
-                });
-
-                thumb.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    thumb.classList.add('drag-over');
-                });
-
-                thumb.addEventListener('dragleave', () => {
-                    thumb.classList.remove('drag-over');
-                });
-
-                thumb.addEventListener('drop', async (e) => {
-                    e.preventDefault();
-                    thumb.classList.remove('drag-over');
-                    const dropIdx = parseInt(thumb.dataset.pageIndex);
-                    if (dragIdx >= 0 && dragIdx !== dropIdx) {
-                        await reorderPages(dragIdx, dropIdx);
-                    }
-                });
-            });
-        }
-
-        async function addCurrentPage() {
-            elements.scanStatus.style.display = 'flex';
-            elements.scanStatusText.textContent = '正在加入頁面...';
-
-            try {
-                const response = await fetch(`${API_BASE}/pages/add`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-
-                if (!response.ok) throw new Error('加入頁面失敗');
-                const result = await response.json();
-
-                if (result.success) {
-                    // 重新載入頁面列表
-                    await loadPages();
-                    state.multiPageMode = true;
-                    elements.scanStatus.style.display = 'none';
-                }
-            } catch (error) {
-                console.error('Add page error:', error);
-                elements.scanStatusText.textContent = '加入頁面失敗';
-                setTimeout(() => elements.scanStatus.style.display = 'none', 2000);
-            }
-        }
-
-        async function loadPages() {
-            try {
-                const response = await fetch(`${API_BASE}/pages`);
-                if (!response.ok) throw new Error('載入頁面失敗');
-                const result = await response.json();
-
-                state.pages = result.pages || [];
-                renderPagesStrip();
-            } catch (error) {
-                console.error('Load pages error:', error);
-            }
-        }
-
-        async function removePage(index) {
-            try {
-                const response = await fetch(`${API_BASE}/pages/${index}`, {
-                    method: 'DELETE'
-                });
-                if (!response.ok) throw new Error('刪除頁面失敗');
-                await loadPages();
-            } catch (error) {
-                console.error('Remove page error:', error);
-            }
-        }
-
-        async function reorderPages(fromIdx, toIdx) {
-            // 建立新順序
-            const order = state.pages.map((_, i) => i);
-            const [moved] = order.splice(fromIdx, 1);
-            order.splice(toIdx, 0, moved);
-
-            try {
-                const response = await fetch(`${API_BASE}/pages/reorder`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ order })
-                });
-                if (!response.ok) throw new Error('排序失敗');
-                await loadPages();
-            } catch (error) {
-                console.error('Reorder error:', error);
-            }
-        }
-
-        function startNewPageScan() {
-            // 重設 Step 1 狀態，準備掃描下一頁
-            state.uploadedFile = null;
-            state.uploadedFileData = null;
-            state.imageUploaded = false;
-            state.scanProcessedUrl = null;
-            state.cropCorners = null;
-            state.cropDragging = -1;
-            state.cropOriginalDataUrl = null;
-            _cropImage = null;
-
-            // 重設 UI
-            elements.thumbnailPreview.style.display = 'none';
-            elements.cameraContainer.style.display = 'block';
-            elements.retakeContainer.style.display = 'none';
-            elements.captureBtn.style.display = 'flex';
-            elements.uploadBtn.style.display = 'flex';
-            elements.nextStep1Btn.style.display = 'none';
-            elements.scanPanel.style.display = 'none';
-
-            // 重新啟動相機
-            initCamera();
-        }
-
-        // ==================== Step Navigation ====================
-        function goToStep(step) {
-            if (step < 1 || step > 4) return;
-
-            // Hide all steps
-            elements.steps.forEach(s => s.classList.remove('active'));
-            elements.stepDots.forEach(d => d.classList.remove('active', 'completed'));
-
-            // Show current step
-            document.querySelector(`.step[data-step="${step}"]`).classList.add('active');
-
-            // Update step indicators
-            for (let i = 1; i <= 4; i++) {
-                const dot = document.querySelector(`.step-dot[data-step="${i}"]`);
-                if (i < step) {
-                    dot.classList.add('completed');
-                } else if (i === step) {
-                    dot.classList.add('active');
-                }
-            }
-
-            state.currentStep = step;
-
-            // Step-specific initialization
-            if (step === 1) {
-                initCamera();
-            } else if (step === 2) {
-                loadContacts();
-                // 重置下一步按鈕（需重新選擇聯絡人才會顯示）
-                const nextBtn = document.getElementById('nextToAnalyzeBtn');
-                if (nextBtn) nextBtn.style.display = state.selectedContact ? 'block' : 'none';
-            }
-
-            window.scrollTo(0, 0);
-        }
-
-        // ==================== Contacts Management ====================
-        async function loadContacts() {
-            try {
-                const response = await fetch(`${API_BASE}/contacts`);
-                if (!response.ok) throw new Error('Failed to load contacts');
-                state.contacts = await response.json();
-                renderContacts();
-            } catch (error) {
-                console.error('Error loading contacts:', error);
-                state.contacts = [];
-                renderContacts();
-            }
-        }
-
-        function renderContacts() {
-            if (state.contacts.length === 0) {
-                elements.contactsGrid.innerHTML = '';
-                elements.noContactsMsg.style.display = 'block';
-                return;
-            }
-
-            elements.noContactsMsg.style.display = 'none';
-            elements.contactsGrid.innerHTML = state.contacts.map((contact, index) => `
-                <div class="contact-card" data-id="${contact.id || index}">
-                    <div class="contact-name">${contact.name}</div>
-                    <div class="contact-email">${contact.email}</div>
-                    <div class="contact-dept">${contact.department || 'N/A'}</div>
-                </div>
-            `).join('');
-
-            // Add click handlers
-            document.querySelectorAll('.contact-card').forEach(card => {
-                card.addEventListener('click', () => selectContact(card));
-            });
-        }
-
-        function selectContact(card) {
-            document.querySelectorAll('.contact-card').forEach(c => c.classList.remove('selected'));
-            card.classList.add('selected');
-            const index = Array.from(elements.contactsGrid.children).indexOf(card);
-            state.selectedContact = state.contacts[index];
-            // 顯示「下一步」按鈕
-            document.getElementById('nextToAnalyzeBtn').style.display = 'block';
-        }
-
-        async function addNewContact() {
-            const name = elements.contactName.value.trim();
-            const email = elements.contactEmail.value.trim();
-            const dept = elements.contactDept.value.trim();
-            const title = elements.contactTitle.value.trim();
-
-            if (!name || !email) {
-                alert('請填入姓名和 Email');
-                return;
-            }
-
-            try {
-                const response = await fetch(`${API_BASE}/contacts`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name,
-                        email,
-                        department: dept,
-                        title
-                    })
-                });
-
-                if (!response.ok) throw new Error('Failed to add contact');
-
-                // Clear form and reload
-                elements.contactName.value = '';
-                elements.contactEmail.value = '';
-                elements.contactDept.value = '';
-                elements.contactTitle.value = '';
-                elements.addContactForm.style.display = 'none';
-                loadContacts();
-            } catch (error) {
-                console.error('Error adding contact:', error);
-                alert('新增聯絡人失敗');
-            }
-        }
-
-        // ==================== Document Analysis ====================
-        async function analyzeDocument() {
-            if (!state.selectedContact) {
-                goToStep(2);
-                return;
-            }
-
-            elements.loadingState.style.display = 'block';
-            elements.previewContent.style.display = 'none';
-
-            try {
-                const response = await fetch(`${API_BASE}/analyze`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contact_id: state.selectedContact.id || 0
-                    })
-                });
-
-                if (!response.ok) {
-                    const err = await response.json().catch(() => ({}));
-                    throw new Error(err.detail || `伺服器錯誤 (${response.status})`);
-                }
-                const data = await response.json();
-                state.analyzeResult = data.result || data;
-
-                renderPreview();
-                elements.loadingState.style.display = 'none';
-                elements.previewContent.style.display = 'block';
-            } catch (error) {
-                console.error('Analysis error:', error);
-                elements.loadingState.style.display = 'none';
-                alert('AI 辨識失敗：' + error.message + '\n\n請確認 .env 中已設定 ANTHROPIC_API_KEY');
-                goToStep(2);
-            }
-        }
-
-        function renderPreview() {
-            const result = state.analyzeResult;
-            const docType = result.doc_type || 'other';
-            const typeInfo = DOC_TYPES[docType] || DOC_TYPES.other;
-            const confidence = Math.round((result.confidence || 0) * 100);
-
-            // Update header
-            elements.docTypeIcon.textContent = typeInfo.icon;
-            elements.docTypeText.textContent = typeInfo.label;
-            elements.docTypeBadge.style.backgroundColor = typeInfo.color;
-
-            // Update content
-            elements.emailSubject.textContent = result.subject || '(未辨識主旨)';
-            elements.emailBody.textContent = result.body || '(未辨識內容)';
-            elements.confidenceBadge.textContent = `信心度: ${confidence}%`;
-            elements.recipientDisplay.textContent = `${state.selectedContact.name} <${state.selectedContact.email}>`;
-            elements.filenameDisplay.textContent = result.filename || state.uploadedFile || 'document.pdf';
-
-            // Show warning if confidence < 30%
-            if (confidence < 30) {
-                elements.confidenceWarning.style.display = 'flex';
-            } else {
-                elements.confidenceWarning.style.display = 'none';
-            }
-
-            // Reset contenteditable
-            elements.emailSubject.contentEditable = 'false';
-            elements.emailBody.contentEditable = 'false';
-            elements.filenameDisplay.contentEditable = 'false';
-            state.editingField = null;
-        }
-
-        function enableEditing() {
-            elements.emailSubject.contentEditable = 'true';
-            elements.emailBody.contentEditable = 'true';
-            elements.filenameDisplay.contentEditable = 'true';
-
-            elements.emailSubject.focus();
-            elements.editBtn.style.display = 'none';
-
-            // Add click handlers for editing
-            elements.emailSubject.addEventListener('click', () => {
-                elements.emailSubject.contentEditable = 'true';
-                elements.emailSubject.focus();
-            });
-            elements.emailBody.addEventListener('click', () => {
-                elements.emailBody.contentEditable = 'true';
-                elements.emailBody.focus();
-            });
-            elements.filenameDisplay.addEventListener('click', () => {
-                elements.filenameDisplay.contentEditable = 'true';
-                elements.filenameDisplay.focus();
-            });
-        }
-
-        // ==================== Upload & Send ====================
-        async function uploadDocument() {
-            if (!state.uploadedFileData) {
-                alert('請先拍照或上傳檔案');
-                return;
-            }
-
-            const formData = new FormData();
-            formData.append('file', state.uploadedFileData, state.uploadedFile);
-
-            try {
-                const response = await fetch(`${API_BASE}/upload`, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                if (!response.ok) throw new Error('Upload failed');
-                state.imageUploaded = true;
-                return await response.json();
-            } catch (error) {
-                console.error('Upload error:', error);
-                throw error;
-            }
-        }
-
-        async function sendEmail() {
-            try {
-                const subject = elements.emailSubject.textContent.trim();
-                const body = elements.emailBody.textContent.trim();
-                const filename = elements.filenameDisplay.textContent.trim();
-
-                const response = await fetch(`${API_BASE}/send`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contact_id: state.selectedContact.id,
-                        subject,
-                        body,
-                        filename
-                    })
-                });
-
-                if (!response.ok) {
-                    const errData = await response.json().catch(() => ({}));
-                    throw new Error(errData.detail || '寄送失敗');
-                }
-
-                const result = await response.json();
-
-                // 檢查後端回傳的 success 欄位（SMTP 可能失敗但 HTTP 仍 200）
-                if (!result.success) {
-                    throw new Error(result.message || '郵件寄送失敗，請檢查 SMTP 設定');
-                }
-
-                // Show success
-                elements.resultSubject.textContent = result.subject || subject;
-                elements.resultRecipient.textContent = result.recipient_email || state.selectedContact.email;
-                elements.resultFilename.textContent = result.filename || filename;
-                elements.successResult.style.display = 'block';
-                elements.errorResult.style.display = 'none';
-                goToStep(4);
-            } catch (error) {
-                console.error('Send error:', error);
-                elements.errorMessage.textContent = error.message || '寄送失敗，請重試';
-                elements.successResult.style.display = 'none';
-                elements.errorResult.style.display = 'block';
-                goToStep(4);
-            }
-        }
-
-        // ==================== Side Panel ====================
-        function openPanel() {
-            elements.sidePanel.classList.add('open');
-            elements.overlay.classList.add('open');
-        }
-
-        function closePanel() {
-            elements.sidePanel.classList.remove('open');
-            elements.overlay.classList.remove('open');
-        }
-
-        async function loadHistory() {
-            try {
-                const response = await fetch(`${API_BASE}/history`);
-                if (!response.ok) throw new Error('Failed to load history');
-                state.history = await response.json();
-                renderHistory();
-            } catch (error) {
-                console.error('Error loading history:', error);
-                state.history = [];
-                renderHistory();
-            }
-        }
-
-        function renderHistory() {
-            if (state.history.length === 0) {
-                elements.panelHistoryList.innerHTML = '';
-                elements.panelNoHistory.style.display = 'block';
-                return;
-            }
-
-            elements.panelNoHistory.style.display = 'none';
-            elements.panelHistoryList.innerHTML = state.history.map(item => {
-                const typeInfo = DOC_TYPES[item.doc_type] || DOC_TYPES.other;
-                const date = new Date(item.date).toLocaleDateString('zh-TW');
-                return `
-                    <div class="history-item">
-                        <div class="history-header">
-                            <div class="history-subject">${item.subject}</div>
-                            <span class="doc-type-badge" style="background-color: ${typeInfo.color}; margin: 0;">
-                                ${typeInfo.icon} ${typeInfo.label}
-                            </span>
-                        </div>
-                        <div class="history-recipient">${item.recipient}</div>
-                        <div class="history-date">${date}</div>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        async function loadSettings() {
-            try {
-                const response = await fetch(`${API_BASE}/settings`);
-                if (!response.ok) throw new Error('Failed to load settings');
-                state.settings = await response.json();
-
-                elements.senderName.value = state.settings.name || '';
-                elements.senderEmail.value = state.settings.email || '';
-                elements.senderTitle.value = state.settings.title || '';
-                elements.senderDept.value = state.settings.department || '';
-                elements.senderOrg.value = state.settings.organization || '';
-            } catch (error) {
-                console.error('Error loading settings:', error);
-            }
-        }
-
-        async function saveSettings(e) {
-            e.preventDefault();
-
-            const settings = {
-                name: elements.senderName.value.trim(),
-                email: elements.senderEmail.value.trim(),
-                title: elements.senderTitle.value.trim(),
-                department: elements.senderDept.value.trim(),
-                organization: elements.senderOrg.value.trim()
-            };
-
-            try {
-                const response = await fetch(`${API_BASE}/settings`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(settings)
-                });
-
-                if (!response.ok) throw new Error('Failed to save settings');
-                alert('設定已儲存');
-            } catch (error) {
-                console.error('Error saving settings:', error);
-                alert('儲存失敗');
-            }
-        }
-
-        // ==================== Event Listeners ====================
-        function setupEventListeners() {
-            // Camera and Upload
-            elements.captureBtn.addEventListener('click', capturePhoto);
-            elements.uploadBtn.addEventListener('click', () => fileInput.click());
-            fileInput.addEventListener('change', (e) => {
-                const file = e.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = (event) => {
-                        state.uploadedFileData = file;
-                        state.uploadedFile = file.name;
-                        showThumbnail(event.target.result);
-                    };
-                    reader.readAsDataURL(file);
-                }
-            });
-            elements.retakeBtn.addEventListener('click', hideThumbnail);
-            elements.nextStep1Btn.addEventListener('click', () => goToStep(2));
-
-            // Crop editor buttons
-            elements.cropAutoDetectBtn.addEventListener('click', async () => {
-                elements.cropHint.textContent = '正在重新偵測...';
-                try {
-                    const res = await fetch(`${API_BASE}/scan/detect`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' }
-                    });
-                    const r = await res.json();
-                    if (r.detected && r.corners) {
-                        state.cropCorners = r.corners;
-                        state.cropImageWidth = r.image_width;
-                        state.cropImageHeight = r.image_height;
-                        elements.cropHint.textContent = '✅ 已偵測到文件邊界';
-                    } else {
-                        elements.cropHint.textContent = 'ℹ️ 未偵測到邊界，請手動調整角點';
-                    }
-                    drawCropCanvas();
-                } catch (err) {
-                    elements.cropHint.textContent = '偵測失敗';
-                }
-            });
-
-            elements.cropResetBtn.addEventListener('click', () => {
-                setDefaultCorners();
-                elements.cropHint.textContent = '已重設為預設範圍';
-                drawCropCanvas();
-            });
-
-            elements.cropApplyBtn.addEventListener('click', () => applyCropAndProcess());
-
-            elements.cropEditAgainBtn.addEventListener('click', () => showCropEditor());
-
-            // Rotation buttons
-            elements.rotateCCWBtn.addEventListener('click', () => rotateImage(-90));
-            elements.rotateCWBtn.addEventListener('click', () => rotateImage(90));
-
-            // Multi-page buttons
-            elements.addPageBtn.addEventListener('click', addCurrentPage);
-            elements.addMorePageBtn.addEventListener('click', startNewPageScan);
-
-            // Scan panel: filter buttons
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.addEventListener('click', () => {
-                    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-                    btn.classList.add('active');
-                    switchFilter(btn.dataset.filter);
-                });
-            });
-
-            // Scan panel: next button — if multipage, auto-add current page first
-            elements.scanNextBtn.addEventListener('click', async () => {
-                // 如果尚未加入任何頁面，自動將目前圖片作為單頁
-                // 如果已在多頁模式但目前頁面未加入，提示加入
-                if (state.multiPageMode && state.scanProcessedUrl) {
-                    const addCurrent = confirm('是否將目前掃描結果加入為新頁面？\n\n點「確定」加入，點「取消」跳過');
-                    if (addCurrent) {
-                        await addCurrentPage();
-                    }
-                }
-                goToStep(2);
-            });
-
-            // Contacts
-            elements.addContactBtn.addEventListener('click', () => {
-                elements.addContactForm.style.display = 'block';
-                elements.contactName.focus();
-            });
-            elements.cancelContactBtn.addEventListener('click', () => {
-                elements.addContactForm.style.display = 'none';
-            });
-            elements.saveContactBtn.addEventListener('click', addNewContact);
-
-            // Step 2 → Step 3: 選好收件人後 → AI 分析（圖片已在掃描階段上傳+處理）
-            document.getElementById('nextToAnalyzeBtn').addEventListener('click', async () => {
-                if (!state.selectedContact) {
-                    alert('請先選擇一位收件人');
-                    return;
-                }
-                goToStep(3);
-                try {
-                    // 圖片已在 Step 1 掃描階段上傳到伺服器
-                    // 如果沒有經過掃描面板（理論上不應發生），補上傳
-                    if (!state.imageUploaded) {
-                        await uploadDocument();
-                    }
-                    // 觸發 AI 分析
-                    await analyzeDocument();
-                } catch (error) {
-                    console.error('Analyze error:', error);
-                    elements.loadingState.style.display = 'none';
-                    alert('處理失敗：' + (error.message || '請重試'));
-                    goToStep(2);
-                }
-            });
-
-            // Preview
-            elements.editBtn.addEventListener('click', enableEditing);
-            elements.cancelBtn.addEventListener('click', () => goToStep(2));
-            elements.sendBtn.addEventListener('click', sendEmail);
-
-            // Results
-            elements.restartBtn.addEventListener('click', async () => {
-                state.uploadedFile = null;
-                state.uploadedFileData = null;
-                state.imageUploaded = false;
-                state.scanProcessedUrl = null;
-                state.selectedContact = null;
-                state.analyzeResult = null;
-                state.pages = [];
-                state.multiPageMode = false;
-                // 清除伺服器端的頁面
-                try { await fetch(`${API_BASE}/pages/clear`, { method: 'POST' }); } catch(e) {}
-                hideThumbnail();
-                goToStep(1);
-            });
-            elements.retryBtn.addEventListener('click', () => goToStep(3));
-            elements.backBtn.addEventListener('click', () => goToStep(3));
-
-            // Side Panel
-            elements.hamburgerBtn.addEventListener('click', openPanel);
-            elements.panelCloseBtn.addEventListener('click', closePanel);
-            elements.overlay.addEventListener('click', closePanel);
-
-            elements.panelTabs.forEach(tab => {
-                tab.addEventListener('click', () => {
-                    const tabName = tab.dataset.tab;
-
-                    // Update active tab
-                    elements.panelTabs.forEach(t => t.classList.remove('active'));
-                    tab.classList.add('active');
-
-                    // Update active content
-                    elements.tabContents.forEach(content => {
-                        content.classList.remove('active');
-                    });
-                    document.querySelector(`.tab-content[data-content="${tabName}"]`)?.classList.add('active');
-
-                    // Load data
-                    if (tabName === 'history') loadHistory();
-                    if (tabName === 'settings') loadSettings();
-                });
-            });
-
-            elements.settingsForm.addEventListener('submit', saveSettings);
-        }
-
-        // ==================== Initialize ====================
-        function init() {
-            setupEventListeners();
-            loadContacts();
-            goToStep(1);
-        }
-
-        // Start app
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', init);
-        } else {
-            init();
-        }
-    </script>
+    <!-- Scripts (模組化) -->
+    <script src="/static/js/app.js"></script>
+    <script src="/static/js/scanmail.js"></script>
 </body>
 </html>
