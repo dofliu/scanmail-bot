@@ -505,6 +505,136 @@
             margin-bottom: 8px;
         }
 
+        /* 旋轉按鈕 */
+        .rotate-controls {
+            display: flex;
+            gap: 6px;
+            justify-content: center;
+            margin-top: 6px;
+        }
+
+        .rotate-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 6px 12px;
+            border: 1.5px solid var(--border-color);
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-secondary);
+            transition: var(--transition);
+        }
+
+        .rotate-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        /* 多頁掃描 */
+        .pages-strip {
+            margin-top: 16px;
+            padding: 12px;
+            background: var(--bg-light);
+            border-radius: 10px;
+            border: 1px solid var(--border-color);
+        }
+
+        .pages-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .pages-header h4 {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .pages-count {
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: white;
+            padding: 2px 10px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
+        }
+
+        .pages-list {
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            padding: 4px 0;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .page-thumb {
+            position: relative;
+            flex: 0 0 auto;
+            width: 72px;
+            cursor: grab;
+            user-select: none;
+        }
+
+        .page-thumb.dragging {
+            opacity: 0.4;
+        }
+
+        .page-thumb.drag-over {
+            transform: scale(1.05);
+        }
+
+        .page-thumb img {
+            width: 72px;
+            height: 96px;
+            object-fit: cover;
+            border-radius: 6px;
+            border: 2px solid var(--border-color);
+            background: white;
+        }
+
+        .page-thumb .page-number {
+            position: absolute;
+            bottom: 18px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.6);
+            color: white;
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+        }
+
+        .page-thumb .page-remove {
+            position: absolute;
+            top: -6px;
+            right: -6px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #d32f2f;
+            color: white;
+            border: none;
+            font-size: 12px;
+            line-height: 20px;
+            text-align: center;
+            cursor: pointer;
+            display: none;
+        }
+
+        .page-thumb:hover .page-remove {
+            display: block;
+        }
+
+        .pages-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
         /* Step 2: Contact Selection */
         .contacts-grid {
             display: grid;
@@ -1168,6 +1298,10 @@
                             <div class="crop-canvas-wrapper" id="cropCanvasWrapper">
                                 <canvas id="cropCanvas"></canvas>
                             </div>
+                            <div class="rotate-controls">
+                                <button class="rotate-btn" id="rotateCCWBtn">↺ 左轉 90°</button>
+                                <button class="rotate-btn" id="rotateCWBtn">↻ 右轉 90°</button>
+                            </div>
                             <div class="crop-controls">
                                 <button class="crop-btn" id="cropAutoDetectBtn">🔍 自動偵測</button>
                                 <button class="crop-btn" id="cropResetBtn">↩️ 重設</button>
@@ -1226,6 +1360,19 @@
                         <button class="crop-btn" id="cropEditAgainBtn" style="margin-bottom: 10px;">✏️ 重新調整裁切範圍</button>
                     </div>
 
+                    <!-- 多頁掃描面板 -->
+                    <div class="pages-strip" id="pagesStrip" style="display: none;">
+                        <div class="pages-header">
+                            <h4>📄 已掃描頁面</h4>
+                            <span class="pages-count" id="pagesCount">0 頁</span>
+                        </div>
+                        <div class="pages-list" id="pagesList"></div>
+                        <div class="pages-actions">
+                            <button class="crop-btn primary" id="addPageBtn">➕ 加入此頁</button>
+                            <button class="crop-btn" id="addMorePageBtn">📷 繼續掃描下一頁</button>
+                        </div>
+                    </div>
+
                     <!-- 處理狀態 -->
                     <div class="scan-status" id="scanStatus" style="display: none;">
                         <div class="loading-spinner small"></div>
@@ -1238,7 +1385,7 @@
                     </div>
 
                     <button class="btn btn-primary" id="scanNextBtn" style="width: 100%; margin-top: 12px;">
-                        確認掃描結果，下一步 →
+                        確認掃描結果，選擇收件人 →
                     </button>
                 </div>
             </section>
@@ -1494,7 +1641,10 @@
             cropImageWidth: 0,       // 原圖寬度
             cropImageHeight: 0,      // 原圖高度
             cropDragging: -1,        // 正在拖曳的角點 index（-1=無）
-            cropOriginalDataUrl: null // 原圖 data URL（用於 canvas 繪製）
+            cropOriginalDataUrl: null, // 原圖 data URL（用於 canvas 繪製）
+            // 多頁掃描
+            pages: [],               // [{thumbnail: base64, index: number}, ...]
+            multiPageMode: false     // 是否已進入多頁模式
         };
 
         // ==================== DOM Elements ====================
@@ -1534,6 +1684,15 @@
             cropApplyBtn: document.getElementById('cropApplyBtn'),
             cropHint: document.getElementById('cropHint'),
             cropEditAgainBtn: document.getElementById('cropEditAgainBtn'),
+            // Rotation
+            rotateCCWBtn: document.getElementById('rotateCCWBtn'),
+            rotateCWBtn: document.getElementById('rotateCWBtn'),
+            // Multi-page
+            pagesStrip: document.getElementById('pagesStrip'),
+            pagesCount: document.getElementById('pagesCount'),
+            pagesList: document.getElementById('pagesList'),
+            addPageBtn: document.getElementById('addPageBtn'),
+            addMorePageBtn: document.getElementById('addMorePageBtn'),
             // Step 2
             addContactBtn: document.getElementById('addContactBtn'),
             addContactForm: document.getElementById('addContactForm'),
@@ -2009,6 +2168,13 @@
                 elements.scanStatus.style.display = 'none';
                 elements.cropApplyBtn.disabled = false;
 
+                // 顯示多頁面板（含「加入此頁」按鈕）
+                elements.pagesStrip.style.display = 'block';
+                // 如果已有頁面，載入顯示
+                if (state.multiPageMode) {
+                    await loadPages();
+                }
+
             } catch (error) {
                 console.error('Crop process error:', error);
                 elements.scanStatusText.textContent = '裁切處理失敗';
@@ -2069,6 +2235,215 @@
                     elements.scanStatus.style.display = 'none';
                 }, 2000);
             }
+        }
+
+        // ==================== 圖片旋轉 ====================
+
+        async function rotateImage(angle) {
+            elements.scanStatus.style.display = 'flex';
+            elements.scanStatusText.textContent = `正在旋轉 ${angle > 0 ? '右' : '左'}轉 ${Math.abs(angle)}°...`;
+
+            try {
+                const response = await fetch(`${API_BASE}/scan/rotate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ angle })
+                });
+
+                if (!response.ok) throw new Error('旋轉失敗');
+                const result = await response.json();
+
+                if (result.success) {
+                    // 更新 crop canvas 的原圖
+                    const newDataUrl = 'data:image/jpeg;base64,' + result.image_base64;
+                    state.cropOriginalDataUrl = newDataUrl;
+                    state.cropImageWidth = result.image_width;
+                    state.cropImageHeight = result.image_height;
+                    state.cropCorners = null;
+                    state.cropDragging = -1;
+
+                    // 重新載入 canvas 圖片
+                    _cropImage = new Image();
+                    _cropImage.onload = () => {
+                        setDefaultCorners();
+                        drawCropCanvas();
+                        elements.cropHint.textContent = '已旋轉，請重新調整裁切範圍或自動偵測';
+                    };
+                    _cropImage.src = newDataUrl;
+
+                    // 同時更新縮圖
+                    elements.thumbnailImage.src = newDataUrl;
+                }
+
+                elements.scanStatus.style.display = 'none';
+            } catch (error) {
+                console.error('Rotate error:', error);
+                elements.scanStatusText.textContent = '旋轉失敗';
+                setTimeout(() => elements.scanStatus.style.display = 'none', 2000);
+            }
+        }
+
+        // ==================== 多頁掃描 ====================
+
+        function renderPagesStrip() {
+            if (state.pages.length === 0) {
+                elements.pagesStrip.style.display = 'none';
+                return;
+            }
+
+            elements.pagesStrip.style.display = 'block';
+            elements.pagesCount.textContent = `${state.pages.length} 頁`;
+
+            elements.pagesList.innerHTML = state.pages.map((page, i) => `
+                <div class="page-thumb" draggable="true" data-page-index="${i}">
+                    <img src="data:image/jpeg;base64,${page.thumbnail}" alt="第 ${i + 1} 頁">
+                    <span class="page-number">${i + 1}</span>
+                    <button class="page-remove" data-remove-index="${i}">&times;</button>
+                </div>
+            `).join('');
+
+            // 刪除按鈕事件
+            elements.pagesList.querySelectorAll('.page-remove').forEach(btn => {
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    const idx = parseInt(btn.dataset.removeIndex);
+                    await removePage(idx);
+                });
+            });
+
+            // 拖曳排序事件
+            setupPageDragAndDrop();
+        }
+
+        function setupPageDragAndDrop() {
+            const thumbs = elements.pagesList.querySelectorAll('.page-thumb');
+            let dragIdx = -1;
+
+            thumbs.forEach(thumb => {
+                thumb.addEventListener('dragstart', (e) => {
+                    dragIdx = parseInt(thumb.dataset.pageIndex);
+                    thumb.classList.add('dragging');
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+
+                thumb.addEventListener('dragend', () => {
+                    thumb.classList.remove('dragging');
+                    thumbs.forEach(t => t.classList.remove('drag-over'));
+                });
+
+                thumb.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    thumb.classList.add('drag-over');
+                });
+
+                thumb.addEventListener('dragleave', () => {
+                    thumb.classList.remove('drag-over');
+                });
+
+                thumb.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    thumb.classList.remove('drag-over');
+                    const dropIdx = parseInt(thumb.dataset.pageIndex);
+                    if (dragIdx >= 0 && dragIdx !== dropIdx) {
+                        await reorderPages(dragIdx, dropIdx);
+                    }
+                });
+            });
+        }
+
+        async function addCurrentPage() {
+            elements.scanStatus.style.display = 'flex';
+            elements.scanStatusText.textContent = '正在加入頁面...';
+
+            try {
+                const response = await fetch(`${API_BASE}/pages/add`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!response.ok) throw new Error('加入頁面失敗');
+                const result = await response.json();
+
+                if (result.success) {
+                    // 重新載入頁面列表
+                    await loadPages();
+                    state.multiPageMode = true;
+                    elements.scanStatus.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Add page error:', error);
+                elements.scanStatusText.textContent = '加入頁面失敗';
+                setTimeout(() => elements.scanStatus.style.display = 'none', 2000);
+            }
+        }
+
+        async function loadPages() {
+            try {
+                const response = await fetch(`${API_BASE}/pages`);
+                if (!response.ok) throw new Error('載入頁面失敗');
+                const result = await response.json();
+
+                state.pages = result.pages || [];
+                renderPagesStrip();
+            } catch (error) {
+                console.error('Load pages error:', error);
+            }
+        }
+
+        async function removePage(index) {
+            try {
+                const response = await fetch(`${API_BASE}/pages/${index}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('刪除頁面失敗');
+                await loadPages();
+            } catch (error) {
+                console.error('Remove page error:', error);
+            }
+        }
+
+        async function reorderPages(fromIdx, toIdx) {
+            // 建立新順序
+            const order = state.pages.map((_, i) => i);
+            const [moved] = order.splice(fromIdx, 1);
+            order.splice(toIdx, 0, moved);
+
+            try {
+                const response = await fetch(`${API_BASE}/pages/reorder`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ order })
+                });
+                if (!response.ok) throw new Error('排序失敗');
+                await loadPages();
+            } catch (error) {
+                console.error('Reorder error:', error);
+            }
+        }
+
+        function startNewPageScan() {
+            // 重設 Step 1 狀態，準備掃描下一頁
+            state.uploadedFile = null;
+            state.uploadedFileData = null;
+            state.imageUploaded = false;
+            state.scanProcessedUrl = null;
+            state.cropCorners = null;
+            state.cropDragging = -1;
+            state.cropOriginalDataUrl = null;
+            _cropImage = null;
+
+            // 重設 UI
+            elements.thumbnailPreview.style.display = 'none';
+            elements.cameraContainer.style.display = 'block';
+            elements.retakeContainer.style.display = 'none';
+            elements.captureBtn.style.display = 'flex';
+            elements.uploadBtn.style.display = 'flex';
+            elements.nextStep1Btn.style.display = 'none';
+            elements.scanPanel.style.display = 'none';
+
+            // 重新啟動相機
+            initCamera();
         }
 
         // ==================== Step Navigation ====================
@@ -2497,6 +2872,14 @@
 
             elements.cropEditAgainBtn.addEventListener('click', () => showCropEditor());
 
+            // Rotation buttons
+            elements.rotateCCWBtn.addEventListener('click', () => rotateImage(-90));
+            elements.rotateCWBtn.addEventListener('click', () => rotateImage(90));
+
+            // Multi-page buttons
+            elements.addPageBtn.addEventListener('click', addCurrentPage);
+            elements.addMorePageBtn.addEventListener('click', startNewPageScan);
+
             // Scan panel: filter buttons
             document.querySelectorAll('.filter-btn').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -2506,8 +2889,18 @@
                 });
             });
 
-            // Scan panel: next button
-            elements.scanNextBtn.addEventListener('click', () => goToStep(2));
+            // Scan panel: next button — if multipage, auto-add current page first
+            elements.scanNextBtn.addEventListener('click', async () => {
+                // 如果尚未加入任何頁面，自動將目前圖片作為單頁
+                // 如果已在多頁模式但目前頁面未加入，提示加入
+                if (state.multiPageMode && state.scanProcessedUrl) {
+                    const addCurrent = confirm('是否將目前掃描結果加入為新頁面？\n\n點「確定」加入，點「取消」跳過');
+                    if (addCurrent) {
+                        await addCurrentPage();
+                    }
+                }
+                goToStep(2);
+            });
 
             // Contacts
             elements.addContactBtn.addEventListener('click', () => {
@@ -2548,13 +2941,17 @@
             elements.sendBtn.addEventListener('click', sendEmail);
 
             // Results
-            elements.restartBtn.addEventListener('click', () => {
+            elements.restartBtn.addEventListener('click', async () => {
                 state.uploadedFile = null;
                 state.uploadedFileData = null;
                 state.imageUploaded = false;
                 state.scanProcessedUrl = null;
                 state.selectedContact = null;
                 state.analyzeResult = null;
+                state.pages = [];
+                state.multiPageMode = false;
+                // 清除伺服器端的頁面
+                try { await fetch(`${API_BASE}/pages/clear`, { method: 'POST' }); } catch(e) {}
                 hideThumbnail();
                 goToStep(1);
             });

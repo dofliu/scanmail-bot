@@ -57,26 +57,43 @@ def optimize_image(image_data: bytes, max_dimension: int = 2480,
 
 def image_to_pdf(image_data: bytes) -> bytes:
     """將圖片轉為 A4 PDF"""
-    img = Image.open(io.BytesIO(image_data))
+    return images_to_pdf([image_data])
 
-    # 自動旋轉
-    img = ImageOps.exif_transpose(img)
 
-    # 轉 RGB
-    if img.mode in ("RGBA", "P"):
-        img = img.convert("RGB")
+def images_to_pdf(images: list[bytes]) -> bytes:
+    """將多張圖片轉為多頁 A4 PDF
 
-    # A4 適配
-    img.thumbnail((A4_WIDTH_PX, A4_HEIGHT_PX), Image.LANCZOS)
+    Args:
+        images: 圖片 bytes 列表，每張一頁
 
-    # 輸出 JPEG
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=85, optimize=True)
-    buf.seek(0)
+    Returns:
+        PDF bytes
+    """
+    if not images:
+        raise ValueError("至少需要一張圖片")
 
-    # 轉 PDF
-    pdf_bytes = img2pdf.convert(buf.getvalue())
-    logger.info("圖片轉 PDF 完成: %d bytes", len(pdf_bytes))
+    jpeg_pages = []
+    for i, image_data in enumerate(images):
+        img = Image.open(io.BytesIO(image_data))
+
+        # 自動旋轉
+        img = ImageOps.exif_transpose(img)
+
+        # 轉 RGB
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        # A4 適配
+        img.thumbnail((A4_WIDTH_PX, A4_HEIGHT_PX), Image.LANCZOS)
+
+        # 輸出 JPEG
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=85, optimize=True)
+        jpeg_pages.append(buf.getvalue())
+
+    # 轉 PDF（img2pdf 原生支援多頁）
+    pdf_bytes = img2pdf.convert(jpeg_pages)
+    logger.info("圖片轉 PDF 完成: %d 頁, %d bytes", len(jpeg_pages), len(pdf_bytes))
     return pdf_bytes
 
 
