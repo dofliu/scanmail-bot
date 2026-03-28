@@ -507,18 +507,22 @@ async function applyCropAndProcess() {
         const activeFilter = document.querySelector('.filter-btn.active');
         const filterName = activeFilter ? activeFilter.dataset.filter : 'auto';
 
-        // 呼叫 process API，帶入手動角點
+        // 呼叫 process API，帶入手動角點（確保為整數）
+        const intCorners = state.cropCorners.map(c => [Math.round(c[0]), Math.round(c[1])]);
         const response = await fetch(`${API_BASE}/scan/process`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                corners: state.cropCorners,
+                corners: intCorners,
                 filter_name: filterName,
                 auto_detect: false
             })
         });
 
-        if (!response.ok) throw new Error('裁切處理失敗');
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.detail || '裁切處理失敗');
+        }
         const result = await response.json();
 
         if (result.success && result.image_base64) {
