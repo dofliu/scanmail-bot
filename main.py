@@ -54,19 +54,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── 路由掛載 ──
-app.include_router(scanmail.router, prefix="/api", tags=["scanmail"])
-app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"])
-app.include_router(pdf_tools.router, prefix="/api/tools/pdf", tags=["pdf-tools"])
-app.include_router(doc_convert.router, prefix="/api/tools/convert", tags=["doc-convert"])
-app.include_router(gif_tools.router, prefix="/api/tools/gif", tags=["gif-tools"])
-app.include_router(video_tools.router, prefix="/api/tools/video", tags=["video-tools"])
-app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch-rename"])
 
-# ── 靜態檔案 ──
-if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
+# ── 頁面路由（必須在 mount 之前）──
 
 @app.get("/")
 async def serve_frontend():
@@ -79,3 +68,20 @@ async def serve_frontend():
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "service": "ScanMail+", "version": "3.0.0"}
+
+
+# ── API 路由掛載 ──
+
+app.include_router(scanmail.router, prefix="/api", tags=["scanmail"])
+app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"])
+app.include_router(pdf_tools.router, prefix="/api/tools/pdf", tags=["pdf-tools"])
+app.include_router(doc_convert.router, prefix="/api/tools/convert", tags=["doc-convert"])
+app.include_router(gif_tools.router, prefix="/api/tools/gif", tags=["gif-tools"])
+app.include_router(video_tools.router, prefix="/api/tools/video", tags=["video-tools"])
+app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch-rename"])
+
+
+# ── 靜態檔案（必須放最後，否則會攔截其他路由）──
+
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
