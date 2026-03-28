@@ -363,15 +363,16 @@
 
         .filter-options {
             display: flex;
-            gap: 8px;
+            gap: 6px;
             overflow-x: auto;
             padding: 4px 0;
             margin-bottom: 12px;
+            -webkit-overflow-scrolling: touch;
         }
 
         .filter-btn {
-            flex: 1;
-            min-width: 60px;
+            flex: 0 0 auto;
+            min-width: 56px;
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -1111,6 +1112,14 @@
                             <span class="filter-icon">🪄</span>
                             <span>自動</span>
                         </button>
+                        <button class="filter-btn" data-filter="scan">
+                            <span class="filter-icon">🖨️</span>
+                            <span>專業掃描</span>
+                        </button>
+                        <button class="filter-btn" data-filter="color_doc">
+                            <span class="filter-icon">🔴</span>
+                            <span>彩色公文</span>
+                        </button>
                         <button class="filter-btn" data-filter="document">
                             <span class="filter-icon">📄</span>
                             <span>文件</span>
@@ -1615,6 +1624,8 @@
         function getFilterLabel(filterName) {
             const labels = {
                 'auto': '🪄 自動',
+                'scan': '🖨️ 專業掃描',
+                'color_doc': '🔴 彩色公文',
                 'document': '📄 文件',
                 'enhance': '🔆 增強',
                 'bw': '◼️ 黑白',
