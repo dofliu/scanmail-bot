@@ -464,19 +464,134 @@
             </div>
 
             <div class="tool-page" data-tool="gif-tools">
-                <div class="card"><div class="tool-placeholder">
-                    <div class="placeholder-icon">🎞️</div>
-                    <h3>GIF 製作</h3>
-                    <p>圖片序列轉 GIF、影片轉 GIF — 即將推出</p>
-                </div></div>
+                <h2 class="step-title">🎞️ GIF 製作</h2>
+                <div class="card">
+                    <div id="gifDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
+                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">🎞️</div>
+                        <div style="font-size:14px; color:var(--text-secondary);">拖放多張圖片到此處（依順序產生動畫）</div>
+                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">支援 JPG, PNG, WebP, GIF</div>
+                    </div>
+                    <input type="file" id="gifFileInput" multiple accept="image/*" style="display:none;">
+                    <div id="gifFileList" style="display:none; margin-top:12px;"></div>
+
+                    <div style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">GIF 選項</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">每幀時間 (ms)</label>
+                                <input type="number" class="form-input" id="gifDuration" value="500" min="50" max="5000">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">縮放模式</label>
+                                <select class="form-input" id="gifResizeMode">
+                                    <option value="fit">等比縮放</option>
+                                    <option value="cover">裁切填滿</option>
+                                    <option value="stretch">拉伸</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">輸出寬度 (0=自動)</label>
+                                <input type="number" class="form-input" id="gifWidth" value="0" min="0" max="2000">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">輸出高度 (0=自動)</label>
+                                <input type="number" class="form-input" id="gifHeight" value="0" min="0" max="2000">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="gifProgress" style="display:none; margin-top:12px;"></div>
+                    <div id="gifResult" style="display:none; margin-top:12px;"></div>
+                    <div style="display:flex; gap:8px; margin-top:16px;">
+                        <button class="crop-btn" id="gifClearBtn" style="display:none;">🗑️ 清除</button>
+                        <button class="btn btn-primary" id="gifProcessBtn" style="display:none; flex:1;">⚡ 產生 GIF</button>
+                    </div>
+                </div>
             </div>
 
             <div class="tool-page" data-tool="video-tools">
-                <div class="card"><div class="tool-placeholder">
-                    <div class="placeholder-icon">🎬</div>
-                    <h3>影片工具</h3>
-                    <p>影片合併、壓縮、轉 GIF — 即將推出</p>
-                </div></div>
+                <h2 class="step-title">🎬 影片工具</h2>
+                <div class="card" style="padding:12px;">
+                    <div style="display:flex; gap:6px; overflow-x:auto;">
+                        <button class="filter-btn active vid-action-tab" data-action="merge">
+                            <span class="filter-icon">📎</span><span>合併</span>
+                        </button>
+                        <button class="filter-btn vid-action-tab" data-action="to-gif">
+                            <span class="filter-icon">🎞️</span><span>轉GIF</span>
+                        </button>
+                        <button class="filter-btn vid-action-tab" data-action="compress">
+                            <span class="filter-icon">📦</span><span>壓縮</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="card">
+                    <div id="vidDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
+                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">🎬</div>
+                        <div id="vidDropHint" style="font-size:14px; color:var(--text-secondary);">拖放多個影片檔案</div>
+                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">支援 MP4, AVI, MOV, MKV, WebM（單檔 200MB）</div>
+                    </div>
+                    <input type="file" id="vidFileInput" multiple accept="video/*" style="display:none;">
+                    <div id="vidFileList" style="display:none; margin-top:12px;"></div>
+
+                    <!-- 合併選項（預設顯示） -->
+                    <div id="vidOpts_merge" class="vid-options-panel" style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-size:13px; color:var(--text-secondary);">影片將按列表順序依次合併為一個 MP4 檔案</div>
+                    </div>
+
+                    <!-- 轉GIF選項 -->
+                    <div id="vidOpts_to-gif" class="vid-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">影片轉 GIF</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">幀率 (FPS)</label>
+                                <input type="number" class="form-input" id="vidGifFps" value="10" min="1" max="30">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">輸出寬度 (0=自動)</label>
+                                <input type="number" class="form-input" id="vidGifWidth" value="0" min="0">
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">起始秒數</label>
+                                <input type="number" class="form-input" id="vidGifStart" value="0" min="0" step="0.5">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">結束秒數 (0=全部)</label>
+                                <input type="number" class="form-input" id="vidGifEnd" value="0" min="0" step="0.5">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 壓縮選項 -->
+                    <div id="vidOpts_compress" class="vid-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">影片壓縮</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">解析度</label>
+                                <select class="form-input" id="vidCompressRes">
+                                    <option value="">維持原始</option>
+                                    <option value="720p">720p</option>
+                                    <option value="480p">480p</option>
+                                    <option value="360p">360p</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">品質 (CRF, 越高越小)</label>
+                                <input type="range" id="vidCompressCrf" min="18" max="40" value="28" style="width:100%;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="vidProgress" style="display:none; margin-top:12px;"></div>
+                    <div id="vidResult" style="display:none; margin-top:12px;"></div>
+                    <div style="display:flex; gap:8px; margin-top:16px;">
+                        <button class="crop-btn" id="vidClearBtn" style="display:none;">🗑️ 清除</button>
+                        <button class="btn btn-primary" id="vidProcessBtn" style="display:none; flex:1;">⚡ 開始處理</button>
+                    </div>
+                </div>
             </div>
 
             <div class="tool-page" data-tool="pdf-tools">
@@ -659,5 +774,7 @@
     <script src="/static/js/image-tools.js"></script>
     <script src="/static/js/pdf-tools.js"></script>
     <script src="/static/js/doc-convert.js"></script>
+    <script src="/static/js/gif-tools.js"></script>
+    <script src="/static/js/video-tools.js"></script>
 </body>
 </html>
