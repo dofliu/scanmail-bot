@@ -1,148 +1,250 @@
-# ScanMail — 智慧掃描郵寄系統
+# ScanMail+ — 智慧文件處理平台
 
-**拍照 → AI辨識 → 自動寄信**，專為大學教職員設計的文件掃描郵寄工具。
-
-用手機或電腦的攝影機拍攝文件（公文、考卷、收據等），AI 自動辨識文件類型、產生專業郵件標題與內容，一鍵附檔寄出。
+**掃描郵寄 + 多媒體工具箱**，將 ScanMail Bot 與 MediaToolkit (myPicasa) 整合為統一的 Web 平台。
 
 ---
 
-## 功能特色
+## 功能總覽
 
-- **📷 拍照/上傳** — 支援手機相機、桌機 Webcam、或直接上傳圖檔
-- **✨ 智慧掃描** — 自動偵測文件邊界、透視校正、去除陰影，產生清晰的掃描效果
-- **🤖 AI 文件辨識** — 使用 Google Gemini Vision API 辨識 8 種文件類型（公文/考卷/收據/合約/報告/信函/表單/其他）
-- **✉️ 自動郵件產生** — AI 根據文件內容自動產生專業的郵件標題、正文、附件檔名
-- **📤 一鍵寄出** — SMTP 直接寄出，附件自動轉為 PDF 格式
-- **👥 聯絡人管理** — 常用收件人快速選取
-- **📊 歷史紀錄** — 查看過去的寄送記錄與統計
+| 工具 | 說明 |
+|------|------|
+| 📨 **掃描郵寄** | 拍照 → AI 辨識 → 自動產生郵件 → 一鍵寄出 PDF |
+| 🖼️ **圖片工具** | 批次縮放、格式轉換、壓縮、文字/圖片浮水印 |
+| 📕 **PDF 工具** | PDF 合併（含書籤目錄）、浮水印、密碼保護 |
+| 🔄 **文件轉檔** | Word⟷PDF、Markdown⟷PDF/Word 雙向轉換 |
+| 🎞️ **GIF 製作** | 圖片序列 → 動畫 GIF（自訂幀率/尺寸） |
+| 🎬 **影片工具** | 影片合併、影片轉 GIF、影片壓縮 |
+| ✏️ **批次改名** | 前綴/後綴/搜尋取代/流水編號，即時預覽 |
 
-## 技術架構
+---
 
-```
-┌──────────────────────────────────────────────────┐
-│                  前端 (SPA)                        │
-│   HTML/CSS/JS · getUserMedia · Responsive UI      │
-├──────────────────────────────────────────────────┤
-│                FastAPI 後端                        │
-│   REST API · Session 管理 · 靜態檔案伺服          │
-├──────────────┬───────────┬───────────────────────┤
-│  Gemini      │  OpenCV   │     aiosmtplib        │
-│  Vision API  │  掃描處理  │     SMTP 寄送          │
-├──────────────┴───────────┴───────────────────────┤
-│              SQLite 資料庫                         │
-│   contacts · send_history · sender_profiles       │
-└──────────────────────────────────────────────────┘
-```
+## 快速啟動
 
-## 快速開始
+### 前置需求
 
-### 1. 安裝相依套件
+- **Python 3.10+**
+- **ffmpeg**（影片工具需要，圖片/PDF/文件轉檔不需要）
+
+### 1. 安裝
 
 ```bash
-cd scanmail_bot
+# 進入專案目錄
+cd scanmail-bot
+
+# 建立虛擬環境（建議）
+python -m venv venv
+source venv/bin/activate        # macOS / Linux
+# venv\Scripts\activate         # Windows
+
+# 安裝所有依賴
 pip install -r requirements.txt
 ```
 
 ### 2. 設定環境變數
 
-複製 `.env.template` 為 `.env`，填入必要設定：
-
 ```bash
+# 複製範本
 cp .env.template .env
 ```
 
-必須設定的項目：
-- `GEMINI_API_KEY` — Google Gemini API 金鑰（[取得金鑰](https://aistudio.google.com/app/apikey)）
-- `SMTP_HOST` / `SMTP_PORT` — 郵件伺服器設定
-- `SMTP_USER` / `SMTP_PASSWORD` — SMTP 認證資訊
+用文字編輯器打開 `.env`，填入以下設定：
 
-### 3. 啟動服務
+```env
+# ── 必填：AI 辨識（掃描郵寄功能需要）──
+GEMINI_API_KEY=your-gemini-api-key-here
 
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8001 --reload
+# ── 必填：郵件寄送（掃描郵寄功能需要）──
+SMTP_HOST=smtp.gmail.com        # 或您的 SMTP 伺服器
+SMTP_PORT=587
+SMTP_USER=your-email@gmail.com
+SMTP_PASSWORD=your-app-password
+
+# ── 選填：寄件人資料 ──
+SENDER_NAME=您的姓名
+SENDER_TITLE=職稱
+SENDER_DEPT=部門
+SENDER_ORG=組織名稱
 ```
 
-開啟瀏覽器前往 `http://localhost:8001`
+> **注意**：如果您只使用圖片工具、PDF 工具、文件轉檔等功能，**不需要**設定 Gemini API Key 和 SMTP。這些設定只有掃描郵寄功能才需要。
 
-## 使用流程
+### 3. 啟動伺服器
 
-1. **拍照/上傳** — 用攝影機拍攝文件，或上傳現有圖片
-2. **掃描處理** — 系統自動偵測文件邊界、校正透視、套用增強濾鏡（可切換 5 種濾鏡）
-3. **選擇收件人** — 從聯絡人清單中選取，或新增收件人
-4. **AI 辨識** — AI 自動辨識文件類型、產生郵件主旨/正文/檔名
-5. **預覽確認** — 確認或編輯 AI 產生的內容
-6. **寄出** — 一鍵寄出含 PDF 附件的郵件
+```bash
+# 開發模式（自動重新載入）
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# 或使用 Python 直接執行
+python -m uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 4. 開啟瀏覽器
+
+```
+http://localhost:8000
+```
+
+手機使用：確保手機與電腦在同一個 Wi-Fi 網路，在手機瀏覽器輸入電腦的 IP：
+
+```
+http://192.168.x.x:8000
+```
+
+---
+
+## Docker 啟動
+
+```bash
+# 建置映像檔
+docker build -f deploy/Dockerfile -t scanmail-plus .
+
+# 執行（掛載 .env 和資料庫）
+docker run -d \
+  --name scanmail-plus \
+  -p 8000:8000 \
+  -v $(pwd)/.env:/app/.env \
+  -v $(pwd)/scanmail.db:/app/scanmail.db \
+  scanmail-plus
+```
+
+或使用 Docker Compose：
+
+```bash
+cd deploy
+docker-compose up -d
+```
+
+> **影片工具注意**：Docker 映像檔需要 ffmpeg。如果使用預設的 `python:3.11-slim`，moviepy 會自動下載 ffmpeg binary。若需要手動安裝，在 Dockerfile 加入：
+> ```dockerfile
+> RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+> ```
+
+---
+
+## ffmpeg 安裝（影片工具）
+
+影片工具（合併、轉 GIF、壓縮）需要 ffmpeg。**其他工具不需要**。
+
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu / Debian
+sudo apt-get install ffmpeg
+
+# Windows (使用 chocolatey)
+choco install ffmpeg
+
+# 或手動下載：https://ffmpeg.org/download.html
+```
+
+驗證安裝：
+```bash
+ffmpeg -version
+```
+
+---
 
 ## 專案結構
 
 ```
-scanmail_bot/
-├── main.py                      # FastAPI 主程式（API endpoints）
-├── static/
-│   └── index.html               # 前端 SPA（單頁應用）
+scanmail-bot/
+├── main.py                         # App Factory（~80行）
+├── requirements.txt                # Python 依賴
+├── .env.template                   # 環境變數範本
+│
 ├── app/
-│   ├── config.py                # 環境變數與設定管理
-│   ├── database.py              # SQLite 資料庫初始化
-│   ├── models/
-│   │   ├── contact.py           # 聯絡人 CRUD
-│   │   ├── history.py           # 寄送歷史記錄
-│   │   ├── sender.py            # 寄件人設定檔
-│   │   └── session.py           # Session 狀態機
-│   ├── services/
-│   │   ├── ai_analyzer.py       # Gemini Vision AI 文件辨識
-│   │   ├── doc_scanner.py       # OpenCV 文件掃描後處理
-│   │   ├── email_sender.py      # SMTP 郵件寄送（多策略）
-│   │   └── image_processor.py   # 圖片處理與 PDF 轉換
-│   └── utils/
-│       ├── crypto.py            # 加密工具
-│       └── validators.py        # 輸入驗證
-├── deploy/                      # 部署設定（Docker/Render/Railway）
-├── scripts/                     # 工具腳本
-├── tests/                       # 單元測試
-├── .env.template                # 環境變數範本
-└── requirements.txt             # Python 相依套件
+│   ├── core/                       # 共用基礎設施
+│   │   ├── sessions.py             #   工作階段管理
+│   │   ├── tasks.py                #   背景任務 + SSE 進度
+│   │   └── file_manager.py         #   暫存檔管理 + 清理
+│   │
+│   ├── routers/                    # API 路由（7 個模組）
+│   │   ├── scanmail.py             #   /api/* — 掃描郵寄
+│   │   ├── image_tools.py          #   /api/tools/image/*
+│   │   ├── pdf_tools.py            #   /api/tools/pdf/*
+│   │   ├── doc_convert.py          #   /api/tools/convert/*
+│   │   ├── gif_tools.py            #   /api/tools/gif/*
+│   │   ├── video_tools.py          #   /api/tools/video/*
+│   │   └── batch_rename.py         #   /api/tools/rename/*
+│   │
+│   ├── services/                   # 業務邏輯（10 個模組）
+│   │   ├── doc_scanner.py          #   OpenCV 邊界偵測/透視校正
+│   │   ├── image_processor.py      #   圖片驗證/最佳化/PDF 轉換
+│   │   ├── ai_analyzer.py          #   Gemini AI 文件辨識
+│   │   ├── email_sender.py         #   SMTP 多策略寄送
+│   │   ├── image_batch.py          #   圖片批次處理
+│   │   ├── pdf_processor.py        #   PDF 合併/浮水印/加密
+│   │   ├── doc_converter.py        #   Word/PDF/Markdown 互轉
+│   │   ├── gif_creator.py          #   GIF 動畫製作
+│   │   ├── video_processor.py      #   影片合併/壓縮/轉GIF
+│   │   └── batch_renamer.py        #   批次改名邏輯
+│   │
+│   ├── models/                     # 資料庫模型
+│   └── config.py                   # 環境變數設定
+│
+├── static/
+│   ├── index.html                  # HTML Shell（導航 + 7 個工具頁面）
+│   ├── css/common.css              # 共用樣式
+│   └── js/                         # 8 個 JS 模組
+│       ├── app.js                  #   導航管理
+│       ├── scanmail.js             #   掃描郵寄
+│       ├── image-tools.js          #   圖片工具
+│       ├── pdf-tools.js            #   PDF 工具
+│       ├── doc-convert.js          #   文件轉檔
+│       ├── gif-tools.js            #   GIF 製作
+│       ├── video-tools.js          #   影片工具
+│       └── batch-rename.js         #   批次改名
+│
+├── deploy/                         # 部署設定
+│   ├── Dockerfile
+│   ├── docker-compose.yml
+│   └── render.yaml
+│
+├── tests/                          # 測試
+└── docs/                           # 文件
+    ├── TODO.md
+    └── ARCHITECTURE.md
 ```
 
-## API Endpoints
+---
 
-| Method | Path | 說明 |
-|--------|------|------|
-| POST | `/api/upload` | 上傳圖片 |
-| POST | `/api/scan/detect` | 偵測文件邊界 |
-| POST | `/api/scan/process` | 完整掃描處理（邊界校正+濾鏡） |
-| POST | `/api/scan/filter` | 切換濾鏡 |
-| POST | `/api/analyze` | AI 文件辨識 |
-| POST | `/api/send` | 寄送郵件 |
-| GET/POST | `/api/contacts` | 聯絡人管理 |
-| GET | `/api/history` | 寄送歷史 |
-| GET | `/api/stats` | 統計資料 |
-| GET/POST | `/api/settings` | 寄件人設定 |
+## API 文件
 
-## 環境需求
+啟動伺服器後，瀏覽自動產生的 API 文件：
 
-- Python 3.10+
-- 現代瀏覽器（支援 getUserMedia API）
-- Google Gemini API 金鑰
-- SMTP 郵件伺服器
+- **Swagger UI**: http://localhost:8000/docs
+- **ReDoc**: http://localhost:8000/redoc
 
-## 相依套件
+### API 端點摘要（62 個）
 
-| 套件 | 用途 |
-|------|------|
-| FastAPI | Web 框架 |
-| uvicorn | ASGI 伺服器 |
-| google-genai | Gemini Vision API |
-| opencv-python-headless | 文件掃描後處理（邊界偵測/透視校正） |
-| numpy | 影像處理運算 |
-| Pillow | 圖片處理 |
-| img2pdf | 圖片轉 PDF |
-| aiosmtplib | 非同步 SMTP 寄送 |
-| pydantic-settings | 環境變數管理 |
+| 群組 | 端點 | 數量 |
+|------|------|------|
+| 掃描郵寄 | `/api/upload`, `/api/scan/*`, `/api/pages/*`, `/api/analyze`, `/api/send`, `/api/contacts`, `/api/history`, `/api/stats`, `/api/settings` | 20 |
+| 圖片工具 | `/api/tools/image/resize`, `convert`, `compress`, `watermark`, `info`, `batch/*` | 11 |
+| PDF 工具 | `/api/tools/pdf/merge`, `watermark/text`, `watermark/image`, `protect`, `info` | 7 |
+| 文件轉檔 | `/api/tools/convert/word-to-pdf`, `pdf-to-word`, `md-to-pdf`, `md-to-word`, `word-to-md` | 5 |
+| GIF 製作 | `/api/tools/gif/create` | 3 |
+| 影片工具 | `/api/tools/video/merge`, `to-gif`, `compress` | 5 |
+| 批次改名 | `/api/tools/rename/preview`, `apply` | 4 |
 
-## 開發者
+---
 
-劉瑞弘 — 國立勤益科技大學 智慧自動化工程系
+## 開發
+
+```bash
+# 執行測試
+python -m pytest tests/ -v
+
+# 開發模式啟動（自動重載）
+uvicorn main:app --reload
+
+# 健康檢查
+curl http://localhost:8000/health
+```
+
+---
 
 ## 授權
 
-本專案由國立勤益科技大學智慧自動化工程系開發，僅供教學與內部使用。
+MIT License — DofLab Laboratory
