@@ -51,7 +51,7 @@ class SenderProfileRequest(BaseModel):
     organization: str = "國立勤益科技大學"
 
 class ScanRequest(BaseModel):
-    corners: Optional[list[list[int]]] = None
+    corners: Optional[list[list[float]]] = None
     filter_name: str = "auto"
     auto_detect: bool = True
 
@@ -125,10 +125,15 @@ async def process_scan(request: Request, body: ScanRequest):
     if not session.image_data:
         raise HTTPException(status_code=400, detail="請先上傳圖片")
 
+    # 座標轉整數（前端拖曳可能產生浮點數）
+    corners = None
+    if body.corners:
+        corners = [[int(round(x)), int(round(y))] for x, y in body.corners]
+
     try:
         result = scan_document(
             image_data=session.image_data,
-            corners=body.corners,
+            corners=corners,
             filter_name=body.filter_name,
             auto_detect=body.auto_detect,
         )
