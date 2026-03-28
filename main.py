@@ -67,7 +67,7 @@ async def serve_frontend():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "ScanMail+", "version": "3.0.0"}
+    return {"status": "ok", "service": "ScanMail+", "version": "3.1.0"}
 
 
 # ── API 路由掛載 ──

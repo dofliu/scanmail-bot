@@ -125,10 +125,18 @@ async def process_scan(request: Request, body: ScanRequest):
     if not session.image_data:
         raise HTTPException(status_code=400, detail="請先上傳圖片")
 
+    logger.info("scan/process 請求: corners=%s, filter=%s, auto_detect=%s",
+                body.corners is not None, body.filter_name, body.auto_detect)
+
     # 座標轉整數（前端拖曳可能產生浮點數）
     corners = None
     if body.corners:
-        corners = [[int(round(x)), int(round(y))] for x, y in body.corners]
+        try:
+            corners = [[int(round(x)), int(round(y))] for x, y in body.corners]
+            logger.info("角點座標: %s", corners)
+        except Exception as e:
+            logger.error("角點座標轉換失敗: %s", e)
+            raise HTTPException(status_code=400, detail=f"角點座標格式錯誤: {e}")
 
     try:
         result = scan_document(
@@ -138,26 +146,30 @@ async def process_scan(request: Request, body: ScanRequest):
             auto_detect=body.auto_detect,
         )
     except Exception as e:
-        logger.error("掃描處理失敗: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail=f"掃描處理失敗: {e}")
+        logger.error("scan_document 異常: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"掃描處理異常: {e}")
 
-    session.image_data = result["image"]
-    session.image_media_type = "image/jpeg"
-    if result["corners"]:
-        session.detected_corners = result["corners"]
+    try:
+        session.image_data = result["image"]
+        session.image_media_type = "image/jpeg"
+        if result.get("corners"):
+            session.detected_corners = result["corners"]
 
-    img_b64 = base64.b64encode(result["image"]).decode("utf-8")
+        img_b64 = base64.b64encode(result["image"]).decode("utf-8")
 
-    return {
-        "success": True,
-        "image_base64": img_b64,
-        "corners": result["corners"],
-        "auto_detected": result["auto_detected"],
-        "filter_applied": result["filter_applied"],
-        "original_size": result["original_size"],
-        "processed_size": result["processed_size"],
-        "distortion": result.get("distortion"),
-    }
+        return {
+            "success": True,
+            "image_base64": img_b64,
+            "corners": result.get("corners"),
+            "auto_detected": result.get("auto_detected", False),
+            "filter_applied": result.get("filter_applied", "auto"),
+            "original_size": result.get("original_size"),
+            "processed_size": result.get("processed_size"),
+            "distortion": result.get("distortion"),
+        }
+    except Exception as e:
+        logger.error("回應組裝失敗: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"回應處理失敗: {e}")
 
 
 @router.post("/scan/filter")

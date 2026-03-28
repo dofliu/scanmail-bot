@@ -833,12 +833,15 @@ def _adaptive_sharpening(img: np.ndarray, strength: float = 0.5) -> np.ndarray:
 # ══════════════════════════════════════════════════════════════
 
 def apply_filter(image_data: bytes, filter_name: str = "auto") -> bytes:
-    """套用影像增強濾鏡"""
+    """套用影像增強濾鏡（防禦性實作）"""
     if filter_name == "original":
         return image_data
 
     nparr = np.frombuffer(image_data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        logger.warning("apply_filter: 無法解碼圖片，回傳原始資料")
+        return image_data
 
     filters = {
         "scan": _filter_scan,
@@ -849,9 +852,28 @@ def apply_filter(image_data: bytes, filter_name: str = "auto") -> bytes:
         "auto": _filter_auto,
     }
     func = filters.get(filter_name, _filter_auto)
-    result = func(img)
 
-    _, buf = cv2.imencode(".jpg", result, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    try:
+        result = func(img)
+    except Exception as e:
+        logger.error("濾鏡 [%s] 執行失敗: %s，回傳原圖", filter_name, e, exc_info=True)
+        result = img
+
+    # 確保 result 是有效的 numpy array
+    if result is None or not isinstance(result, np.ndarray) or result.size == 0:
+        logger.warning("濾鏡 [%s] 結果無效，回傳原圖", filter_name)
+        result = img
+
+    # 確保是 BGR 或灰階格式才能 imencode
+    if len(result.shape) == 2:
+        # 灰階 → BGR
+        result = cv2.cvtColor(result, cv2.COLOR_GRAY2BGR)
+
+    success, buf = cv2.imencode(".jpg", result, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not success:
+        logger.error("cv2.imencode 失敗，回傳原始資料")
+        return image_data
+
     processed = buf.tobytes()
     logger.info("濾鏡 [%s] 套用完成: %d bytes", filter_name, len(processed))
     return processed
