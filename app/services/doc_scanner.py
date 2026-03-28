@@ -39,13 +39,14 @@ def _order_points(pts: np.ndarray) -> np.ndarray:
 
 
 def _is_valid_quad(corners: np.ndarray, img_w: int, img_h: int,
-                   min_area_ratio: float = 0.08,
-                   max_area_ratio: float = 0.98) -> bool:
+                   min_area_ratio: float = 0.05,
+                   max_area_ratio: float = 0.85) -> bool:
     """驗證四邊形是否為合理的文件邊界
 
-    放寬限制以支援大角度傾斜拍攝（如 50°）：
-    - 大角度時文件面積投影會大幅縮小 → 降低面積下限到 8%
-    - 大角度時遠端邊會比近端短很多 → 放寬對邊比例到 0.1
+    關鍵改進：
+    - 降低 max_area_ratio 到 0.85（排除幾乎整張圖的誤判）
+    - 降低 min_area_ratio 到 0.05（支援小文件/遠距拍攝）
+    - 加入凸性檢查（文件應該是凸四邊形）
     """
     area = cv2.contourArea(corners)
     img_area = img_w * img_h
@@ -54,10 +55,17 @@ def _is_valid_quad(corners: np.ndarray, img_w: int, img_h: int,
     if ratio < min_area_ratio or ratio > max_area_ratio:
         return False
 
+    # 凸性檢查：文件邊界應該是凸多邊形
+    if not cv2.isContourConvex(corners.reshape(-1, 1, 2).astype(np.int32)):
+        # 容許輕微非凸（手指遮擋可能造成）
+        hull = cv2.convexHull(corners.reshape(-1, 1, 2).astype(np.int32))
+        hull_area = cv2.contourArea(hull)
+        if hull_area > 0 and area / hull_area < 0.85:
+            return False
+
     ordered = _order_points(corners.astype("float32"))
     (tl, tr, br, bl) = ordered
 
-    # 計算邊長
     w_top = np.linalg.norm(tr - tl)
     w_bot = np.linalg.norm(br - bl)
     h_left = np.linalg.norm(bl - tl)
@@ -66,47 +74,120 @@ def _is_valid_quad(corners: np.ndarray, img_w: int, img_h: int,
     # 寬高比不能太極端（排除細長條）
     max_side = max(w_top, w_bot, h_left, h_right)
     min_side = min(w_top, w_bot, h_left, h_right)
-    if min_side < max_side * 0.08:
+    if min_side < max_side * 0.1:
         return False
 
-    # 對邊比例限制（放寬以支援大角度傾斜）
-    # 50° 傾斜時 cos(50°) ≈ 0.64，遠端邊可能只有近端的 ~15%
-    if min(w_top, w_bot) < max(w_top, w_bot) * 0.1:
+    # 對邊比例限制
+    if min(w_top, w_bot) < max(w_top, w_bot) * 0.15:
         return False
-    if min(h_left, h_right) < max(h_left, h_right) * 0.1:
+    if min(h_left, h_right) < max(h_left, h_right) * 0.15:
         return False
 
     return True
 
 
-def _find_contour_quad(mask: np.ndarray, img_w: int, img_h: int) -> Optional[np.ndarray]:
-    """從二值遮罩中找出最大的四邊形輪廓"""
+def _find_contour_quad(mask: np.ndarray, img_w: int, img_h: int,
+                       prefer_smaller: bool = False) -> Optional[np.ndarray]:
+    """從二值遮罩中找出最佳的四邊形輪廓
+
+    Args:
+        prefer_smaller: True 時偏好面積較小但形狀更矩形的輪廓
+                        （用於手持文件場景，避免選到整張圖）
+    """
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:10]
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)[:15]
+
+    candidates = []
+    img_area = img_w * img_h
 
     for c in contours:
         peri = cv2.arcLength(c, True)
-        # 嘗試不同的逼近精度
         for eps in [0.02, 0.03, 0.04, 0.05]:
             approx = cv2.approxPolyDP(c, eps * peri, True)
             if len(approx) == 4:
                 pts = approx.reshape(4, 2)
                 if _is_valid_quad(pts, img_w, img_h):
-                    return pts
+                    score = _score_quad(pts, img_w, img_h, prefer_smaller)
+                    candidates.append((score, pts))
+                    break  # 這個輪廓找到了，不用試更大的 eps
 
-        # 如果逼近不到 4 個點，用最小面積矩形
-        if cv2.contourArea(c) > img_w * img_h * 0.15:
+        # 最小面積矩形 fallback
+        c_area = cv2.contourArea(c)
+        if c_area > img_area * 0.05 and c_area < img_area * 0.85:
             rect = cv2.minAreaRect(c)
-            box = cv2.boxPoints(rect)
-            box = box.astype(int)
+            box = cv2.boxPoints(rect).astype(int)
             if _is_valid_quad(box, img_w, img_h):
-                return box
+                score = _score_quad(box, img_w, img_h, prefer_smaller)
+                candidates.append((score, box))
 
-    return None
+    if not candidates:
+        return None
+
+    # 取分數最高的
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return candidates[0][1]
+
+
+def _score_quad(corners: np.ndarray, img_w: int, img_h: int,
+                prefer_smaller: bool = False) -> float:
+    """評分四邊形作為「文件邊界」的可信度
+
+    高分條件：
+    - 面積適中（不是太大也不是太小）
+    - 形狀接近矩形（直角）
+    - 寬高比接近常見紙張（A4: ~0.707, Letter: ~0.773）
+    """
+    area = cv2.contourArea(corners)
+    img_area = img_w * img_h
+    area_ratio = area / img_area
+
+    # 面積分數：偏好 15%-60% 的面積
+    if prefer_smaller:
+        # 手持場景：偏好 10%-50%
+        if area_ratio < 0.10:
+            area_score = area_ratio / 0.10
+        elif area_ratio < 0.50:
+            area_score = 1.0
+        elif area_ratio < 0.75:
+            area_score = 1.0 - (area_ratio - 0.50) / 0.25
+        else:
+            area_score = 0.1
+    else:
+        if area_ratio < 0.10:
+            area_score = area_ratio / 0.10
+        elif area_ratio < 0.70:
+            area_score = 1.0
+        else:
+            area_score = 1.0 - (area_ratio - 0.70) / 0.30
+
+    # 矩形度分數：面積 vs 最小外接矩形面積
+    rect = cv2.minAreaRect(corners.reshape(-1, 1, 2).astype(np.int32))
+    rect_area = rect[1][0] * rect[1][1]
+    rectangularity = (area / rect_area) if rect_area > 0 else 0
+
+    # 寬高比分數：接近常見紙張比例
+    ordered = _order_points(corners.astype("float32"))
+    (tl, tr, br, bl) = ordered
+    w_avg = (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) / 2
+    h_avg = (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr)) / 2
+    if max(w_avg, h_avg) > 0:
+        aspect = min(w_avg, h_avg) / max(w_avg, h_avg)
+    else:
+        aspect = 0
+    # 常見紙張比例在 0.6~0.8 之間
+    aspect_score = 1.0 - abs(aspect - 0.72) * 2.0
+    aspect_score = max(0, min(1, aspect_score))
+
+    return area_score * 0.4 + rectangularity * 0.35 + aspect_score * 0.25
 
 
 def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
-    """偵測圖片中的文件邊界（多策略）
+    """偵測圖片中的文件邊界（多策略 + 智慧選擇）
+
+    改進策略：
+    1. 收集所有策略找到的候選四邊形
+    2. 用評分機制選出最佳的（而非只取第一個成功的）
+    3. 新增「直線交叉」策略，專門處理複雜背景
 
     Returns:
         四個角點 [[x,y], ...] 或 None
@@ -118,7 +199,6 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
 
     orig_h, orig_w = img.shape[:2]
 
-    # 縮放到合理大小
     scale = 1.0
     max_dim = 800
     if max(orig_h, orig_w) > max_dim:
@@ -128,61 +208,157 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
         img_s = img.copy()
 
     h, w = img_s.shape[:2]
-    corners = None
 
-    # ── 策略 1：顏色分析（紙張通常是淺色/白色）──
-    corners = _detect_by_color(img_s, w, h)
-    if corners is not None:
-        logger.info("邊界偵測成功 (策略: 顏色分析)")
+    # 收集所有策略的候選結果
+    all_candidates = []
 
-    # ── 策略 2：Canny 邊緣 + 多閾值 ──
-    if corners is None:
-        corners = _detect_by_canny(img_s, w, h)
-        if corners is not None:
-            logger.info("邊界偵測成功 (策略: Canny 邊緣)")
+    # ── 策略 1：Canny 邊緣（最可靠的直線邊緣偵測）──
+    result = _detect_by_canny(img_s, w, h)
+    if result is not None:
+        score = _score_quad(result, w, h, prefer_smaller=True)
+        all_candidates.append((score, result, "Canny"))
+        logger.info("Canny 候選: score=%.3f", score)
 
-    # ── 策略 3：自適應閾值 ──
-    if corners is None:
-        corners = _detect_by_adaptive(img_s, w, h)
-        if corners is not None:
-            logger.info("邊界偵測成功 (策略: 自適應閾值)")
+    # ── 策略 2：Hough 直線交叉（專門針對複雜背景中的直線文件邊緣）──
+    result = _detect_by_hough_lines(img_s, w, h)
+    if result is not None:
+        score = _score_quad(result, w, h, prefer_smaller=True)
+        all_candidates.append((score, result, "Hough"))
+        logger.info("Hough 候選: score=%.3f", score)
 
-    # ── 策略 4：GrabCut 前景分離 ──
-    if corners is None:
-        corners = _detect_by_grabcut(img_s, w, h)
-        if corners is not None:
-            logger.info("邊界偵測成功 (策略: GrabCut)")
+    # ── 策略 3：顏色分析（白色紙張偵測）──
+    result = _detect_by_color(img_s, w, h)
+    if result is not None:
+        score = _score_quad(result, w, h, prefer_smaller=True)
+        all_candidates.append((score, result, "Color"))
+        logger.info("Color 候選: score=%.3f", score)
 
-    if corners is None:
+    # ── 策略 4：自適應閾值 ──
+    result = _detect_by_adaptive(img_s, w, h)
+    if result is not None:
+        score = _score_quad(result, w, h, prefer_smaller=True)
+        all_candidates.append((score, result, "Adaptive"))
+        logger.info("Adaptive 候選: score=%.3f", score)
+
+    # ── 策略 5：GrabCut 前景分離 ──
+    result = _detect_by_grabcut(img_s, w, h)
+    if result is not None:
+        score = _score_quad(result, w, h, prefer_smaller=True)
+        all_candidates.append((score, result, "GrabCut"))
+        logger.info("GrabCut 候選: score=%.3f", score)
+
+    if not all_candidates:
         logger.info("所有策略都無法偵測到文件邊界")
         return None
 
+    # 選出最高分的候選
+    all_candidates.sort(key=lambda x: x[0], reverse=True)
+    best_score, best_corners, best_strategy = all_candidates[0]
+    logger.info("最佳候選: %s (score=%.3f), 共 %d 個候選",
+                best_strategy, best_score, len(all_candidates))
+
     # 轉回原始尺寸座標
-    corners = (corners / scale).astype(int)
-    ordered = _order_points(corners.astype("float32"))
+    best_corners = (best_corners / scale).astype(int)
+    ordered = _order_points(best_corners.astype("float32"))
 
     logger.info("偵測到文件邊界 (原始座標): %s", ordered.astype(int).tolist())
     return ordered.astype(int).tolist()
 
 
+def _detect_by_hough_lines(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
+    """用 Hough 直線偵測找出文件的四條邊
+
+    專為複雜背景設計：文件邊緣通常是清晰的直線，
+    而背景（人臉、衣服、牆壁裝飾）不太有規則直線。
+    找到水平和垂直的直線群後，取交叉點作為四個角。
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+
+    # 用 Canny 找邊緣
+    edged = cv2.Canny(blurred, 40, 120)
+
+    # Hough 線段偵測
+    lines = cv2.HoughLinesP(
+        edged, 1, np.pi / 180,
+        threshold=60,
+        minLineLength=min(w, h) // 6,
+        maxLineGap=15,
+    )
+    if lines is None or len(lines) < 4:
+        return None
+
+    # 分類直線：水平（角度 < 30°）和垂直（角度 > 60°）
+    h_lines = []  # 接近水平
+    v_lines = []  # 接近垂直
+
+    for line in lines:
+        x1, y1, x2, y2 = line[0]
+        angle = abs(math.degrees(math.atan2(y2 - y1, x2 - x1)))
+        length = math.hypot(x2 - x1, y2 - y1)
+
+        if angle < 35 or angle > 145:
+            h_lines.append((y1, y2, x1, y1, x2, y2, length))
+        elif 55 < angle < 125:
+            v_lines.append((x1, x2, x1, y1, x2, y2, length))
+
+    if len(h_lines) < 2 or len(v_lines) < 2:
+        return None
+
+    # 依 y 位置聚類水平線 → 找頂邊和底邊
+    h_lines.sort(key=lambda l: (l[0] + l[1]) / 2)
+    top_y = np.mean([(l[0] + l[1]) / 2 for l in h_lines[:max(1, len(h_lines)//3)]])
+    bot_y = np.mean([(l[0] + l[1]) / 2 for l in h_lines[-max(1, len(h_lines)//3):]])
+
+    # 依 x 位置聚類垂直線 → 找左邊和右邊
+    v_lines.sort(key=lambda l: (l[0] + l[1]) / 2)
+    left_x = np.mean([(l[0] + l[1]) / 2 for l in v_lines[:max(1, len(v_lines)//3)]])
+    right_x = np.mean([(l[0] + l[1]) / 2 for l in v_lines[-max(1, len(v_lines)//3):]])
+
+    # 組成四邊形
+    if right_x - left_x < w * 0.1 or bot_y - top_y < h * 0.1:
+        return None
+
+    corners = np.array([
+        [int(left_x), int(top_y)],
+        [int(right_x), int(top_y)],
+        [int(right_x), int(bot_y)],
+        [int(left_x), int(bot_y)],
+    ])
+
+    if _is_valid_quad(corners, w, h):
+        return corners
+    return None
+
+
 def _detect_by_color(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
-    """利用顏色分析找出淺色紙張區域"""
-    # 轉到 HSV/LAB 色彩空間
+    """利用顏色分析找出淺色紙張區域（改良版）
+
+    改進：加強膚色排除，避免把人臉/手當成紙張
+    """
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
 
-    # 白色/淺色紙張：低飽和度 + 高亮度
-    # HSV: S < 60, V > 150
-    mask_hsv = cv2.inRange(hsv, (0, 0, 140), (180, 70, 255))
+    # 白色紙張：低飽和度 + 高亮度
+    mask_hsv = cv2.inRange(hsv, (0, 0, 150), (180, 55, 255))
 
-    # LAB: L > 170 (亮)
+    # LAB: L > 175（更嚴格的亮度門檻）
     l_channel = lab[:, :, 0]
-    mask_lab = (l_channel > 160).astype(np.uint8) * 255
+    mask_lab = (l_channel > 175).astype(np.uint8) * 255
 
-    # 合併遮罩
+    # 排除膚色區域（HSV: H=0~25, S=30~170, V=80~255 是膚色範圍）
+    skin_mask = cv2.inRange(hsv, (0, 30, 80), (25, 170, 255))
+    skin_mask2 = cv2.inRange(hsv, (160, 30, 80), (180, 170, 255))
+    skin_mask = cv2.bitwise_or(skin_mask, skin_mask2)
+    # 膨脹膚色區域以確保覆蓋完整
+    skin_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    skin_mask = cv2.dilate(skin_mask, skin_kernel, iterations=2)
+
     mask = cv2.bitwise_and(mask_hsv, mask_lab)
+    # 從白色遮罩中移除膚色區域
+    mask = cv2.bitwise_and(mask, cv2.bitwise_not(skin_mask))
 
-    # 形態學操作：去噪 + 填補
+    # 形態學操作
     kernel_small = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     kernel_large = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_small, iterations=2)
@@ -191,15 +367,13 @@ def _detect_by_color(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
     # 填補內部孔洞
     mask_filled = mask.copy()
     flood_mask = np.zeros((h + 2, w + 2), np.uint8)
-    # 從四個角落flood fill（假設角落是背景）
     for pt in [(0, 0), (w-1, 0), (0, h-1), (w-1, h-1)]:
         if mask_filled[pt[1], pt[0]] == 0:
             cv2.floodFill(mask_filled, flood_mask, pt, 255)
-    # 反轉flood結果得到前景
     mask_inv = cv2.bitwise_not(mask_filled)
     mask = cv2.bitwise_or(mask, mask_inv)
 
-    return _find_contour_quad(mask, w, h)
+    return _find_contour_quad(mask, w, h, prefer_smaller=True)
 
 
 def _detect_by_canny(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
@@ -207,19 +381,25 @@ def _detect_by_canny(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
+    best = None
+    best_score = -1
+
     for low, high in [(30, 100), (50, 150), (20, 60), (75, 200)]:
         edged = cv2.Canny(blurred, low, high)
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        edged = cv2.dilate(edged, kernel, iterations=3)
+        edged = cv2.dilate(edged, kernel, iterations=2)
         edged = cv2.morphologyEx(edged, cv2.MORPH_CLOSE,
                                   cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)),
                                   iterations=2)
 
-        result = _find_contour_quad(edged, w, h)
+        result = _find_contour_quad(edged, w, h, prefer_smaller=True)
         if result is not None:
-            return result
+            score = _score_quad(result, w, h, prefer_smaller=True)
+            if score > best_score:
+                best_score = score
+                best = result
 
-    return None
+    return best
 
 
 def _detect_by_adaptive(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
@@ -227,14 +407,13 @@ def _detect_by_adaptive(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
 
-    # 高亮度區域（紙張）
     _, bright = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
     bright = cv2.morphologyEx(bright, cv2.MORPH_CLOSE, kernel, iterations=4)
     bright = cv2.morphologyEx(bright, cv2.MORPH_OPEN, kernel, iterations=2)
 
-    return _find_contour_quad(bright, w, h)
+    return _find_contour_quad(bright, w, h, prefer_smaller=True)
 
 
 def _detect_by_grabcut(img: np.ndarray, w: int, h: int) -> Optional[np.ndarray]:
