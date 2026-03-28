@@ -361,6 +361,74 @@
             flex-shrink: 0;
         }
 
+        /* 裁切編輯器 */
+        .crop-editor {
+            position: relative;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .crop-canvas-wrapper {
+            position: relative;
+            display: inline-block;
+            max-width: 100%;
+            border-radius: 8px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            background: #1a1a1a;
+            touch-action: none;
+        }
+
+        .crop-canvas-wrapper canvas {
+            display: block;
+            max-width: 100%;
+            max-height: 50vh;
+        }
+
+        .crop-controls {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .crop-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 14px;
+            border: 1.5px solid var(--border-color);
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            font-size: 13px;
+            color: var(--text-secondary);
+            transition: var(--transition);
+        }
+
+        .crop-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .crop-btn.primary {
+            background: var(--secondary-color);
+            border-color: var(--secondary-color);
+            color: white;
+            font-weight: 600;
+        }
+
+        .crop-btn.primary:hover {
+            background: #0b8a7d;
+        }
+
+        .crop-hint {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 6px;
+        }
+
         .filter-options {
             display: flex;
             gap: 6px;
@@ -1093,49 +1161,69 @@
                 <div class="card scan-panel" id="scanPanel" style="display: none;">
                     <h3 style="margin-bottom: 12px; font-size: 16px;">✨ 文件掃描處理</h3>
 
-                    <!-- Before/After 預覽 -->
-                    <div class="scan-preview-row">
-                        <div class="scan-preview-item">
-                            <span class="scan-label">原始</span>
-                            <img id="scanOriginal" class="scan-preview-img" alt="原始">
-                        </div>
-                        <div class="scan-arrow">→</div>
-                        <div class="scan-preview-item">
-                            <span class="scan-label">處理後</span>
-                            <img id="scanProcessed" class="scan-preview-img" alt="處理後">
+                    <!-- 裁切編輯器（Step A：調整文件邊界）-->
+                    <div id="cropEditorSection">
+                        <span class="scan-label">拖曳四個角點調整文件邊界，裁切掉背景</span>
+                        <div class="crop-editor">
+                            <div class="crop-canvas-wrapper" id="cropCanvasWrapper">
+                                <canvas id="cropCanvas"></canvas>
+                            </div>
+                            <div class="crop-controls">
+                                <button class="crop-btn" id="cropAutoDetectBtn">🔍 自動偵測</button>
+                                <button class="crop-btn" id="cropResetBtn">↩️ 重設</button>
+                                <button class="crop-btn primary" id="cropApplyBtn">✂️ 裁切並處理</button>
+                            </div>
+                            <p class="crop-hint" id="cropHint">自動偵測文件邊界中...</p>
                         </div>
                     </div>
 
-                    <!-- 濾鏡選擇 -->
-                    <div class="filter-options" id="filterOptions">
-                        <button class="filter-btn active" data-filter="auto">
-                            <span class="filter-icon">🪄</span>
-                            <span>自動</span>
-                        </button>
-                        <button class="filter-btn" data-filter="scan">
-                            <span class="filter-icon">🖨️</span>
-                            <span>專業掃描</span>
-                        </button>
-                        <button class="filter-btn" data-filter="color_doc">
-                            <span class="filter-icon">🔴</span>
-                            <span>彩色公文</span>
-                        </button>
-                        <button class="filter-btn" data-filter="document">
-                            <span class="filter-icon">📄</span>
-                            <span>文件</span>
-                        </button>
-                        <button class="filter-btn" data-filter="enhance">
-                            <span class="filter-icon">🔆</span>
-                            <span>增強</span>
-                        </button>
-                        <button class="filter-btn" data-filter="bw">
-                            <span class="filter-icon">◼️</span>
-                            <span>黑白</span>
-                        </button>
-                        <button class="filter-btn" data-filter="original">
-                            <span class="filter-icon">🖼️</span>
-                            <span>原圖</span>
-                        </button>
+                    <!-- 處理結果預覽（Step B：顯示濾鏡結果）-->
+                    <div id="scanResultSection" style="display: none;">
+                        <div class="scan-preview-row">
+                            <div class="scan-preview-item">
+                                <span class="scan-label">原始</span>
+                                <img id="scanOriginal" class="scan-preview-img" alt="原始">
+                            </div>
+                            <div class="scan-arrow">→</div>
+                            <div class="scan-preview-item">
+                                <span class="scan-label">處理後</span>
+                                <img id="scanProcessed" class="scan-preview-img" alt="處理後">
+                            </div>
+                        </div>
+
+                        <!-- 濾鏡選擇 -->
+                        <div class="filter-options" id="filterOptions">
+                            <button class="filter-btn active" data-filter="auto">
+                                <span class="filter-icon">🪄</span>
+                                <span>自動</span>
+                            </button>
+                            <button class="filter-btn" data-filter="scan">
+                                <span class="filter-icon">🖨️</span>
+                                <span>專業掃描</span>
+                            </button>
+                            <button class="filter-btn" data-filter="color_doc">
+                                <span class="filter-icon">🔴</span>
+                                <span>彩色公文</span>
+                            </button>
+                            <button class="filter-btn" data-filter="document">
+                                <span class="filter-icon">📄</span>
+                                <span>文件</span>
+                            </button>
+                            <button class="filter-btn" data-filter="enhance">
+                                <span class="filter-icon">🔆</span>
+                                <span>增強</span>
+                            </button>
+                            <button class="filter-btn" data-filter="bw">
+                                <span class="filter-icon">◼️</span>
+                                <span>黑白</span>
+                            </button>
+                            <button class="filter-btn" data-filter="original">
+                                <span class="filter-icon">🖼️</span>
+                                <span>原圖</span>
+                            </button>
+                        </div>
+
+                        <button class="crop-btn" id="cropEditAgainBtn" style="margin-bottom: 10px;">✏️ 重新調整裁切範圍</button>
                     </div>
 
                     <!-- 處理狀態 -->
@@ -1400,7 +1488,13 @@
             editingField: null,
             contacts: [],
             history: [],
-            settings: {}
+            settings: {},
+            // 裁切相關
+            cropCorners: null,       // 四個角點 [[x,y], ...]（原圖座標）
+            cropImageWidth: 0,       // 原圖寬度
+            cropImageHeight: 0,      // 原圖高度
+            cropDragging: -1,        // 正在拖曳的角點 index（-1=無）
+            cropOriginalDataUrl: null // 原圖 data URL（用於 canvas 繪製）
         };
 
         // ==================== DOM Elements ====================
@@ -1430,6 +1524,16 @@
             scanInfo: document.getElementById('scanInfo'),
             scanInfoText: document.getElementById('scanInfoText'),
             scanNextBtn: document.getElementById('scanNextBtn'),
+            // Crop Editor
+            cropEditorSection: document.getElementById('cropEditorSection'),
+            scanResultSection: document.getElementById('scanResultSection'),
+            cropCanvas: document.getElementById('cropCanvas'),
+            cropCanvasWrapper: document.getElementById('cropCanvasWrapper'),
+            cropAutoDetectBtn: document.getElementById('cropAutoDetectBtn'),
+            cropResetBtn: document.getElementById('cropResetBtn'),
+            cropApplyBtn: document.getElementById('cropApplyBtn'),
+            cropHint: document.getElementById('cropHint'),
+            cropEditAgainBtn: document.getElementById('cropEditAgainBtn'),
             // Step 2
             addContactBtn: document.getElementById('addContactBtn'),
             addContactForm: document.getElementById('addContactForm'),
@@ -1554,20 +1658,231 @@
             elements.captureBtn.style.display = 'flex';
             elements.uploadBtn.style.display = 'flex';
             elements.nextStep1Btn.style.display = 'none';
-            // 隱藏掃描面板
+            // 隱藏掃描面板 & 重設裁切狀態
             elements.scanPanel.style.display = 'none';
+            state.cropCorners = null;
+            state.cropDragging = -1;
+            state.cropOriginalDataUrl = null;
+            _cropImage = null;
         }
 
-        // ==================== 文件掃描處理 ====================
+        // ==================== 文件裁切與掃描處理 ====================
+
+        // ── 裁切 Canvas 繪製 ──
+
+        let _cropImage = null; // 快取的 Image 物件
+
+        function drawCropCanvas() {
+            const canvas = elements.cropCanvas;
+            const ctx = canvas.getContext('2d');
+            if (!_cropImage || !_cropImage.complete) return;
+
+            // 計算 canvas 顯示尺寸（適配容器寬度，最大高度 50vh）
+            const wrapper = elements.cropCanvasWrapper;
+            const maxW = wrapper.parentElement.clientWidth - 2;
+            const maxH = window.innerHeight * 0.5;
+            const imgW = _cropImage.naturalWidth;
+            const imgH = _cropImage.naturalHeight;
+
+            let dispW = imgW;
+            let dispH = imgH;
+            if (dispW > maxW) {
+                dispH = dispH * (maxW / dispW);
+                dispW = maxW;
+            }
+            if (dispH > maxH) {
+                dispW = dispW * (maxH / dispH);
+                dispH = maxH;
+            }
+            dispW = Math.round(dispW);
+            dispH = Math.round(dispH);
+
+            // 設定高解析度 canvas（支援 Retina）
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = dispW * dpr;
+            canvas.height = dispH * dpr;
+            canvas.style.width = dispW + 'px';
+            canvas.style.height = dispH + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+            // 繪製圖片
+            ctx.drawImage(_cropImage, 0, 0, dispW, dispH);
+
+            // 繪製半透明遮罩（裁切區域外變暗）
+            if (state.cropCorners && state.cropCorners.length === 4) {
+                const corners = state.cropCorners;
+                const scaleX = dispW / state.cropImageWidth;
+                const scaleY = dispH / state.cropImageHeight;
+
+                // 畫暗色遮罩
+                ctx.save();
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+                ctx.beginPath();
+                ctx.rect(0, 0, dispW, dispH);
+                // 挖出裁切區域
+                ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
+                for (let i = 1; i < 4; i++) {
+                    ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
+                }
+                ctx.closePath();
+                ctx.fill('evenodd');
+                ctx.restore();
+
+                // 畫邊界線
+                ctx.save();
+                ctx.strokeStyle = '#0d9488';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 3]);
+                ctx.beginPath();
+                ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
+                for (let i = 1; i < 4; i++) {
+                    ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
+                }
+                ctx.closePath();
+                ctx.stroke();
+                ctx.restore();
+
+                // 畫角點拖曳把手
+                const labels = ['TL', 'TR', 'BR', 'BL'];
+                for (let i = 0; i < 4; i++) {
+                    const cx = corners[i][0] * scaleX;
+                    const cy = corners[i][1] * scaleY;
+                    const isActive = (state.cropDragging === i);
+
+                    // 外圈
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, isActive ? 14 : 11, 0, Math.PI * 2);
+                    ctx.fillStyle = isActive ? 'rgba(13,148,136,0.9)' : 'rgba(13,148,136,0.7)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'white';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // 內圈
+                    ctx.beginPath();
+                    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = 'white';
+                    ctx.fill();
+                }
+            }
+        }
+
+        function getCropCanvasScale() {
+            const canvas = elements.cropCanvas;
+            const dispW = parseInt(canvas.style.width);
+            const dispH = parseInt(canvas.style.height);
+            return {
+                x: dispW / state.cropImageWidth,
+                y: dispH / state.cropImageHeight,
+                dispW, dispH
+            };
+        }
+
+        function getCanvasPointerPos(e) {
+            const canvas = elements.cropCanvas;
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            return {
+                x: clientX - rect.left,
+                y: clientY - rect.top
+            };
+        }
+
+        function findNearestCorner(pos, threshold) {
+            if (!state.cropCorners) return -1;
+            const scale = getCropCanvasScale();
+            let minDist = Infinity;
+            let minIdx = -1;
+            for (let i = 0; i < 4; i++) {
+                const cx = state.cropCorners[i][0] * scale.x;
+                const cy = state.cropCorners[i][1] * scale.y;
+                const dist = Math.hypot(pos.x - cx, pos.y - cy);
+                if (dist < threshold && dist < minDist) {
+                    minDist = dist;
+                    minIdx = i;
+                }
+            }
+            return minIdx;
+        }
+
+        // ── 拖曳事件 ──
+
+        function onCropPointerDown(e) {
+            if (!state.cropCorners) return;
+            const pos = getCanvasPointerPos(e);
+            const idx = findNearestCorner(pos, 30);
+            if (idx >= 0) {
+                state.cropDragging = idx;
+                drawCropCanvas();
+                e.preventDefault();
+            }
+        }
+
+        function onCropPointerMove(e) {
+            if (state.cropDragging < 0) return;
+            e.preventDefault();
+            const pos = getCanvasPointerPos(e);
+            const scale = getCropCanvasScale();
+            // 轉回原圖座標
+            let newX = Math.round(pos.x / scale.x);
+            let newY = Math.round(pos.y / scale.y);
+            // 限制在圖片範圍內
+            newX = Math.max(0, Math.min(state.cropImageWidth, newX));
+            newY = Math.max(0, Math.min(state.cropImageHeight, newY));
+            state.cropCorners[state.cropDragging] = [newX, newY];
+            drawCropCanvas();
+        }
+
+        function onCropPointerUp(e) {
+            if (state.cropDragging >= 0) {
+                state.cropDragging = -1;
+                drawCropCanvas();
+            }
+        }
+
+        function initCropCanvasEvents() {
+            const canvas = elements.cropCanvas;
+            // 滑鼠
+            canvas.addEventListener('mousedown', onCropPointerDown);
+            canvas.addEventListener('mousemove', onCropPointerMove);
+            canvas.addEventListener('mouseup', onCropPointerUp);
+            canvas.addEventListener('mouseleave', onCropPointerUp);
+            // 觸控
+            canvas.addEventListener('touchstart', onCropPointerDown, { passive: false });
+            canvas.addEventListener('touchmove', onCropPointerMove, { passive: false });
+            canvas.addEventListener('touchend', onCropPointerUp);
+            canvas.addEventListener('touchcancel', onCropPointerUp);
+        }
+
+        function setDefaultCorners() {
+            // 預設裁切範圍：圖片邊緣內縮 5%
+            const m = 0.05;
+            const w = state.cropImageWidth;
+            const h = state.cropImageHeight;
+            state.cropCorners = [
+                [Math.round(w * m), Math.round(h * m)],             // 左上
+                [Math.round(w * (1 - m)), Math.round(h * m)],       // 右上
+                [Math.round(w * (1 - m)), Math.round(h * (1 - m))], // 右下
+                [Math.round(w * m), Math.round(h * (1 - m))]        // 左下
+            ];
+        }
+
+        // ── 主流程 ──
+
         async function startScanProcessing(originalDataUrl) {
-            // 顯示掃描面板
+            // 顯示掃描面板，進入裁切模式
             elements.scanPanel.style.display = 'block';
-            elements.scanOriginal.src = originalDataUrl;
-            elements.scanProcessed.src = originalDataUrl;  // 先顯示原圖
+            elements.cropEditorSection.style.display = 'block';
+            elements.scanResultSection.style.display = 'none';
             elements.scanStatus.style.display = 'flex';
             elements.scanStatusText.textContent = '正在上傳並偵測文件邊界...';
             elements.scanInfo.style.display = 'none';
             elements.scanNextBtn.disabled = true;
+            elements.cropHint.textContent = '正在自動偵測文件邊界...';
+
+            // 儲存原圖 data URL
+            state.cropOriginalDataUrl = originalDataUrl;
 
             // 重設濾鏡選擇
             document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -1577,48 +1892,125 @@
                 // Step 1: 上傳圖片
                 await uploadDocument();
 
-                // Step 2: 呼叫掃描處理 API
-                elements.scanStatusText.textContent = '正在進行邊界偵測與智慧校正...';
+                // Step 2: 偵測邊界（不套用濾鏡，只取得角點）
+                elements.scanStatusText.textContent = '正在偵測文件邊界...';
+                const detectRes = await fetch(`${API_BASE}/scan/detect`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!detectRes.ok) throw new Error('邊界偵測失敗');
+                const detectResult = await detectRes.json();
+
+                state.cropImageWidth = detectResult.image_width;
+                state.cropImageHeight = detectResult.image_height;
+
+                if (detectResult.detected && detectResult.corners) {
+                    state.cropCorners = detectResult.corners;
+                    elements.cropHint.textContent = '✅ 已自動偵測到文件邊界，可拖曳角點微調';
+                } else {
+                    // 未偵測到邊界，設定預設裁切框
+                    setDefaultCorners();
+                    elements.cropHint.textContent = 'ℹ️ 未偵測到明確邊界，請手動拖曳角點選取文件範圍';
+                }
+
+                // 載入原圖到 canvas
+                _cropImage = new Image();
+                _cropImage.onload = () => {
+                    drawCropCanvas();
+                    initCropCanvasEvents();
+                };
+                _cropImage.src = originalDataUrl;
+
+                elements.scanStatus.style.display = 'none';
+
+            } catch (error) {
+                console.error('Scan detect error:', error);
+                elements.scanStatusText.textContent = '邊界偵測失敗';
+                elements.cropHint.textContent = '偵測失敗，請手動選取或直接裁切處理';
+
+                // 用預設值
+                state.cropImageWidth = 1000;
+                state.cropImageHeight = 1000;
+                setDefaultCorners();
+
+                _cropImage = new Image();
+                _cropImage.onload = () => {
+                    state.cropImageWidth = _cropImage.naturalWidth;
+                    state.cropImageHeight = _cropImage.naturalHeight;
+                    setDefaultCorners();
+                    drawCropCanvas();
+                    initCropCanvasEvents();
+                };
+                _cropImage.src = originalDataUrl;
+
+                elements.scanStatus.style.display = 'none';
+            }
+        }
+
+        async function applyCropAndProcess() {
+            if (!state.cropCorners) return;
+
+            elements.scanStatus.style.display = 'flex';
+            elements.scanStatusText.textContent = '正在裁切並處理文件...';
+            elements.cropApplyBtn.disabled = true;
+
+            try {
+                // 取得目前選取的濾鏡
+                const activeFilter = document.querySelector('.filter-btn.active');
+                const filterName = activeFilter ? activeFilter.dataset.filter : 'auto';
+
+                // 呼叫 process API，帶入手動角點
                 const response = await fetch(`${API_BASE}/scan/process`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        filter_name: 'auto',
-                        auto_detect: true
+                        corners: state.cropCorners,
+                        filter_name: filterName,
+                        auto_detect: false
                     })
                 });
 
-                if (!response.ok) throw new Error('掃描處理失敗');
+                if (!response.ok) throw new Error('裁切處理失敗');
                 const result = await response.json();
 
                 if (result.success && result.image_base64) {
                     const processedUrl = 'data:image/jpeg;base64,' + result.image_base64;
+
+                    // 切換到結果預覽
+                    elements.cropEditorSection.style.display = 'none';
+                    elements.scanResultSection.style.display = 'block';
+                    elements.scanOriginal.src = state.cropOriginalDataUrl;
                     elements.scanProcessed.src = processedUrl;
                     state.scanProcessedUrl = processedUrl;
 
                     // 顯示資訊
-                    let infoText = '';
-                    if (result.auto_detected) {
-                        infoText = '✅ 已自動偵測文件邊界並校正透視';
-                    } else {
-                        infoText = 'ℹ️ 未偵測到明確邊界，已套用影像增強';
-                    }
+                    let infoText = '✅ 文件裁切完成';
                     infoText += ` | 濾鏡: ${getFilterLabel(result.filter_applied)}`;
+                    if (result.processed_size) {
+                        infoText += ` | ${result.processed_size[0]}x${result.processed_size[1]}`;
+                    }
                     elements.scanInfoText.textContent = infoText;
                     elements.scanInfo.style.display = 'block';
+                    elements.scanNextBtn.disabled = false;
                 }
 
                 elements.scanStatus.style.display = 'none';
-                elements.scanNextBtn.disabled = false;
+                elements.cropApplyBtn.disabled = false;
 
             } catch (error) {
-                console.error('Scan processing error:', error);
-                elements.scanStatusText.textContent = '掃描處理失敗，將使用原圖';
-                elements.scanNextBtn.disabled = false;
-                setTimeout(() => {
-                    elements.scanStatus.style.display = 'none';
-                }, 2000);
+                console.error('Crop process error:', error);
+                elements.scanStatusText.textContent = '裁切處理失敗';
+                elements.cropApplyBtn.disabled = false;
+                setTimeout(() => elements.scanStatus.style.display = 'none', 2000);
             }
+        }
+
+        function showCropEditor() {
+            elements.cropEditorSection.style.display = 'block';
+            elements.scanResultSection.style.display = 'none';
+            elements.scanNextBtn.disabled = true;
+            drawCropCanvas();
         }
 
         function getFilterLabel(filterName) {
@@ -2060,6 +2452,39 @@
             });
             elements.retakeBtn.addEventListener('click', hideThumbnail);
             elements.nextStep1Btn.addEventListener('click', () => goToStep(2));
+
+            // Crop editor buttons
+            elements.cropAutoDetectBtn.addEventListener('click', async () => {
+                elements.cropHint.textContent = '正在重新偵測...';
+                try {
+                    const res = await fetch(`${API_BASE}/scan/detect`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const r = await res.json();
+                    if (r.detected && r.corners) {
+                        state.cropCorners = r.corners;
+                        state.cropImageWidth = r.image_width;
+                        state.cropImageHeight = r.image_height;
+                        elements.cropHint.textContent = '✅ 已偵測到文件邊界';
+                    } else {
+                        elements.cropHint.textContent = 'ℹ️ 未偵測到邊界，請手動調整角點';
+                    }
+                    drawCropCanvas();
+                } catch (err) {
+                    elements.cropHint.textContent = '偵測失敗';
+                }
+            });
+
+            elements.cropResetBtn.addEventListener('click', () => {
+                setDefaultCorners();
+                elements.cropHint.textContent = '已重設為預設範圍';
+                drawCropCanvas();
+            });
+
+            elements.cropApplyBtn.addEventListener('click', () => applyCropAndProcess());
+
+            elements.cropEditAgainBtn.addEventListener('click', () => showCropEditor());
 
             // Scan panel: filter buttons
             document.querySelectorAll('.filter-btn').forEach(btn => {
