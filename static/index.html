@@ -700,11 +700,73 @@
             </div>
 
             <div class="tool-page" data-tool="batch-rename">
-                <div class="card"><div class="tool-placeholder">
-                    <div class="placeholder-icon">✏️</div>
-                    <h3>批次改名</h3>
-                    <p>前綴、後綴、編號規則批次重命名 — 即將推出</p>
-                </div></div>
+                <h2 class="step-title">✏️ 批次改名</h2>
+                <div class="card">
+                    <div id="renDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
+                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">📁</div>
+                        <div style="font-size:14px; color:var(--text-secondary);">拖放任意檔案到此處</div>
+                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">設定改名規則後，下載重命名的 ZIP</div>
+                    </div>
+                    <input type="file" id="renFileInput" multiple style="display:none;">
+                    <div id="renFileInfo" style="margin-top:8px;"></div>
+
+                    <!-- 改名規則 -->
+                    <div style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
+                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">改名規則</div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">加前綴</label>
+                                <input type="text" class="form-input" id="renPrefix" placeholder="例: IMG_">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">加後綴</label>
+                                <input type="text" class="form-input" id="renSuffix" placeholder="例: _final">
+                            </div>
+                        </div>
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">搜尋文字</label>
+                                <input type="text" class="form-input" id="renFind" placeholder="找什麼">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">取代為</label>
+                                <input type="text" class="form-input" id="renReplace" placeholder="換成什麼">
+                            </div>
+                        </div>
+                        <div style="margin-top:10px;">
+                            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                                <input type="checkbox" id="renNumbering"> 加入流水編號
+                            </label>
+                        </div>
+                        <div id="renNumOpts" style="display:none; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px;">
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">起始號</label>
+                                <input type="number" class="form-input" id="renNumStart" value="1" min="0">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">位數</label>
+                                <input type="number" class="form-input" id="renNumDigits" value="3" min="1" max="10">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label class="form-label">位置</label>
+                                <select class="form-input" id="renNumPos">
+                                    <option value="prefix">前綴</option>
+                                    <option value="suffix">後綴</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 即時預覽 -->
+                    <div id="renPreview" style="margin-top:12px; max-height:300px; overflow-y:auto;"></div>
+
+                    <div id="renProgress" style="display:none; margin-top:12px;"></div>
+                    <div id="renResult" style="display:none; margin-top:12px;"></div>
+                    <div style="display:flex; gap:8px; margin-top:16px;">
+                        <button class="crop-btn" id="renClearBtn" style="display:none;">🗑️ 清除</button>
+                        <button class="btn btn-primary" id="renApplyBtn" style="display:none; flex:1;">⚡ 套用改名並下載 ZIP</button>
+                    </div>
+                </div>
             </div>
 
         </main>
@@ -776,5 +838,6 @@
     <script src="/static/js/doc-convert.js"></script>
     <script src="/static/js/gif-tools.js"></script>
     <script src="/static/js/video-tools.js"></script>
+    <script src="/static/js/batch-rename.js"></script>
 </body>
 </html>
