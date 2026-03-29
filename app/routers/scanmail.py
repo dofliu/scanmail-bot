@@ -11,6 +11,8 @@ from app.core.file_manager import make_thumbnail
 from app.models.contact import ContactModel
 from app.models.history import HistoryModel
 from app.models.sender import SenderModel
+from app.models.group import GroupModel
+from app.models.template import TemplateModel
 from app.services.ai_analyzer import analyze_document
 from app.services.image_processor import (
     image_to_pdf, images_to_pdf, validate_image, get_image_info,
@@ -492,6 +494,201 @@ async def update_sender_settings(request: Request, body: SenderProfileRequest):
         title=body.title, department=body.department,
         organization=body.organization,
     )
+    return {"success": True}
+
+
+# ── 批次寄送 ──
+
+class BatchSendRequest(BaseModel):
+    contact_ids: list[int]
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    filename: Optional[str] = None
+
+
+@router.post("/send/batch")
+async def batch_send_email(request: Request, body: BatchSendRequest):
+    """批次寄送 — 同一份文件寄給多位收件人"""
+    user_id = get_user_id(request)
+    session = get_session(user_id)
+
+    if not session.image_data:
+        raise HTTPException(status_code=400, detail="請先上傳圖片")
+    if not session.ai_result:
+        raise HTTPException(status_code=400, detail="請先執行 AI 分析")
+    if not body.contact_ids:
+        raise HTTPException(status_code=400, detail="請選擇至少一位收件人")
+
+    sender = SenderModel.get_or_default(user_id)
+    ai = session.ai_result
+
+    subject = body.subject or ai.get("subject", "掃描文件")
+    email_body = body.body or ai.get("body", "附件為掃描文件，請查收。")
+    filename = body.filename or ai.get("filename", "document.pdf")
+    if not filename.endswith(".pdf"):
+        filename += ".pdf"
+
+    try:
+        if session.pages:
+            pdf_bytes = images_to_pdf(session.pages)
+        else:
+            pdf_bytes = image_to_pdf(session.image_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"圖片轉 PDF 失敗: {e}")
+
+    results = []
+    for cid in body.contact_ids:
+        contact = ContactModel.get_by_id(cid)
+        if not contact:
+            results.append({"contact_id": cid, "success": False, "message": "聯絡人不存在"})
+            continue
+
+        result = await send_email(
+            sender_email=sender.get("email", "") or sender.get("smtp_user", ""),
+            sender_name=sender.get("name", ""),
+            recipient_email=contact["email"],
+            recipient_name=contact["name"],
+            subject=subject, body=email_body,
+            pdf_bytes=pdf_bytes, filename=filename,
+            sender_title=sender.get("title", ""),
+            sender_dept=sender.get("department", ""),
+            sender_org=sender.get("organization", "國立勤益科技大學"),
+        )
+
+        results.append({
+            "contact_id": cid,
+            "name": contact["name"],
+            "email": contact["email"],
+            "success": result["success"],
+            "message": result["message"],
+        })
+
+        if result["success"]:
+            HistoryModel.create(
+                user_id=user_id, recipient_email=contact["email"],
+                recipient_name=contact["name"], subject=subject,
+                body=email_body, doc_type=ai.get("doc_type", "other"),
+                filename=filename, ai_confidence=ai.get("confidence", 0),
+                file_size=len(pdf_bytes),
+            )
+            ContactModel.increment_frequency(cid)
+
+    success_count = sum(1 for r in results if r["success"])
+    total = len(results)
+
+    # 全部成功才清除 session
+    if success_count == total:
+        session.image_data = None
+        session.image_original = None
+        session.ai_result = None
+        session.pages.clear()
+
+    return {
+        "success": success_count > 0,
+        "total": total,
+        "success_count": success_count,
+        "fail_count": total - success_count,
+        "results": results,
+    }
+
+
+# ── 收件人群組 ──
+
+class GroupCreateRequest(BaseModel):
+    name: str
+    description: str = ""
+    contact_ids: list[int] = []
+
+
+class GroupUpdateMembersRequest(BaseModel):
+    contact_ids: list[int]
+
+
+@router.get("/groups")
+async def list_groups(request: Request):
+    user_id = get_user_id(request)
+    return GroupModel.list_by_user(user_id)
+
+
+@router.post("/groups")
+async def create_group(request: Request, body: GroupCreateRequest):
+    user_id = get_user_id(request)
+    group_id = GroupModel.create(user_id, body.name, body.description)
+    if body.contact_ids:
+        GroupModel.set_members(group_id, body.contact_ids)
+    return {"id": group_id, "name": body.name}
+
+
+@router.get("/groups/{group_id}")
+async def get_group(request: Request, group_id: int):
+    group = GroupModel.get_by_id(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="群組不存在")
+    members = GroupModel.get_members(group_id)
+    return {**group, "members": members}
+
+
+@router.put("/groups/{group_id}/members")
+async def update_group_members(request: Request, group_id: int, body: GroupUpdateMembersRequest):
+    group = GroupModel.get_by_id(group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="群組不存在")
+    GroupModel.set_members(group_id, body.contact_ids)
+    return {"success": True}
+
+
+@router.delete("/groups/{group_id}")
+async def delete_group(request: Request, group_id: int):
+    GroupModel.delete(group_id)
+    return {"success": True}
+
+
+# ── 郵件模板 ──
+
+class TemplateCreateRequest(BaseModel):
+    doc_type: str = "other"
+    name: str
+    subject_template: str
+    body_template: str
+
+
+class TemplateUpdateRequest(BaseModel):
+    name: str
+    subject_template: str
+    body_template: str
+
+
+@router.get("/templates")
+async def list_templates(request: Request):
+    user_id = get_user_id(request)
+    return TemplateModel.list_by_user(user_id)
+
+
+@router.get("/templates/{doc_type}")
+async def get_template_for_type(request: Request, doc_type: str):
+    user_id = get_user_id(request)
+    return TemplateModel.get_for_doc_type(user_id, doc_type)
+
+
+@router.post("/templates")
+async def create_template(request: Request, body: TemplateCreateRequest):
+    user_id = get_user_id(request)
+    tid = TemplateModel.create(
+        user_id, body.doc_type, body.name,
+        body.subject_template, body.body_template,
+    )
+    return {"id": tid, "name": body.name}
+
+
+@router.put("/templates/{template_id}")
+async def update_template(request: Request, template_id: int, body: TemplateUpdateRequest):
+    TemplateModel.update(template_id, body.name, body.subject_template, body.body_template)
+    return {"success": True}
+
+
+@router.delete("/templates/{template_id}")
+async def delete_template(request: Request, template_id: int):
+    TemplateModel.delete(template_id)
     return {"success": True}
 
 
