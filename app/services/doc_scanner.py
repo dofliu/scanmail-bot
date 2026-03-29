@@ -398,11 +398,11 @@ def _estimate_distortion_level(corners: np.ndarray) -> dict:
 
     return {
         "level": level,
-        "aspect_ratio_diff": aspect_diff,
-        "estimated_angle": estimated_angle,
-        "needs_compensation": aspect_diff > 0.15,
-        "w_ratio": w_ratio,
-        "h_ratio": h_ratio,
+        "aspect_ratio_diff": float(aspect_diff),
+        "estimated_angle": float(estimated_angle),
+        "needs_compensation": bool(aspect_diff > 0.15),
+        "w_ratio": float(w_ratio),
+        "h_ratio": float(h_ratio),
     }
 
 
