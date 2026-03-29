@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScanMail+ — 智慧文件處理平台</title>
-    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/common.css?v=3.2">
 </head>
 <body>
     <div class="app-container">
@@ -790,6 +790,25 @@
                     <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">我的聯絡人</h3>
                     <div id="panelContactsList"></div>
                     <div id="panelNoContacts" class="empty-state" style="padding: 20px;">尚無聯絡人</div>
+                    <!-- 群組管理 -->
+                    <div style="margin-top:20px; border-top:1px solid var(--border-color); padding-top:16px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                            <h3 style="font-size: 14px; font-weight: 600;">收件人群組</h3>
+                            <button class="btn btn-small btn-primary" id="addGroupBtn" style="flex:none;padding:4px 12px;font-size:12px;">➕ 新增</button>
+                        </div>
+                        <div id="addGroupForm" style="display:none;padding:12px;background:var(--bg-light);border-radius:8px;margin-bottom:12px;">
+                            <div class="form-group" style="margin-bottom:8px;">
+                                <input type="text" class="form-input" id="groupName" placeholder="群組名稱（例：系務會議成員）">
+                            </div>
+                            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">勾選要加入群組的聯絡人：</div>
+                            <div id="groupMemberSelect" style="max-height:200px;overflow-y:auto;"></div>
+                            <div style="display:flex;gap:8px;margin-top:8px;">
+                                <button class="btn btn-secondary btn-small" id="cancelGroupBtn">取消</button>
+                                <button class="btn btn-primary btn-small" id="saveGroupBtn">儲存群組</button>
+                            </div>
+                        </div>
+                        <div id="panelGroupsList"></div>
+                    </div>
                 </div>
             </div>
             <div class="tab-content" data-content="history">
@@ -831,13 +850,13 @@
     </aside>
 
     <!-- Scripts (模組化) -->
-    <script src="/static/js/app.js"></script>
-    <script src="/static/js/scanmail.js"></script>
-    <script src="/static/js/image-tools.js"></script>
-    <script src="/static/js/pdf-tools.js"></script>
-    <script src="/static/js/doc-convert.js"></script>
-    <script src="/static/js/gif-tools.js"></script>
-    <script src="/static/js/video-tools.js"></script>
-    <script src="/static/js/batch-rename.js"></script>
+    <script src="/static/js/app.js?v=3.2"></script>
+    <script src="/static/js/scanmail.js?v=3.2"></script>
+    <script src="/static/js/image-tools.js?v=3.2"></script>
+    <script src="/static/js/pdf-tools.js?v=3.2"></script>
+    <script src="/static/js/doc-convert.js?v=3.2"></script>
+    <script src="/static/js/gif-tools.js?v=3.2"></script>
+    <script src="/static/js/video-tools.js?v=3.2"></script>
+    <script src="/static/js/batch-rename.js?v=3.2"></script>
 </body>
 </html>

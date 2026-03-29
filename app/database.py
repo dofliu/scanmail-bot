@@ -22,6 +22,37 @@ CREATE TABLE IF NOT EXISTS contacts (
     UNIQUE(user_id, email)
 );
 
+-- 收件人群組表
+CREATE TABLE IF NOT EXISTS contact_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, name)
+);
+
+-- 群組成員關聯表
+CREATE TABLE IF NOT EXISTS group_members (
+    group_id INTEGER NOT NULL,
+    contact_id INTEGER NOT NULL,
+    PRIMARY KEY (group_id, contact_id),
+    FOREIGN KEY (group_id) REFERENCES contact_groups(id) ON DELETE CASCADE,
+    FOREIGN KEY (contact_id) REFERENCES contacts(id) ON DELETE CASCADE
+);
+
+-- 郵件模板表
+CREATE TABLE IF NOT EXISTS email_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    doc_type TEXT NOT NULL DEFAULT 'other',
+    name TEXT NOT NULL,
+    subject_template TEXT NOT NULL,
+    body_template TEXT NOT NULL,
+    is_default INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 寄件歷史表
 CREATE TABLE IF NOT EXISTS send_history (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,6 +98,8 @@ CREATE TABLE IF NOT EXISTS sender_profiles (
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id, frequency DESC);
 CREATE INDEX IF NOT EXISTS idx_history_user ON send_history(user_id, sent_at DESC);
+CREATE INDEX IF NOT EXISTS idx_groups_user ON contact_groups(user_id);
+CREATE INDEX IF NOT EXISTS idx_templates_user ON email_templates(user_id, doc_type);
 """
 
 

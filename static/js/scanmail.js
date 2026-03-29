@@ -19,6 +19,8 @@ let state = {
     imageUploaded: false,
     scanProcessedUrl: null,
     selectedContact: null,
+    selectedContacts: [],    // 批次寄送用：多選的聯絡人
+    groups: [],              // 收件人群組列表
     analyzeResult: null,
     editingField: null,
     contacts: [],
@@ -877,46 +879,136 @@ function goToStep(step) {
 // ==================== Contacts Management ====================
 async function loadContacts() {
     try {
-        const response = await fetch(`${API_BASE}/contacts`);
-        if (!response.ok) throw new Error('Failed to load contacts');
-        state.contacts = await response.json();
+        const [contactsRes, groupsRes] = await Promise.all([
+            fetch(`${API_BASE}/contacts`),
+            fetch(`${API_BASE}/groups`),
+        ]);
+        state.contacts = contactsRes.ok ? await contactsRes.json() : [];
+        state.groups = groupsRes.ok ? await groupsRes.json() : [];
         renderContacts();
     } catch (error) {
         console.error('Error loading contacts:', error);
         state.contacts = [];
+        state.groups = [];
         renderContacts();
     }
 }
 
 function renderContacts() {
-    if (state.contacts.length === 0) {
+    if (state.contacts.length === 0 && state.groups.length === 0) {
         elements.contactsGrid.innerHTML = '';
         elements.noContactsMsg.style.display = 'block';
         return;
     }
 
     elements.noContactsMsg.style.display = 'none';
-    elements.contactsGrid.innerHTML = state.contacts.map((contact, index) => `
-        <div class="contact-card" data-id="${contact.id || index}">
-            <div class="contact-name">${contact.name}</div>
-            <div class="contact-email">${contact.email}</div>
-            <div class="contact-dept">${contact.department || 'N/A'}</div>
-        </div>
-    `).join('');
+    let html = '';
 
-    // Add click handlers
-    document.querySelectorAll('.contact-card').forEach(card => {
-        card.addEventListener('click', () => selectContact(card));
+    // 群組區塊
+    if (state.groups.length > 0) {
+        html += '<div style="grid-column:1/-1;margin-bottom:8px;">' +
+            '<div style="font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:8px;">收件人群組</div>' +
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;">' +
+            state.groups.map(g => `
+                <button class="group-select-btn" data-group-id="${g.id}"
+                        style="padding:8px 14px;border:2px solid var(--border-color);border-radius:20px;
+                        background:white;cursor:pointer;font-size:13px;transition:var(--transition);">
+                    👥 ${g.name} (${g.member_count || 0})
+                </button>
+            `).join('') +
+            '</div></div>' +
+            '<div style="grid-column:1/-1;border-bottom:1px solid var(--border-color);margin-bottom:8px;"></div>';
+    }
+
+    // 聯絡人卡片（支援多選）
+    html += state.contacts.map((contact, index) => {
+        const isSelected = state.selectedContacts.some(c => c.id === contact.id);
+        return `
+        <div class="contact-card ${isSelected ? 'selected' : ''}" data-id="${contact.id || index}">
+            <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" class="contact-checkbox" data-contact-idx="${index}"
+                       ${isSelected ? 'checked' : ''} style="width:18px;height:18px;cursor:pointer;">
+                <div style="flex:1;">
+                    <div class="contact-name">${contact.name}</div>
+                    <div class="contact-email">${contact.email}</div>
+                    <div class="contact-dept">${contact.department || ''}</div>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+
+    elements.contactsGrid.innerHTML = html;
+
+    // 聯絡人點擊/勾選
+    document.querySelectorAll('.contact-checkbox').forEach(cb => {
+        cb.addEventListener('change', (e) => {
+            e.stopPropagation();
+            const idx = parseInt(cb.dataset.contactIdx);
+            toggleContactSelection(idx);
+        });
     });
+    document.querySelectorAll('.contact-card').forEach(card => {
+        card.addEventListener('click', (e) => {
+            if (e.target.type === 'checkbox') return;
+            const idx = Array.from(elements.contactsGrid.querySelectorAll('.contact-card')).indexOf(card);
+            if (idx >= 0 && idx < state.contacts.length) toggleContactSelection(idx);
+        });
+    });
+
+    // 群組按鈕
+    document.querySelectorAll('.group-select-btn').forEach(btn => {
+        btn.addEventListener('click', () => selectGroup(parseInt(btn.dataset.groupId)));
+    });
+
+    updateNextButton();
 }
 
-function selectContact(card) {
-    document.querySelectorAll('.contact-card').forEach(c => c.classList.remove('selected'));
-    card.classList.add('selected');
-    const index = Array.from(elements.contactsGrid.children).indexOf(card);
-    state.selectedContact = state.contacts[index];
-    // 顯示「下一步」按鈕
-    document.getElementById('nextToAnalyzeBtn').style.display = 'block';
+function toggleContactSelection(index) {
+    const contact = state.contacts[index];
+    if (!contact) return;
+    const existIdx = state.selectedContacts.findIndex(c => c.id === contact.id);
+    if (existIdx >= 0) {
+        state.selectedContacts.splice(existIdx, 1);
+    } else {
+        state.selectedContacts.push(contact);
+    }
+    // 向後相容：單選時也設定 selectedContact
+    state.selectedContact = state.selectedContacts.length > 0 ? state.selectedContacts[0] : null;
+    renderContacts();
+}
+
+async function selectGroup(groupId) {
+    try {
+        const res = await fetch(`${API_BASE}/groups/${groupId}`);
+        if (!res.ok) return;
+        const group = await res.json();
+        // 將群組成員全部加入選擇
+        state.selectedContacts = [];
+        for (const member of (group.members || [])) {
+            if (!state.selectedContacts.some(c => c.id === member.id)) {
+                state.selectedContacts.push(member);
+            }
+        }
+        state.selectedContact = state.selectedContacts[0] || null;
+        renderContacts();
+    } catch (e) {
+        console.error('Select group error:', e);
+    }
+}
+
+function updateNextButton() {
+    const btn = document.getElementById('nextToAnalyzeBtn');
+    if (!btn) return;
+    const count = state.selectedContacts.length;
+    if (count === 0) {
+        btn.style.display = 'none';
+    } else if (count === 1) {
+        btn.style.display = 'block';
+        btn.textContent = `🤖 開始 AI 辨識 →`;
+    } else {
+        btn.style.display = 'block';
+        btn.textContent = `🤖 AI 辨識 → 批次寄送 ${count} 人`;
+    }
 }
 
 async function addNewContact() {
@@ -1009,7 +1101,12 @@ function renderPreview() {
     elements.emailSubject.textContent = result.subject || '(未辨識主旨)';
     elements.emailBody.textContent = result.body || '(未辨識內容)';
     elements.confidenceBadge.textContent = `信心度: ${confidence}%`;
-    elements.recipientDisplay.textContent = `${state.selectedContact.name} <${state.selectedContact.email}>`;
+    // 顯示收件人（支援多人）
+    if (state.selectedContacts.length > 1) {
+        elements.recipientDisplay.textContent = state.selectedContacts.map(c => c.name).join('、') + ` (共 ${state.selectedContacts.length} 人)`;
+    } else if (state.selectedContact) {
+        elements.recipientDisplay.textContent = `${state.selectedContact.name} <${state.selectedContact.email}>`;
+    }
     elements.filenameDisplay.textContent = result.filename || state.uploadedFile || 'document.pdf';
 
     // Show warning if confidence < 30%
@@ -1080,33 +1177,51 @@ async function sendEmail() {
         const body = elements.emailBody.textContent.trim();
         const filename = elements.filenameDisplay.textContent.trim();
 
-        const response = await fetch(`${API_BASE}/send`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                contact_id: state.selectedContact.id,
-                subject,
-                body,
-                filename
-            })
-        });
+        let result;
 
-        if (!response.ok) {
-            const errData = await response.json().catch(() => ({}));
-            throw new Error(errData.detail || '寄送失敗');
+        if (state.selectedContacts.length > 1) {
+            // ── 批次寄送 ──
+            const response = await fetch(`${API_BASE}/send/batch`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contact_ids: state.selectedContacts.map(c => c.id),
+                    subject, body, filename,
+                })
+            });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || '批次寄送失敗');
+            }
+            result = await response.json();
+            if (!result.success) throw new Error('全部寄送失敗');
+
+            elements.resultSubject.textContent = subject;
+            elements.resultRecipient.textContent = `${result.success_count}/${result.total} 人寄送成功`;
+            elements.resultFilename.textContent = filename;
+
+        } else {
+            // ── 單人寄送 ──
+            const response = await fetch(`${API_BASE}/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contact_id: state.selectedContact.id,
+                    subject, body, filename,
+                })
+            });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.detail || '寄送失敗');
+            }
+            result = await response.json();
+            if (!result.success) throw new Error(result.message || '寄送失敗，請檢查 SMTP 設定');
+
+            elements.resultSubject.textContent = result.subject || subject;
+            elements.resultRecipient.textContent = result.recipient_email || state.selectedContact.email;
+            elements.resultFilename.textContent = result.filename || filename;
         }
 
-        const result = await response.json();
-
-        // 檢查後端回傳的 success 欄位（SMTP 可能失敗但 HTTP 仍 200）
-        if (!result.success) {
-            throw new Error(result.message || '郵件寄送失敗，請檢查 SMTP 設定');
-        }
-
-        // Show success
-        elements.resultSubject.textContent = result.subject || subject;
-        elements.resultRecipient.textContent = result.recipient_email || state.selectedContact.email;
-        elements.resultFilename.textContent = result.filename || filename;
         elements.successResult.style.display = 'block';
         elements.errorResult.style.display = 'none';
         goToStep(4);
@@ -1339,6 +1454,7 @@ function setupEventListeners() {
         state.imageUploaded = false;
         state.scanProcessedUrl = null;
         state.selectedContact = null;
+        state.selectedContacts = [];
         state.analyzeResult = null;
         state.pages = [];
         state.multiPageMode = false;
@@ -1370,6 +1486,7 @@ function setupEventListeners() {
             document.querySelector(`.tab-content[data-content="${tabName}"]`)?.classList.add('active');
 
             // Load data
+            if (tabName === 'contacts') loadPanelGroups();
             if (tabName === 'history') loadHistory();
             if (tabName === 'settings') loadSettings();
         });
@@ -1379,8 +1496,86 @@ function setupEventListeners() {
 }
 
 // ==================== Initialize ====================
+// ==================== 群組管理（側邊欄）====================
+async function loadPanelGroups() {
+    try {
+        const res = await fetch(`${API_BASE}/groups`);
+        const groups = res.ok ? await res.json() : [];
+        const list = document.getElementById('panelGroupsList');
+        if (!list) return;
+        if (groups.length === 0) {
+            list.innerHTML = '<div style="font-size:13px;color:var(--text-secondary);">尚無群組</div>';
+            return;
+        }
+        list.innerHTML = groups.map(g => `
+            <div class="contact-item">
+                <div class="contact-info">
+                    <div class="contact-name-small">👥 ${g.name}</div>
+                    <div class="contact-email-small">${g.member_count || 0} 位成員</div>
+                </div>
+                <button class="btn-icon" style="background:#d32f2f;color:white;font-size:12px;width:24px;height:24px;"
+                        onclick="deleteGroup(${g.id})">✕</button>
+            </div>
+        `).join('');
+    } catch(e) {}
+}
+
+async function deleteGroup(groupId) {
+    if (!confirm('確定刪除此群組？')) return;
+    await fetch(`${API_BASE}/groups/${groupId}`, {method:'DELETE'});
+    loadPanelGroups();
+    loadContacts(); // 重新整理主頁群組列表
+}
+
+function setupGroupUI() {
+    const addBtn = document.getElementById('addGroupBtn');
+    const form = document.getElementById('addGroupForm');
+    const cancelBtn = document.getElementById('cancelGroupBtn');
+    const saveBtn = document.getElementById('saveGroupBtn');
+    if (!addBtn) return;
+
+    addBtn.addEventListener('click', () => {
+        form.style.display = 'block';
+        // 載入聯絡人勾選列表
+        const sel = document.getElementById('groupMemberSelect');
+        sel.innerHTML = state.contacts.map((c, i) => `
+            <label style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:13px;cursor:pointer;">
+                <input type="checkbox" class="group-member-cb" data-cid="${c.id}" style="width:16px;height:16px;">
+                ${c.name} (${c.email})
+            </label>
+        `).join('');
+    });
+
+    cancelBtn.addEventListener('click', () => { form.style.display = 'none'; });
+
+    saveBtn.addEventListener('click', async () => {
+        const name = document.getElementById('groupName').value.trim();
+        if (!name) { alert('請輸入群組名稱'); return; }
+        const cids = [];
+        document.querySelectorAll('.group-member-cb:checked').forEach(cb => {
+            cids.push(parseInt(cb.dataset.cid));
+        });
+        if (cids.length === 0) { alert('請至少選擇一位成員'); return; }
+        try {
+            await fetch(`${API_BASE}/groups`, {
+                method:'POST',
+                headers:{'Content-Type':'application/json'},
+                body:JSON.stringify({name, contact_ids:cids})
+            });
+            form.style.display = 'none';
+            document.getElementById('groupName').value = '';
+            loadPanelGroups();
+            loadContacts();
+        } catch(e) { alert('建立群組失敗'); }
+    });
+}
+
+// 把 deleteGroup 暴露到全域（onclick 需要）
+window.deleteGroup = deleteGroup;
+
 function init() {
     setupEventListeners();
+    setupGroupUI();
     loadContacts();
     goToStep(1);
 }
