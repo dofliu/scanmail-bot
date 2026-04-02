@@ -373,20 +373,22 @@ function onCropPointerMove(e) {
     e.preventDefault();
     const pos = getCanvasPointerPos(e);
     const scale = getCropCanvasScale();
-    // 轉回原圖座標
     let newX = Math.round(pos.x / scale.x);
     let newY = Math.round(pos.y / scale.y);
-    // 限制在圖片範圍內
     newX = Math.max(0, Math.min(state.cropImageWidth, newX));
     newY = Math.max(0, Math.min(state.cropImageHeight, newY));
     state.cropCorners[state.cropDragging] = [newX, newY];
     drawCropCanvas();
+    // 拖曳中也更新即時預覽（throttled）
+    updateLivePreview();
 }
 
 function onCropPointerUp(e) {
     if (state.cropDragging >= 0) {
         state.cropDragging = -1;
         drawCropCanvas();
+        // 拖曳結束後更新即時預覽
+        updateLivePreview();
     }
 }
 
@@ -415,6 +417,125 @@ function setDefaultCorners() {
         [Math.round(w * (1 - m)), Math.round(h * (1 - m))], // 右下
         [Math.round(w * m), Math.round(h * (1 - m))]        // 左下
     ];
+}
+
+// ── 即時預覽（客戶端透視校正）──
+
+let _livePreviewTimer = null;
+
+function updateLivePreview() {
+    // debounce 150ms（拖曳中不要太頻繁更新）
+    clearTimeout(_livePreviewTimer);
+    _livePreviewTimer = setTimeout(_renderLivePreview, 150);
+}
+
+function _renderLivePreview() {
+    const section = document.getElementById('livePreviewSection');
+    const canvas = document.getElementById('livePreviewCanvas');
+    if (!section || !canvas || !_cropImage || !state.cropCorners) return;
+
+    const corners = state.cropCorners;
+    if (corners.length !== 4) return;
+
+    section.style.display = 'block';
+    const ctx = canvas.getContext('2d');
+
+    // 計算輸出尺寸（根據角點估算文件寬高）
+    const [tl, tr, br, bl] = corners;
+    const wTop = Math.hypot(tr[0]-tl[0], tr[1]-tl[1]);
+    const wBot = Math.hypot(br[0]-bl[0], br[1]-bl[1]);
+    const hLeft = Math.hypot(bl[0]-tl[0], bl[1]-tl[1]);
+    const hRight = Math.hypot(br[0]-tr[0], br[1]-tr[1]);
+    let outW = Math.round(Math.max(wTop, wBot));
+    let outH = Math.round(Math.max(hLeft, hRight));
+
+    // 限制預覽尺寸
+    const maxDim = 400;
+    if (outW > maxDim || outH > maxDim) {
+        const ratio = maxDim / Math.max(outW, outH);
+        outW = Math.round(outW * ratio);
+        outH = Math.round(outH * ratio);
+    }
+    outW = Math.max(outW, 50);
+    outH = Math.max(outH, 50);
+
+    canvas.width = outW;
+    canvas.height = outH;
+
+    // 用三角形網格做透視變換
+    // 把四邊形分成 N×N 個小格子，每個格子畫成兩個三角形
+    const gridN = 12;
+    for (let gy = 0; gy < gridN; gy++) {
+        for (let gx = 0; gx < gridN; gx++) {
+            // 來源四邊形中的小格子四個角（雙線性插值）
+            const u0 = gx / gridN, u1 = (gx+1) / gridN;
+            const v0 = gy / gridN, v1 = (gy+1) / gridN;
+
+            const s00 = _bilerp(corners, u0, v0);
+            const s10 = _bilerp(corners, u1, v0);
+            const s01 = _bilerp(corners, u0, v1);
+            const s11 = _bilerp(corners, u1, v1);
+
+            // 目標矩形中的對應位置
+            const d00 = [u0 * outW, v0 * outH];
+            const d10 = [u1 * outW, v0 * outH];
+            const d01 = [u0 * outW, v1 * outH];
+            const d11 = [u1 * outW, v1 * outH];
+
+            // 畫兩個三角形
+            _drawTriangle(ctx, _cropImage, s00, s10, s01, d00, d10, d01);
+            _drawTriangle(ctx, _cropImage, s10, s11, s01, d10, d11, d01);
+        }
+    }
+}
+
+function _bilerp(corners, u, v) {
+    // 雙線性插值：(u,v) ∈ [0,1]×[0,1] → 四邊形內的座標
+    const [tl, tr, br, bl] = corners;
+    const x = (1-v) * ((1-u)*tl[0] + u*tr[0]) + v * ((1-u)*bl[0] + u*br[0]);
+    const y = (1-v) * ((1-u)*tl[1] + u*tr[1]) + v * ((1-u)*bl[1] + u*br[1]);
+    return [x, y];
+}
+
+function _drawTriangle(ctx, img, s0, s1, s2, d0, d1, d2) {
+    // 用 canvas transform + clip 畫一個三角形的紋理映射
+    ctx.save();
+
+    // Clip 到目標三角形
+    ctx.beginPath();
+    ctx.moveTo(d0[0], d0[1]);
+    ctx.lineTo(d1[0], d1[1]);
+    ctx.lineTo(d2[0], d2[1]);
+    ctx.closePath();
+    ctx.clip();
+
+    // 計算仿射變換矩陣：將 source 三角形映射到 dest 三角形
+    // | d0x d1x d2x |   | s0x s1x s2x | ^-1
+    // | d0y d1y d2y | = | s0y s1y s2y |
+    // |  1   1   1  |   |  1   1   1  |
+
+    const sx0 = s0[0], sy0 = s0[1];
+    const sx1 = s1[0], sy1 = s1[1];
+    const sx2 = s2[0], sy2 = s2[1];
+    const dx0 = d0[0], dy0 = d0[1];
+    const dx1 = d1[0], dy1 = d1[1];
+    const dx2 = d2[0], dy2 = d2[1];
+
+    // source 矩陣的逆
+    const det = sx0*(sy1-sy2) + sx1*(sy2-sy0) + sx2*(sy0-sy1);
+    if (Math.abs(det) < 0.001) { ctx.restore(); return; }
+    const idet = 1 / det;
+
+    const a = ((sy1-sy2)*dx0 + (sy2-sy0)*dx1 + (sy0-sy1)*dx2) * idet;
+    const b = ((sx2-sx1)*dx0 + (sx0-sx2)*dx1 + (sx1-sx0)*dx2) * idet;
+    const c = ((sx1*sy2-sx2*sy1)*dx0 + (sx2*sy0-sx0*sy2)*dx1 + (sx0*sy1-sx1*sy0)*dx2) * idet;
+    const d = ((sy1-sy2)*dy0 + (sy2-sy0)*dy1 + (sy0-sy1)*dy2) * idet;
+    const e = ((sx2-sx1)*dy0 + (sx0-sx2)*dy1 + (sx1-sx0)*dy2) * idet;
+    const f = ((sx1*sy2-sx2*sy1)*dy0 + (sx2*sy0-sx0*sy2)*dy1 + (sx0*sy1-sx1*sy0)*dy2) * idet;
+
+    ctx.setTransform(a, d, b, e, c, f);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
 }
 
 // ── 主流程 ──
@@ -468,6 +589,7 @@ async function startScanProcessing(originalDataUrl) {
         _cropImage.onload = () => {
             drawCropCanvas();
             initCropCanvasEvents();
+            updateLivePreview();
         };
         _cropImage.src = originalDataUrl;
 
@@ -1364,6 +1486,7 @@ function setupEventListeners() {
                 elements.cropHint.textContent = 'ℹ️ 未偵測到邊界，請手動調整角點';
             }
             drawCropCanvas();
+            updateLivePreview();
         } catch (err) {
             elements.cropHint.textContent = '偵測失敗';
         }
@@ -1373,6 +1496,7 @@ function setupEventListeners() {
         setDefaultCorners();
         elements.cropHint.textContent = '已重設為預設範圍';
         drawCropCanvas();
+        updateLivePreview();
     });
 
     elements.cropApplyBtn.addEventListener('click', () => applyCropAndProcess());
