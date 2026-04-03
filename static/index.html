@@ -76,6 +76,13 @@
                                 <div class="crop-canvas-wrapper" id="cropCanvasWrapper">
                                     <canvas id="cropCanvas"></canvas>
                                 </div>
+                                <!-- 即時預覽 -->
+                                <div id="livePreviewSection" style="display:none; margin-top:10px; text-align:center;">
+                                    <span class="scan-label">即時預覽（校正後效果）</span>
+                                    <div style="display:inline-block; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; background:#f8f8f8;">
+                                        <canvas id="livePreviewCanvas" style="display:block; max-width:100%; max-height:35vh;"></canvas>
+                                    </div>
+                                </div>
                                 <div class="rotate-controls">
                                     <button class="rotate-btn" id="rotateCCWBtn">↺ 左轉 90°</button>
                                     <button class="rotate-btn" id="rotateCWBtn">↻ 右轉 90°</button>
