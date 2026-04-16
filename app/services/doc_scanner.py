@@ -23,12 +23,14 @@ logger = logging.getLogger(__name__)
 
 
 # ══════════════════════════════════════════════════════════════
-# 1. 邊界偵測（v3 — 全面重新設計）
+# 1. 邊界偵測（v4 — 內容感知評分）
 #
-# 核心設計原則：
-# A. 手持文件四周一定有背景 → 拒絕「貼邊」的輪廓
-# B. 文件是矩形白色區域，內有文字 → 結合多個線索
-# C. 不要只找最大的 → 評分制，偏好「文件形狀」
+# v3 問題：純幾何評分（面積/矩形度/離邊距離）無法區分
+#   「真正的文件」vs「碰巧形狀對的背景區域」
+#
+# v4 改進：加入內容感知信號
+#   D. 內部比外部亮 → 真文件（紙張是白的）
+#   E. 邊緣有強烈梯度 → 文件與背景有明顯分界
 # ══════════════════════════════════════════════════════════════
 
 def _order_points(pts: np.ndarray) -> np.ndarray:
@@ -92,47 +94,51 @@ def _is_valid_doc_quad(corners: np.ndarray, img_w: int, img_h: int) -> bool:
     return True
 
 
-def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int) -> float:
-    """評分四邊形的「文件可信度」
+def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int,
+                    img: np.ndarray = None) -> float:
+    """評分四邊形的「文件可信度」(v4 — 內容感知)
 
-    高分 = 更像一份文件：
-    - 面積適中（15%~55%）
-    - 形狀接近矩形
-    - 離圖片邊緣有距離
-    - 寬高比接近紙張
+    幾何分數（40%）：
+    - 面積適中 + 矩形度 + 離邊距離 + 紙張寬高比
+
+    內容分數（60%）：
+    - 內外亮度差：文件內部比外部亮多少
+    - 邊緣梯度：文件邊界的梯度強度
     """
     area = cv2.contourArea(corners)
     img_area = img_w * img_h
     ratio = area / img_area
 
-    # 1. 面積分：偏好 15%~55%
+    # ── 幾何分數 ──
+
+    # 面積分：偏好 10%~60%
     if ratio < 0.05:
         area_s = 0
-    elif ratio < 0.15:
-        area_s = (ratio - 0.05) / 0.10 * 0.7
-    elif ratio < 0.55:
-        area_s = 0.7 + 0.3 * (1.0 - abs(ratio - 0.35) / 0.20)
+    elif ratio < 0.10:
+        area_s = (ratio - 0.05) / 0.05 * 0.5
+    elif ratio < 0.60:
+        area_s = 0.5 + 0.5 * (1.0 - abs(ratio - 0.30) / 0.30)
     elif ratio < 0.80:
-        area_s = 0.7 * (1.0 - (ratio - 0.55) / 0.25)
+        area_s = 0.5 * (1.0 - (ratio - 0.60) / 0.20)
     else:
         area_s = 0
 
-    # 2. 矩形度
+    # 矩形度
     rect = cv2.minAreaRect(corners.reshape(-1, 1, 2).astype(np.int32))
     rect_area = rect[1][0] * rect[1][1] if rect[1][0] > 0 and rect[1][1] > 0 else 1
     rectangularity = min(area / rect_area, 1.0)
 
-    # 3. 離邊距離分：四個角點離圖片邊緣越遠越好
+    # 離邊距離
     ordered = _order_points(corners.astype("float32"))
     min_border_dist = min(
-        ordered[0][0], ordered[0][1],                  # 左上離左邊/上邊
-        img_w - ordered[1][0], ordered[1][1],           # 右上離右邊/上邊
-        img_w - ordered[2][0], img_h - ordered[2][1],   # 右下離右邊/下邊
-        ordered[3][0], img_h - ordered[3][1],            # 左下離左邊/下邊
+        ordered[0][0], ordered[0][1],
+        img_w - ordered[1][0], ordered[1][1],
+        img_w - ordered[2][0], img_h - ordered[2][1],
+        ordered[3][0], img_h - ordered[3][1],
     )
     border_s = min(min_border_dist / (max(img_w, img_h) * 0.05), 1.0)
 
-    # 4. 紙張寬高比（A4≈0.707, Letter≈0.773, B5≈0.707）
+    # 紙張寬高比
     (tl, tr, br, bl) = ordered
     w_avg = (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl)) / 2
     h_avg = (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr)) / 2
@@ -140,13 +146,129 @@ def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int) -> float:
         aspect = min(w_avg, h_avg) / max(w_avg, h_avg)
     else:
         aspect = 0
-    aspect_s = max(0, 1.0 - abs(aspect - 0.72) * 3.0)
+    aspect_s = max(0, 1.0 - abs(aspect - 0.72) * 2.5)
 
-    return area_s * 0.35 + rectangularity * 0.25 + border_s * 0.25 + aspect_s * 0.15
+    geo_score = area_s * 0.30 + rectangularity * 0.30 + border_s * 0.25 + aspect_s * 0.15
+
+    # ── 內容分數（需要原圖）──
+    if img is None:
+        return geo_score
+
+    content_score = _score_content(corners, img, img_w, img_h)
+
+    # 最終分數：幾何 40% + 內容 60%
+    return geo_score * 0.40 + content_score * 0.60
 
 
-def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int) -> Optional[np.ndarray]:
-    """從二值遮罩中找出最佳的文件四邊形"""
+def _score_content(corners: np.ndarray, img: np.ndarray,
+                   img_w: int, img_h: int) -> float:
+    """評估候選四邊形內部的「文件特徵」
+
+    1. 內外亮度差：文件內部應比外部亮（紙張 vs 背景）
+    2. 內部亮度均勻度：紙張亮度應該比較均勻
+    3. 邊緣梯度強度：文件邊界應有明顯的亮度跳變
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+
+    # 建立內部遮罩
+    mask_in = np.zeros((img_h, img_w), dtype=np.uint8)
+    pts = _order_points(corners.astype("float32")).astype(np.int32)
+    cv2.fillConvexPoly(mask_in, pts, 255)
+
+    # 建立外部遮罩（排除圖片邊緣 5%）
+    margin = int(max(img_w, img_h) * 0.05)
+    mask_out = np.zeros((img_h, img_w), dtype=np.uint8)
+    mask_out[margin:img_h-margin, margin:img_w-margin] = 255
+    mask_out = cv2.bitwise_and(mask_out, cv2.bitwise_not(mask_in))
+
+    # 如果遮罩面積太小就跳過
+    in_count = cv2.countNonZero(mask_in)
+    out_count = cv2.countNonZero(mask_out)
+    if in_count < 100 or out_count < 100:
+        return 0.5
+
+    # 1. 內外亮度差（0~1）
+    mean_in = cv2.mean(gray, mask=mask_in)[0]
+    mean_out = cv2.mean(gray, mask=mask_out)[0]
+    # 文件內部應該比外部亮 20~100
+    brightness_diff = mean_in - mean_out
+    if brightness_diff > 60:
+        bright_s = 1.0
+    elif brightness_diff > 20:
+        bright_s = (brightness_diff - 20) / 40.0
+    elif brightness_diff > 0:
+        bright_s = brightness_diff / 20.0 * 0.3
+    else:
+        bright_s = 0  # 內部比外部暗 → 不像文件
+
+    # 2. 內部亮度均勻度（低標準差 = 均勻 = 紙張）
+    std_in = np.std(gray[mask_in > 0])
+    # 紙張 std 通常 20~50，複雜場景 std > 60
+    if std_in < 30:
+        uniform_s = 1.0
+    elif std_in < 50:
+        uniform_s = 1.0 - (std_in - 30) / 20.0 * 0.5
+    elif std_in < 70:
+        uniform_s = 0.5 - (std_in - 50) / 20.0 * 0.3
+    else:
+        uniform_s = 0.2
+
+    # 3. 邊緣梯度強度
+    edge_s = _score_edge_gradient(gray, pts, img_w, img_h)
+
+    return bright_s * 0.45 + uniform_s * 0.25 + edge_s * 0.30
+
+
+def _score_edge_gradient(gray: np.ndarray, corners: np.ndarray,
+                         img_w: int, img_h: int) -> float:
+    """沿著四邊形的四條邊，計算垂直方向的平均梯度強度
+
+    強梯度 = 文件邊緣清晰（紙張到背景的銳利跳變）
+    """
+    # Sobel 梯度
+    grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+    grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+    grad_mag = np.sqrt(grad_x**2 + grad_y**2)
+
+    # 沿四條邊取樣梯度值
+    edges = [(corners[0], corners[1]), (corners[1], corners[2]),
+             (corners[2], corners[3]), (corners[3], corners[0])]
+
+    total_grad = 0
+    sample_count = 0
+
+    for p1, p2 in edges:
+        # 沿邊取 20 個取樣點
+        for t in np.linspace(0.1, 0.9, 20):
+            x = int(p1[0] + t * (p2[0] - p1[0]))
+            y = int(p1[1] + t * (p2[1] - p1[1]))
+            if 0 <= x < img_w and 0 <= y < img_h:
+                # 取 3x3 鄰域的最大梯度
+                y1, y2 = max(0, y-1), min(img_h, y+2)
+                x1, x2 = max(0, x-1), min(img_w, x+2)
+                total_grad += grad_mag[y1:y2, x1:x2].max()
+                sample_count += 1
+
+    if sample_count == 0:
+        return 0
+
+    avg_grad = total_grad / sample_count
+    # 正規化：梯度 20~80 是典型文件邊緣範圍
+    if avg_grad > 60:
+        return 1.0
+    elif avg_grad > 20:
+        return (avg_grad - 20) / 40.0
+    else:
+        return avg_grad / 20.0 * 0.3
+
+
+def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
+                    img: np.ndarray = None) -> Optional[tuple]:
+    """從二值遮罩中找出最佳的文件四邊形
+
+    Returns:
+        (corners, score) 或 None
+    """
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contours = sorted(contours, key=cv2.contourArea, reverse=True)[:20]
 
@@ -163,7 +285,7 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int) -> Optional[np.nda
             if len(approx) == 4:
                 pts = approx.reshape(4, 2)
                 if _is_valid_doc_quad(pts, img_w, img_h):
-                    score = _score_doc_quad(pts, img_w, img_h)
+                    score = _score_doc_quad(pts, img_w, img_h, img)
                     if score > best_score:
                         best_score = score
                         best_pts = pts
@@ -175,12 +297,14 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int) -> Optional[np.nda
             rect = cv2.minAreaRect(c)
             box = cv2.boxPoints(rect).astype(int)
             if _is_valid_doc_quad(box, img_w, img_h):
-                score = _score_doc_quad(box, img_w, img_h)
+                score = _score_doc_quad(box, img_w, img_h, img)
                 if score > best_score:
                     best_score = score
                     best_pts = box
 
-    return best_pts
+    if best_pts is not None:
+        return (best_pts, best_score)
+    return None
 
 
 def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
@@ -216,10 +340,10 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
         edged = cv2.morphologyEx(edged, cv2.MORPH_CLOSE,
                                   cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
                                   iterations=2)
-        r = _find_best_quad(edged, w, h)
-        if r is not None:
-            s = _score_doc_quad(r, w, h)
-            candidates.append((s, r, f"Canny({lo},{hi})"))
+        result = _find_best_quad(edged, w, h, img_s)
+        if result is not None:
+            pts, s = result
+            candidates.append((s, pts, f"Canny({lo},{hi})"))
 
     # ── 策略 2：白色區域（排除膚色+排除貼邊）──
     hsv = cv2.cvtColor(img_s, cv2.COLOR_BGR2HSV)
@@ -243,20 +367,20 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
     white = cv2.morphologyEx(white, cv2.MORPH_OPEN, k_s, iterations=2)
     white = cv2.morphologyEx(white, cv2.MORPH_CLOSE, k_l, iterations=4)
 
-    r = _find_best_quad(white, w, h)
-    if r is not None:
-        s = _score_doc_quad(r, w, h)
-        candidates.append((s, r, "WhiteRegion"))
+    result = _find_best_quad(white, w, h, img_s)
+    if result is not None:
+        pts, s = result
+        candidates.append((s, pts, "WhiteRegion"))
 
     # ── 策略 3：自適應閾值（Otsu）──
     _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     k_m = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
     otsu = cv2.morphologyEx(otsu, cv2.MORPH_CLOSE, k_m, iterations=3)
     otsu = cv2.morphologyEx(otsu, cv2.MORPH_OPEN, k_m, iterations=2)
-    r = _find_best_quad(otsu, w, h)
-    if r is not None:
-        s = _score_doc_quad(r, w, h)
-        candidates.append((s, r, "Otsu"))
+    result = _find_best_quad(otsu, w, h, img_s)
+    if result is not None:
+        pts, s = result
+        candidates.append((s, pts, "Otsu"))
 
     # ── 策略 4：Laplacian 銳利邊緣（文件邊緣比背景更銳利）──
     lap = cv2.Laplacian(blurred, cv2.CV_64F)
@@ -266,10 +390,10 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
     sharp = cv2.morphologyEx(sharp, cv2.MORPH_CLOSE,
                               cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)),
                               iterations=3)
-    r = _find_best_quad(sharp, w, h)
-    if r is not None:
-        s = _score_doc_quad(r, w, h)
-        candidates.append((s, r, "Laplacian"))
+    result = _find_best_quad(sharp, w, h, img_s)
+    if result is not None:
+        pts, s = result
+        candidates.append((s, pts, "Laplacian"))
 
     # ── 策略 5：GrabCut 前景分離 ──
     try:
@@ -283,10 +407,10 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
         fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE,
                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
                                iterations=3)
-        r = _find_best_quad(fg, w, h)
-        if r is not None:
-            s = _score_doc_quad(r, w, h)
-            candidates.append((s, r, "GrabCut"))
+        result = _find_best_quad(fg, w, h, img_s)
+        if result is not None:
+            pts, s = result
+            candidates.append((s, pts, "GrabCut"))
     except Exception as e:
         logger.debug("GrabCut 失敗: %s", e)
 
