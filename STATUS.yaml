@@ -3,7 +3,7 @@ name_zh: 文件掃描郵件平台
 category: personal_tools
 progress: 90
 status: production
-last_updated: "2026-04-13"
+last_updated: "2026-04-16"
 next_milestone: "OCR accuracy improvements"
 technologies:
   - Python
