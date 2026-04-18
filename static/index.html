@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ScanMail+ — 智慧文件處理平台</title>
-    <link rel="stylesheet" href="/static/css/common.css?v=3.2">
+    <link rel="stylesheet" href="/static/css/common.css?v=4.0">
 </head>
 <body>
     <div class="app-container">
@@ -14,11 +14,18 @@
                 <h1>ScanMail+</h1>
                 <p>智慧文件處理平台</p>
             </div>
-            <button class="hamburger-menu" id="hamburgerBtn" title="功能菜單">☰</button>
+            <div class="header-actions">
+                <button class="header-icon-btn" id="paletteBtn" title="工具總覽 (按 / 開啟)" aria-label="工具總覽">⌘</button>
+                <button class="header-icon-btn" id="hamburgerBtn" title="功能菜單" aria-label="功能菜單">☰</button>
+            </div>
         </header>
 
-        <!-- 工具導航列 -->
-        <nav class="tool-nav" id="toolNav"></nav>
+        <!-- v4 雙層導航：分類 + 工具 -->
+        <nav class="category-nav" id="categoryNav"></nav>
+        <nav class="tool-subnav" id="toolSubnav"></nav>
+
+        <!-- 舊版（保留為相容性，無實際渲染） -->
+        <nav class="tool-nav legacy-hidden" id="toolNav" hidden></nav>
 
         <!-- Main Content -->
         <main class="main-content">
@@ -169,6 +176,43 @@
                             <span id="scanInfoText"></span>
                         </div>
 
+                        <!-- 掃描完成後快速動作（跨工具） -->
+                        <div class="quick-actions-bar" id="scanQuickActions" style="display:none;">
+                            <div class="quick-actions-title">⚡ 完成後動作 — 一鍵將掃描結果送往其他工具</div>
+                            <div class="quick-actions-grid">
+                                <button class="quick-action-chip primary" data-scan-action="send-email">
+                                    <span class="qa-icon">📧</span>
+                                    <span class="qa-label">寄送郵件</span>
+                                    <span class="qa-sub">AI 自動撰寫信件</span>
+                                </button>
+                                <button class="quick-action-chip" data-scan-action="image-tools">
+                                    <span class="qa-icon">🖼️</span>
+                                    <span class="qa-label">圖片處理</span>
+                                    <span class="qa-sub">縮放 / 轉檔 / 壓縮</span>
+                                </button>
+                                <button class="quick-action-chip" data-scan-action="watermark">
+                                    <span class="qa-icon">💧</span>
+                                    <span class="qa-label">加浮水印</span>
+                                    <span class="qa-sub">文字浮水印</span>
+                                </button>
+                                <button class="quick-action-chip" data-scan-action="gif">
+                                    <span class="qa-icon">🎞️</span>
+                                    <span class="qa-label">合成 GIF</span>
+                                    <span class="qa-sub">與其他圖製作動畫</span>
+                                </button>
+                                <button class="quick-action-chip" data-scan-action="rename">
+                                    <span class="qa-icon">✏️</span>
+                                    <span class="qa-label">批次改名</span>
+                                    <span class="qa-sub">套用命名規則</span>
+                                </button>
+                                <button class="quick-action-chip" data-scan-action="download">
+                                    <span class="qa-icon">💾</span>
+                                    <span class="qa-label">直接下載</span>
+                                    <span class="qa-sub">儲存到本機</span>
+                                </button>
+                            </div>
+                        </div>
+
                         <button class="btn btn-primary" id="scanNextBtn" style="width: 100%; margin-top: 12px;">
                             確認掃描結果，選擇收件人 →
                         </button>
@@ -296,9 +340,29 @@
                                     <span class="summary-value" id="resultFilename"></span>
                                 </div>
                             </div>
-                            <div class="result-buttons">
+                            <div class="quick-actions-bar" id="successQuickActions" style="margin-top:24px;">
+                                <div class="quick-actions-title">⚡ 接著想做什麼？</div>
+                                <div class="quick-actions-grid">
+                                    <button class="quick-action-chip" data-success-action="image-tools">
+                                        <span class="qa-icon">🖼️</span>
+                                        <span class="qa-label">圖片工具</span>
+                                        <span class="qa-sub">用剛掃的圖繼續</span>
+                                    </button>
+                                    <button class="quick-action-chip" data-success-action="pdf">
+                                        <span class="qa-icon">📕</span>
+                                        <span class="qa-label">PDF 工具</span>
+                                        <span class="qa-sub">合併 / 加密</span>
+                                    </button>
+                                    <button class="quick-action-chip" data-success-action="watermark">
+                                        <span class="qa-icon">💧</span>
+                                        <span class="qa-label">加浮水印</span>
+                                        <span class="qa-sub">為掃描檔加註</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="result-buttons" style="margin-top:16px;">
                                 <button class="btn btn-primary" id="restartBtn">
-                                    📷 繼續掃描
+                                    📷 繼續掃描下一份
                                 </button>
                             </div>
                         </div>
@@ -856,14 +920,32 @@
         </div>
     </aside>
 
+    <!-- 工具總覽面板（⌘ / ⌘K 啟動器） -->
+    <div class="palette-overlay" id="paletteOverlay" role="dialog" aria-modal="true" aria-label="工具總覽">
+        <div class="palette-modal" id="paletteModal">
+            <div class="palette-search-row">
+                <span class="ps-icon">🔍</span>
+                <input type="text" class="palette-search" id="paletteSearch" placeholder="搜尋工具...（例：壓縮、合併、PDF）" autocomplete="off">
+                <span class="palette-hint">Esc 關閉</span>
+            </div>
+            <div class="palette-list" id="paletteList"></div>
+        </div>
+    </div>
+
+    <!-- 浮動工具切換按鈕 -->
+    <button class="quick-switch-fab" id="quickSwitchFab" title="工具總覽 (按 / 鍵開啟)" aria-label="工具總覽">⌘</button>
+
+    <!-- Toast 通知容器 -->
+    <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+
     <!-- Scripts (模組化) -->
-    <script src="/static/js/app.js?v=3.2"></script>
-    <script src="/static/js/scanmail.js?v=3.2"></script>
-    <script src="/static/js/image-tools.js?v=3.2"></script>
-    <script src="/static/js/pdf-tools.js?v=3.2"></script>
-    <script src="/static/js/doc-convert.js?v=3.2"></script>
-    <script src="/static/js/gif-tools.js?v=3.2"></script>
-    <script src="/static/js/video-tools.js?v=3.2"></script>
-    <script src="/static/js/batch-rename.js?v=3.2"></script>
+    <script src="/static/js/app.js?v=4.0"></script>
+    <script src="/static/js/scanmail.js?v=4.0"></script>
+    <script src="/static/js/image-tools.js?v=4.0"></script>
+    <script src="/static/js/pdf-tools.js?v=4.0"></script>
+    <script src="/static/js/doc-convert.js?v=4.0"></script>
+    <script src="/static/js/gif-tools.js?v=4.0"></script>
+    <script src="/static/js/video-tools.js?v=4.0"></script>
+    <script src="/static/js/batch-rename.js?v=4.0"></script>
 </body>
 </html>
