@@ -550,6 +550,8 @@ async function startScanProcessing(originalDataUrl) {
     elements.scanInfo.style.display = 'none';
     elements.scanNextBtn.disabled = true;
     elements.cropHint.textContent = '正在自動偵測文件邊界...';
+    const qa = document.getElementById('scanQuickActions');
+    if (qa) qa.style.display = 'none';
 
     // 儲存原圖 data URL
     state.cropOriginalDataUrl = originalDataUrl;
@@ -658,6 +660,8 @@ async function applyCropAndProcess() {
             elements.scanOriginal.src = state.cropOriginalDataUrl;
             elements.scanProcessed.src = processedUrl;
             state.scanProcessedUrl = processedUrl;
+            const qa = document.getElementById('scanQuickActions');
+            if (qa) qa.style.display = 'block';
 
             // 顯示資訊（含變形等級與品質提示）
             let infoText = '✅ 文件裁切完成';
@@ -703,6 +707,8 @@ function showCropEditor() {
     elements.cropEditorSection.style.display = 'block';
     elements.scanResultSection.style.display = 'none';
     elements.scanNextBtn.disabled = true;
+    const qa = document.getElementById('scanQuickActions');
+    if (qa) qa.style.display = 'none';
     drawCropCanvas();
 }
 
@@ -1617,6 +1623,95 @@ function setupEventListeners() {
     });
 
     elements.settingsForm.addEventListener('submit', saveSettings);
+
+    // ==================== v4: 跨工具快速動作 ====================
+    setupQuickActions();
+}
+
+async function getScanResultAsFile(suggestedName) {
+    if (!state.scanProcessedUrl || !window.ToolBridge) return null;
+    const baseName = (state.uploadedFile || `scan_${Date.now()}`).replace(/\.[^.]+$/, '');
+    const filename = suggestedName || `${baseName}_scanned.jpg`;
+    return await window.ToolBridge.dataUrlToFile(state.scanProcessedUrl, filename, 'image/jpeg');
+}
+
+function downloadFile(file) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function setupQuickActions() {
+    // 掃描完成後的快速動作（Step 1 結尾）
+    document.querySelectorAll('[data-scan-action]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.scanAction;
+
+            if (action === 'send-email') {
+                elements.scanNextBtn.click();
+                return;
+            }
+
+            if (action === 'download') {
+                const file = await getScanResultAsFile();
+                if (!file) {
+                    window.Toast?.show('沒有可下載的掃描結果', { type: 'error' });
+                    return;
+                }
+                downloadFile(file);
+                window.Toast?.show('已下載掃描檔案', { type: 'success' });
+                return;
+            }
+
+            const file = await getScanResultAsFile();
+            if (!file) {
+                window.Toast?.show('請先完成掃描處理', { type: 'error' });
+                return;
+            }
+
+            const map = {
+                'image-tools': { tool: 'image-tools' },
+                'watermark':   { tool: 'image-tools', opts: { action: 'watermark' } },
+                'gif':         { tool: 'gif-tools' },
+                'rename':      { tool: 'batch-rename' },
+            };
+            const cfg = map[action];
+            if (!cfg || !window.ToolBridge) return;
+            window.ToolBridge.sendFilesToTool(cfg.tool, [file], { ...(cfg.opts || {}), sourceLabel: '掃描結果' });
+        });
+    });
+
+    // 寄送成功後的快速動作（Step 4）
+    document.querySelectorAll('[data-success-action]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.successAction;
+
+            if (action === 'pdf') {
+                window.AppNav?.switchTool('pdf-tools');
+                window.Toast?.show('已切換到 PDF 工具', { type: 'info' });
+                return;
+            }
+
+            const file = await getScanResultAsFile();
+            if (!file) {
+                // 已被 restartBtn 清除 — 直接導航
+                window.AppNav?.switchTool(action === 'watermark' ? 'image-tools' : action);
+                return;
+            }
+            const map = {
+                'image-tools': { tool: 'image-tools' },
+                'watermark':   { tool: 'image-tools', opts: { action: 'watermark' } },
+            };
+            const cfg = map[action];
+            if (!cfg || !window.ToolBridge) return;
+            window.ToolBridge.sendFilesToTool(cfg.tool, [file], { ...(cfg.opts || {}), sourceLabel: '已寄送的掃描檔' });
+        });
+    });
 }
 
 // ==================== Initialize ====================
