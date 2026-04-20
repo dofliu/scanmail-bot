@@ -21,6 +21,37 @@
     "docBg": "paper"
   }/*EDITMODE-END*/;
   window.TWEAKS = TWEAKS;
+
+  // ── 裝置偵測 & 模式判斷 ────────────────────────────────
+  // Preview 模式：?preview=1 或嵌入 iframe（Claude Design 編輯器）
+  // Live 模式：直接依裝置渲染對應 shell，不顯示原型框
+  (function initAppMode(){
+    const url = new URL(location.href);
+    const forced = url.searchParams.get('view'); // 'mobile' | 'desktop' | 'both'
+    const previewParam = url.searchParams.has('preview');
+    let inIframe = false;
+    try { inIframe = (window.self !== window.top); } catch(e){ inIframe = true; }
+
+    // 只有明確要求 preview（URL 參數）或 Claude Design 編輯器（iframe）才進原型模式
+    const isPreview = previewParam || (inIframe && forced === 'both');
+
+    // Live 模式裝置判斷（UA + 視窗寬度；forced 會覆寫）
+    function detectDevice(){
+      if (forced === 'mobile' || forced === 'desktop') return forced;
+      const ua = navigator.userAgent || '';
+      const mobileUA = /android|iphone|ipad|ipod|mobile|tablet|blackberry|iemobile|opera mini/i.test(ua);
+      const narrow = window.matchMedia('(max-width: 980px)').matches;
+      return (mobileUA || narrow) ? 'mobile' : 'desktop';
+    }
+
+    window.APP_MODE = {
+      isPreview: isPreview,
+      device: detectDevice(),
+      forced: forced,
+    };
+    document.documentElement.dataset.mode = isPreview ? 'preview' : 'live';
+    document.body && (document.body.dataset.mode = isPreview ? 'preview' : 'live');
+  })();
 </script>
 </head>
 <body>
@@ -121,28 +152,27 @@ function applyTweaks(t){
   root.dataset.density = t.density;
 }
 
-function Stage(){
-  const [state, store] = window.useStore();
+// ── 原型/預覽模式 Stage（含切換 + Tweaks）─────────────
+function PreviewStage(){
   const [tweaks, setTweaks] = useState(window.TWEAKS);
   const [tweaksOpen, setTweaksOpen] = useState(false);
 
   useEffect(() => { applyTweaks(tweaks); }, [tweaks]);
 
-  // Listen for edit mode toggles
   useEffect(() => {
     const onMsg = (e) => {
       if(e.data?.type === '__activate_edit_mode') setTweaksOpen(true);
       if(e.data?.type === '__deactivate_edit_mode') setTweaksOpen(false);
     };
     window.addEventListener('message', onMsg);
-    window.parent.postMessage({type:'__edit_mode_available'}, '*');
+    try { window.parent.postMessage({type:'__edit_mode_available'}, '*'); } catch(e){}
     return () => window.removeEventListener('message', onMsg);
   }, []);
 
   const update = (patch) => {
     const next = {...tweaks, ...patch};
     setTweaks(next);
-    window.parent.postMessage({type:'__edit_mode_set_keys', edits: patch}, '*');
+    try { window.parent.postMessage({type:'__edit_mode_set_keys', edits: patch}, '*'); } catch(e){}
   };
 
   const view = tweaks.view;
@@ -190,7 +220,32 @@ function Stage(){
   );
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<Stage/>);
+// ── Live 模式：依裝置直接渲染，並在視窗大小變化時重判 ──
+function LiveApp(){
+  const [device, setDevice] = useState(window.APP_MODE.device);
+
+  useEffect(() => { applyTweaks(window.TWEAKS); }, []);
+
+  useEffect(() => {
+    if (window.APP_MODE.forced) return; // forced 模式下不跟隨視窗改變
+    const mq = window.matchMedia('(max-width: 980px)');
+    const ua = navigator.userAgent || '';
+    const mobileUA = /android|iphone|ipad|ipod|mobile|tablet|blackberry|iemobile|opera mini/i.test(ua);
+    const onChange = () => setDevice((mobileUA || mq.matches) ? 'mobile' : 'desktop');
+    // 新舊瀏覽器 API 兼容
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+    return () => {
+      if (mq.removeEventListener) mq.removeEventListener('change', onChange);
+      else if (mq.removeListener) mq.removeListener(onChange);
+    };
+  }, []);
+
+  return device === 'desktop' ? <window.DesktopShell/> : <window.MobileShell/>;
+}
+
+const Root = window.APP_MODE.isPreview ? PreviewStage : LiveApp;
+ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
 </script>
 </body>
 </html>

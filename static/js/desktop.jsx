@@ -169,23 +169,71 @@ function DDashboard(){
   );
 }
 
+// ─── 桌面相機彈窗 — 複用 CameraView ────────────────────
+function DCameraModal({ open, onClose, onCapture }){
+  if (!open) return null;
+  return (
+    <div onClick={onClose} style={{
+      position:'fixed', inset:0, zIndex:1000,
+      background:'rgba(15,22,18,0.78)', backdropFilter:'blur(4px)',
+      display:'flex', alignItems:'center', justifyContent:'center', padding:'24px',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width:'min(760px, 100%)', height:'min(580px, 90vh)',
+        background:'#111', borderRadius:'16px', overflow:'hidden',
+        position:'relative', border:'1.5px solid var(--mint-3)',
+        boxShadow:'0 20px 60px rgba(0,0,0,0.4)',
+      }}>
+        <CameraView onCapture={onCapture}/>
+        <button onClick={onClose} title="關閉" style={{
+          position:'absolute', top:'12px', right:'12px', zIndex:5,
+          width:'34px', height:'34px', borderRadius:'50%',
+          background:'rgba(0,0,0,0.55)', color:'#fff', fontSize:'18px', lineHeight:1,
+          border:'1px solid rgba(255,255,255,0.25)',
+        }}>×</button>
+        <div style={{
+          position:'absolute', top:'12px', left:'50%', transform:'translateX(-50%)',
+          zIndex:5, background:'rgba(0,0,0,0.55)', color:'#fff',
+          border:'1px solid rgba(255,255,255,0.25)', borderRadius:'999px',
+          fontSize:'11px', padding:'4px 12px', letterSpacing:'0.06em',
+        }}>📷 即時拍攝</div>
+      </div>
+    </div>
+  );
+}
+
 // ─── SCAN VIEW (desktop 3-column) — with real API ──────────
 function DScan(){
   const [state, store] = window.useStore();
   const fileRef = dUseRef(null);
   const [processing, setProcessing] = dUseState(false);
   const [sending, setSending] = dUseState(false);
+  const [showCamera, setShowCamera] = dUseState(false);
   const subjectRef = dUseRef(null);
   const bodyRef = dUseRef(null);
+
+  const runPostUpload = async () => {
+    await store.detectEdges().catch(() => {});
+    await store.processScan(state.detectedCorners, state.selectedFilter, true);
+    await store.addPageAPI();
+  };
 
   const handleUpload = async (files) => {
     if (!files?.length) return;
     setProcessing(true);
     try {
       await store.uploadFile(files[0]);
-      await store.detectEdges().catch(() => {});
-      await store.processScan(state.detectedCorners, state.selectedFilter, true);
-      await store.addPageAPI();
+      await runPostUpload();
+    } catch(e) { /* toast handled */ }
+    setProcessing(false);
+  };
+
+  const handleCapture = async (blob) => {
+    setShowCamera(false);
+    setProcessing(true);
+    try {
+      await store.captureAndUpload(blob);
+      await runPostUpload();
     } catch(e) { /* toast handled */ }
     setProcessing(false);
   };
@@ -209,13 +257,26 @@ function DScan(){
       <div className="card" style={{padding:'14px', overflow:'auto'}}>
         <div className="row between" style={{marginBottom:'10px'}}>
           <div className="label">頁面 ({state.pages.length})</div>
-          <button className="chip on" onClick={() => fileRef.current?.click()}>＋ 新增</button>
+          <div style={{display:'flex', gap:'4px'}}>
+            <button className="chip on" onClick={() => setShowCamera(true)} title="使用相機拍照">📷 拍照</button>
+            <button className="chip" onClick={() => fileRef.current?.click()} title="從電腦上傳">＋ 上傳</button>
+          </div>
         </div>
         <div className="col" style={{gap:'8px'}}>
           {state.pages.length === 0 ? (
-            <UploadDropzone accept="image/*" onFiles={handleUpload} icon="📷" label="拖放或選擇圖片">
-              <div style={{fontSize:'10.5px', color:'var(--ink-3)', marginTop:'3px'}}>JPG / PNG</div>
-            </UploadDropzone>
+            <>
+              <button onClick={() => setShowCamera(true)} className="card mint" style={{
+                padding:'16px', textAlign:'center', cursor:'pointer',
+                border:'1.5px dashed var(--mint-3)', background:'var(--mint-wash)',
+              }}>
+                <div style={{fontSize:'28px'}}>📷</div>
+                <div style={{fontSize:'13px', fontWeight:600, color:'var(--mint-4)', marginTop:'4px'}}>開啟相機拍照</div>
+                <div style={{fontSize:'10.5px', color:'var(--ink-3)', marginTop:'2px'}}>使用筆電／外接 webcam</div>
+              </button>
+              <UploadDropzone accept="image/*" onFiles={handleUpload} icon="📁" label="或拖放 / 選擇圖片">
+                <div style={{fontSize:'10.5px', color:'var(--ink-3)', marginTop:'3px'}}>JPG / PNG</div>
+              </UploadDropzone>
+            </>
           ) : (
             state.pages.map((p, i) => (
               <PageThumb key={p.id} page={p} idx={i}
@@ -225,13 +286,19 @@ function DScan(){
             ))
           )}
           {state.pages.length > 0 && (
-            <button className="card dash" style={{padding:'10px', textAlign:'center', background:'transparent', cursor:'pointer', fontSize:'12px', color:'var(--ink-3)'}} onClick={() => fileRef.current?.click()}>
-              ＋ 加一頁
-            </button>
+            <div className="row" style={{gap:'6px'}}>
+              <button className="card dash" style={{flex:1, padding:'10px', textAlign:'center', background:'transparent', cursor:'pointer', fontSize:'12px', color:'var(--mint-4)'}} onClick={() => setShowCamera(true)}>
+                📷 拍一頁
+              </button>
+              <button className="card dash" style={{flex:1, padding:'10px', textAlign:'center', background:'transparent', cursor:'pointer', fontSize:'12px', color:'var(--ink-3)'}} onClick={() => fileRef.current?.click()}>
+                ＋ 上傳
+              </button>
+            </div>
           )}
         </div>
         <input ref={fileRef} type="file" accept="image/*" style={{display:'none'}} onChange={e => handleUpload(e.target.files)}/>
       </div>
+      <DCameraModal open={showCamera} onClose={() => setShowCamera(false)} onCapture={handleCapture}/>
 
       {/* CENTER: editor */}
       <div style={{display:'flex', flexDirection:'column', gap:'12px', minHeight:0}}>

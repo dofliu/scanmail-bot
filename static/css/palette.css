@@ -568,3 +568,61 @@ input,select,textarea{font-family:inherit; color:inherit;}
 .iconbtn{width:32px; height:32px; border:1.25px solid var(--line-soft); border-radius:8px;
   display:inline-flex; align-items:center; justify-content:center; background:var(--paper); font-size:14px; cursor:pointer;}
 .iconbtn:hover{background:var(--mint-wash); border-color:var(--mint-3);}
+
+/* ================================================================
+   Live 模式：依裝置填滿視窗，去除原型框
+================================================================ */
+html[data-mode="live"], html[data-mode="live"] body{
+  height:100%; min-height:100vh;
+  overflow-x:hidden;
+}
+html[data-mode="live"] #root{
+  min-height:100vh;
+  display:flex; flex-direction:column;
+}
+
+/* 手機 live：填滿視窗，無 bezel/瀏海/狀態列 */
+html[data-mode="live"] .phone{
+  width:100vw; max-width:100%;
+  padding:0;
+  background:var(--paper);
+  border-radius:0;
+  box-shadow:none;
+  flex:1; min-height:100vh;
+}
+html[data-mode="live"] .phone::before{ display:none; }
+html[data-mode="live"] .phone-inner{
+  border-radius:0;
+  height:100vh;
+  height:100dvh;
+  max-width:100%;
+  margin:0 auto;
+  box-shadow:none;
+}
+html[data-mode="live"] .phone-inner .status-bar{ display:none; }
+
+/* 桌面 live：填滿視窗，無外框 */
+html[data-mode="live"] .desktop{
+  width:100vw;
+  height:100vh;
+  height:100dvh;
+  border:none;
+  border-radius:0;
+  box-shadow:none;
+  flex:1;
+}
+
+/* 若在極寬螢幕被迫切換到手機模式（forced），保留一個舒適寬度置中 */
+html[data-mode="live"] body{
+  background:var(--paper);
+}
+@media (min-width: 981px){
+  html[data-mode="live"] .phone{
+    max-width:640px;
+    margin:0 auto;
+    box-shadow:0 12px 32px rgba(31,42,36,0.12);
+  }
+  html[data-mode="live"] .phone-inner{
+    max-width:640px;
+  }
+}
