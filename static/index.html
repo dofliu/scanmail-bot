@@ -1,951 +1,196 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScanMail+ — 智慧文件處理平台</title>
-    <link rel="stylesheet" href="/static/css/common.css?v=4.0">
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>ScanMail+ · Hi-Fi</title>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Architects+Daughter&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="css/palette.css"/>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script>
+  // Tweaks defaults
+  const TWEAKS = /*EDITMODE-BEGIN*/{
+    "view": "mobile",
+    "accent": "mint",
+    "density": "default",
+    "showLabels": true,
+    "docBg": "paper"
+  }/*EDITMODE-END*/;
+  window.TWEAKS = TWEAKS;
+</script>
 </head>
 <body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-title">
-                <h1>ScanMail+</h1>
-                <p>智慧文件處理平台</p>
-            </div>
-            <div class="header-actions">
-                <button class="header-icon-btn" id="paletteBtn" title="工具總覽 (按 / 開啟)" aria-label="工具總覽">⌘</button>
-                <button class="header-icon-btn" id="hamburgerBtn" title="功能菜單" aria-label="功能菜單">☰</button>
-            </div>
-        </header>
+<div id="root"></div>
 
-        <!-- v4 雙層導航：分類 + 工具 -->
-        <nav class="category-nav" id="categoryNav"></nav>
-        <nav class="tool-subnav" id="toolSubnav"></nav>
+<script src="js/api.js"></script>
+<script src="js/store.js"></script>
+<script type="text/babel" src="js/atoms.jsx"></script>
+<script type="text/babel" src="js/mobile.jsx"></script>
+<script type="text/babel" src="js/desktop.jsx"></script>
 
-        <!-- 舊版（保留為相容性，無實際渲染） -->
-        <nav class="tool-nav legacy-hidden" id="toolNav" hidden></nav>
+<script type="text/babel">
+const { useState, useEffect } = React;
 
-        <!-- Main Content -->
-        <main class="main-content">
+function TweaksPanel({ open, onClose, tweaks, onChange }){
+  if(!open) return null;
+  return (
+    <div className="tweakpanel" style={{width:'260px'}}>
+      <div className="row between" style={{marginBottom:'6px'}}>
+        <h4>Tweaks</h4>
+        <button onClick={onClose} style={{fontSize:'16px', color:'var(--ink-3)'}}>×</button>
+      </div>
+      <div className="stroke dash soft" style={{marginBottom:'10px'}}/>
 
-            <!-- ════════════════════════════════════════════ -->
-            <!-- Tool: 掃描郵寄 (ScanMail)                   -->
-            <!-- ════════════════════════════════════════════ -->
-            <div class="tool-page active" data-tool="scanmail">
-                <!-- Step Indicator -->
-                <div class="step-indicator">
-                    <div class="step-dot active" data-step="1">1</div>
-                    <div class="step-dot" data-step="2">2</div>
-                    <div class="step-dot" data-step="3">3</div>
-                    <div class="step-dot" data-step="4">4</div>
-                </div>
+      <label>視圖
+        <select value={tweaks.view} onChange={e => onChange({view: e.target.value})}>
+          <option value="mobile">📱 僅手機</option>
+          <option value="desktop">💻 僅桌面</option>
+          <option value="both">📱💻 兩者並列</option>
+        </select>
+      </label>
 
-                <!-- Step 1: Camera & Upload -->
-                <section class="step active" data-step="1">
-                    <h2 class="step-title">拍照 / 上傳</h2>
-                    <div class="card">
-                        <div class="camera-preview-container" id="cameraContainer">
-                            <video id="cameraPreview" playsinline></video>
-                            <canvas id="cameraCanvas"></canvas>
-                            <div class="camera-overlay"></div>
-                        </div>
-                        <div class="thumbnail-preview" id="thumbnailPreview" style="display: none;">
-                            <img id="thumbnailImage" class="thumbnail-image" alt="Preview">
-                        </div>
-                        <div class="capture-buttons">
-                            <button class="btn btn-primary" id="captureBtn">
-                                📷 拍照
-                            </button>
-                            <button class="btn btn-secondary" id="uploadBtn">
-                                📁 上傳檔案
-                            </button>
-                        </div>
-                        <div id="retakeContainer" style="display: none;">
-                            <button class="btn btn-secondary" id="retakeBtn" style="width: 100%; margin-bottom: 12px;">
-                                🔄 重新拍照
-                            </button>
-                        </div>
-                        <button class="btn btn-primary" id="nextStep1Btn" style="width: 100%; display: none;">
-                            下一步 →
-                        </button>
-                    </div>
+      <label>主色
+        <select value={tweaks.accent} onChange={e => onChange({accent: e.target.value})}>
+          <option value="mint">薄荷綠 (預設)</option>
+          <option value="sage">灰綠</option>
+          <option value="teal">深青</option>
+          <option value="terracotta">磚紅</option>
+        </select>
+      </label>
 
-                    <!-- 掃描後處理面板 -->
-                    <div class="card scan-panel" id="scanPanel" style="display: none;">
-                        <h3 style="margin-bottom: 12px; font-size: 16px;">✨ 文件掃描處理</h3>
+      <label>紙張底色
+        <select value={tweaks.docBg} onChange={e => onChange({docBg: e.target.value})}>
+          <option value="paper">米紙</option>
+          <option value="warm">暖白</option>
+          <option value="cool">冷白</option>
+          <option value="gray">灰紙</option>
+        </select>
+      </label>
 
-                        <!-- 裁切編輯器 -->
-                        <div id="cropEditorSection">
-                            <span class="scan-label">拖曳四個角點調整文件邊界，裁切掉背景</span>
-                            <div class="crop-editor">
-                                <div class="crop-canvas-wrapper" id="cropCanvasWrapper">
-                                    <canvas id="cropCanvas"></canvas>
-                                </div>
-                                <!-- 即時預覽 -->
-                                <div id="livePreviewSection" style="display:none; margin-top:10px; text-align:center;">
-                                    <span class="scan-label">即時預覽（校正後效果）</span>
-                                    <div style="display:inline-block; border:1px solid var(--border-color); border-radius:8px; overflow:hidden; background:#f8f8f8;">
-                                        <canvas id="livePreviewCanvas" style="display:block; max-width:100%; max-height:35vh;"></canvas>
-                                    </div>
-                                </div>
-                                <div class="rotate-controls">
-                                    <button class="rotate-btn" id="rotateCCWBtn">↺ 左轉 90°</button>
-                                    <button class="rotate-btn" id="rotateCWBtn">↻ 右轉 90°</button>
-                                </div>
-                                <div class="crop-controls">
-                                    <button class="crop-btn" id="cropAutoDetectBtn">🔍 自動偵測</button>
-                                    <button class="crop-btn" id="cropResetBtn">↩️ 重設</button>
-                                    <button class="crop-btn primary" id="cropApplyBtn">✂️ 裁切並處理</button>
-                                </div>
-                                <p class="crop-hint" id="cropHint">自動偵測文件邊界中...</p>
-                            </div>
-                        </div>
+      <label>密度
+        <select value={tweaks.density} onChange={e => onChange({density: e.target.value})}>
+          <option value="tight">緊湊</option>
+          <option value="default">預設</option>
+          <option value="loose">寬鬆</option>
+        </select>
+      </label>
 
-                        <!-- 處理結果預覽 -->
-                        <div id="scanResultSection" style="display: none;">
-                            <div class="scan-preview-row">
-                                <div class="scan-preview-item">
-                                    <span class="scan-label">原始</span>
-                                    <img id="scanOriginal" class="scan-preview-img" alt="原始">
-                                </div>
-                                <div class="scan-arrow">→</div>
-                                <div class="scan-preview-item">
-                                    <span class="scan-label">處理後</span>
-                                    <img id="scanProcessed" class="scan-preview-img" alt="處理後">
-                                </div>
-                            </div>
+      <label>手寫標籤
+        <input type="checkbox" checked={tweaks.showLabels} onChange={e => onChange({showLabels: e.target.checked})}/>
+      </label>
 
-                            <!-- 濾鏡選擇 -->
-                            <div class="filter-options" id="filterOptions">
-                                <button class="filter-btn active" data-filter="auto">
-                                    <span class="filter-icon">🪄</span>
-                                    <span>自動</span>
-                                </button>
-                                <button class="filter-btn" data-filter="scan">
-                                    <span class="filter-icon">🖨️</span>
-                                    <span>專業掃描</span>
-                                </button>
-                                <button class="filter-btn" data-filter="color_doc">
-                                    <span class="filter-icon">🔴</span>
-                                    <span>彩色公文</span>
-                                </button>
-                                <button class="filter-btn" data-filter="document">
-                                    <span class="filter-icon">📄</span>
-                                    <span>文件</span>
-                                </button>
-                                <button class="filter-btn" data-filter="enhance">
-                                    <span class="filter-icon">🔆</span>
-                                    <span>增強</span>
-                                </button>
-                                <button class="filter-btn" data-filter="bw">
-                                    <span class="filter-icon">◼️</span>
-                                    <span>黑白</span>
-                                </button>
-                                <button class="filter-btn" data-filter="original">
-                                    <span class="filter-icon">🖼️</span>
-                                    <span>原圖</span>
-                                </button>
-                            </div>
-
-                            <button class="crop-btn" id="cropEditAgainBtn" style="margin-bottom: 10px;">✏️ 重新調整裁切範圍</button>
-                        </div>
-
-                        <!-- 多頁掃描面板 -->
-                        <div class="pages-strip" id="pagesStrip" style="display: none;">
-                            <div class="pages-header">
-                                <h4>📄 已掃描頁面</h4>
-                                <span class="pages-count" id="pagesCount">0 頁</span>
-                            </div>
-                            <div class="pages-list" id="pagesList"></div>
-                            <div class="pages-actions">
-                                <button class="crop-btn primary" id="addPageBtn">➕ 加入此頁</button>
-                                <button class="crop-btn" id="addMorePageBtn">📷 繼續掃描下一頁</button>
-                            </div>
-                        </div>
-
-                        <!-- 處理狀態 -->
-                        <div class="scan-status" id="scanStatus" style="display: none;">
-                            <div class="loading-spinner small"></div>
-                            <span id="scanStatusText">正在處理...</span>
-                        </div>
-
-                        <!-- 邊界偵測資訊 -->
-                        <div class="scan-info" id="scanInfo" style="display: none;">
-                            <span id="scanInfoText"></span>
-                        </div>
-
-                        <!-- 掃描完成後快速動作（跨工具） -->
-                        <div class="quick-actions-bar" id="scanQuickActions" style="display:none;">
-                            <div class="quick-actions-title">⚡ 完成後動作 — 一鍵將掃描結果送往其他工具</div>
-                            <div class="quick-actions-grid">
-                                <button class="quick-action-chip primary" data-scan-action="send-email">
-                                    <span class="qa-icon">📧</span>
-                                    <span class="qa-label">寄送郵件</span>
-                                    <span class="qa-sub">AI 自動撰寫信件</span>
-                                </button>
-                                <button class="quick-action-chip" data-scan-action="image-tools">
-                                    <span class="qa-icon">🖼️</span>
-                                    <span class="qa-label">圖片處理</span>
-                                    <span class="qa-sub">縮放 / 轉檔 / 壓縮</span>
-                                </button>
-                                <button class="quick-action-chip" data-scan-action="watermark">
-                                    <span class="qa-icon">💧</span>
-                                    <span class="qa-label">加浮水印</span>
-                                    <span class="qa-sub">文字浮水印</span>
-                                </button>
-                                <button class="quick-action-chip" data-scan-action="gif">
-                                    <span class="qa-icon">🎞️</span>
-                                    <span class="qa-label">合成 GIF</span>
-                                    <span class="qa-sub">與其他圖製作動畫</span>
-                                </button>
-                                <button class="quick-action-chip" data-scan-action="rename">
-                                    <span class="qa-icon">✏️</span>
-                                    <span class="qa-label">批次改名</span>
-                                    <span class="qa-sub">套用命名規則</span>
-                                </button>
-                                <button class="quick-action-chip" data-scan-action="download">
-                                    <span class="qa-icon">💾</span>
-                                    <span class="qa-label">直接下載</span>
-                                    <span class="qa-sub">儲存到本機</span>
-                                </button>
-                            </div>
-                        </div>
-
-                        <button class="btn btn-primary" id="scanNextBtn" style="width: 100%; margin-top: 12px;">
-                            確認掃描結果，選擇收件人 →
-                        </button>
-                    </div>
-                </section>
-
-                <!-- Step 2: Contact Selection -->
-                <section class="step" data-step="2">
-                    <h2 class="step-title">選擇收件人</h2>
-                    <div class="card">
-                        <button class="btn btn-primary add-contact-btn" id="addContactBtn">
-                            ➕ 新增收件人
-                        </button>
-
-                        <div id="addContactForm" style="display: none; margin-bottom: 20px; padding: 20px; background: var(--bg-light); border-radius: 8px;">
-                            <h3 style="margin-bottom: 16px;">新增收件人</h3>
-                            <div class="form-group">
-                                <label class="form-label">姓名</label>
-                                <input type="text" class="form-input" id="contactName" placeholder="例: 王經理">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">Email</label>
-                                <input type="email" class="form-input" id="contactEmail" placeholder="例: wang@company.com">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">部門</label>
-                                <input type="text" class="form-input" id="contactDept" placeholder="例: 行政部">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">職稱</label>
-                                <input type="text" class="form-input" id="contactTitle" placeholder="例: 經理">
-                            </div>
-                            <div class="form-buttons">
-                                <button class="btn btn-secondary" id="cancelContactBtn">取消</button>
-                                <button class="btn btn-primary" id="saveContactBtn">儲存</button>
-                            </div>
-                        </div>
-
-                        <div class="contacts-grid" id="contactsGrid"></div>
-
-                        <div id="noContactsMsg" style="text-align: center; padding: 40px 20px; color: var(--text-secondary);">
-                            尚無聯絡人，請新增一個
-                        </div>
-
-                        <button class="btn btn-primary" id="nextToAnalyzeBtn"
-                                style="display: none; width: 100%; margin-top: 20px; padding: 16px; font-size: 18px;">
-                            🤖 開始 AI 辨識 →
-                        </button>
-                    </div>
-                </section>
-
-                <!-- Step 3: Preview & Confirm -->
-                <section class="step" data-step="3">
-                    <h2 class="step-title">預覽確認</h2>
-                    <div class="card">
-                        <div id="loadingState" class="loading-state">
-                            <div class="spinner"></div>
-                            <div class="loading-text">🤖 AI 辨識中...</div>
-                        </div>
-
-                        <div id="previewContent" style="display: none;">
-                            <div id="confidenceWarning" style="display: none;" class="warning-banner">
-                                <span class="warning-icon">⚠️</span>
-                                <div>
-                                    <strong>低可信度警告</strong><br>
-                                    AI 辨識信心度低於 30%，建議確認文件內容無誤
-                                </div>
-                            </div>
-
-                            <div class="email-preview">
-                                <div class="email-header">
-                                    <div class="doc-type-badge" id="docTypeBadge">
-                                        <span id="docTypeIcon">📎</span>
-                                        <span id="docTypeText">其他</span>
-                                    </div>
-                                    <div class="email-header-text">
-                                        <div class="email-subject" id="emailSubject" contenteditable="false">主旨</div>
-                                        <div class="confidence-badge" id="confidenceBadge">信心度: 100%</div>
-                                    </div>
-                                </div>
-
-                                <div class="email-body" id="emailBody" contenteditable="false">
-                                    Email body content
-                                </div>
-
-                                <div class="email-meta">
-                                    <div class="meta-row">
-                                        <div class="meta-label">收件人</div>
-                                        <div class="meta-value" id="recipientDisplay"></div>
-                                    </div>
-                                    <div class="meta-row">
-                                        <div class="meta-label">檔名</div>
-                                        <div class="meta-value" id="filenameDisplay" contenteditable="false"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="preview-buttons" style="margin-top: 20px;">
-                                <button class="btn btn-secondary" id="cancelBtn">取消</button>
-                                <button class="btn btn-secondary" id="editBtn">編輯</button>
-                                <button class="btn btn-success" id="sendBtn">確認寄出 ✓</button>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <!-- Step 4: Result -->
-                <section class="step" data-step="4">
-                    <div class="card">
-                        <div id="successResult" class="result-container" style="display: none;">
-                            <div class="result-icon">✓</div>
-                            <h2 class="result-title">寄送成功</h2>
-                            <p class="result-message">您的掃描文件已成功發送</p>
-                            <div class="result-summary">
-                                <div class="summary-item">
-                                    <span class="summary-label">主旨:</span>
-                                    <span class="summary-value" id="resultSubject"></span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="summary-label">收件人:</span>
-                                    <span class="summary-value" id="resultRecipient"></span>
-                                </div>
-                                <div class="summary-item">
-                                    <span class="summary-label">檔名:</span>
-                                    <span class="summary-value" id="resultFilename"></span>
-                                </div>
-                            </div>
-                            <div class="quick-actions-bar" id="successQuickActions" style="margin-top:24px;">
-                                <div class="quick-actions-title">⚡ 接著想做什麼？</div>
-                                <div class="quick-actions-grid">
-                                    <button class="quick-action-chip" data-success-action="image-tools">
-                                        <span class="qa-icon">🖼️</span>
-                                        <span class="qa-label">圖片工具</span>
-                                        <span class="qa-sub">用剛掃的圖繼續</span>
-                                    </button>
-                                    <button class="quick-action-chip" data-success-action="pdf">
-                                        <span class="qa-icon">📕</span>
-                                        <span class="qa-label">PDF 工具</span>
-                                        <span class="qa-sub">合併 / 加密</span>
-                                    </button>
-                                    <button class="quick-action-chip" data-success-action="watermark">
-                                        <span class="qa-icon">💧</span>
-                                        <span class="qa-label">加浮水印</span>
-                                        <span class="qa-sub">為掃描檔加註</span>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="result-buttons" style="margin-top:16px;">
-                                <button class="btn btn-primary" id="restartBtn">
-                                    📷 繼續掃描下一份
-                                </button>
-                            </div>
-                        </div>
-
-                        <div id="errorResult" class="result-container" style="display: none;">
-                            <div class="result-icon" style="color: #d32f2f;">✕</div>
-                            <h2 class="result-title">寄送失敗</h2>
-                            <p class="result-message" id="errorMessage"></p>
-                            <div class="result-buttons">
-                                <button class="btn btn-danger" id="retryBtn">重試</button>
-                                <button class="btn btn-secondary" id="backBtn">返回編輯</button>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-            </div><!-- /tool: scanmail -->
-
-            <!-- ════════════════════════════════════════════ -->
-            <!-- Tool Placeholders (後續 Phase 實作)          -->
-            <!-- ════════════════════════════════════════════ -->
-            <div class="tool-page" data-tool="image-tools">
-                <h2 class="step-title">🖼️ 圖片工具</h2>
-
-                <!-- 動作選擇 -->
-                <div class="card" style="padding:12px;">
-                    <div style="display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch;">
-                        <button class="filter-btn active img-action-tab" data-action="resize">
-                            <span class="filter-icon">📐</span><span>縮放</span>
-                        </button>
-                        <button class="filter-btn img-action-tab" data-action="convert">
-                            <span class="filter-icon">🔄</span><span>轉檔</span>
-                        </button>
-                        <button class="filter-btn img-action-tab" data-action="compress">
-                            <span class="filter-icon">📦</span><span>壓縮</span>
-                        </button>
-                        <button class="filter-btn img-action-tab" data-action="watermark">
-                            <span class="filter-icon">💧</span><span>浮水印</span>
-                        </button>
-                    </div>
-                </div>
-
-                <!-- 上傳區 -->
-                <div class="card">
-                    <div id="imgDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
-                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">📁</div>
-                        <div style="font-size:14px; color:var(--text-secondary);">拖放圖片到此處，或點擊選擇檔案</div>
-                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">支援 JPG, PNG, WebP, BMP, GIF（最多 50 個，單檔 20MB）</div>
-                    </div>
-                    <input type="file" id="imgFileInput" multiple accept="image/*" style="display:none;">
-
-                    <!-- 檔案列表 -->
-                    <div id="imgFileList" style="display:none; margin-top:12px;"></div>
-
-                    <!-- 選項面板 -->
-                    <div id="imgOpts_resize" class="img-options-panel" style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">縮放選項</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">寬度 (px)</label>
-                                <input type="number" class="form-input" id="imgResizeW" value="800" min="1" max="10000">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">高度 (px)</label>
-                                <input type="number" class="form-input" id="imgResizeH" value="600" min="1" max="10000">
-                            </div>
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">模式</label>
-                                <select class="form-input" id="imgResizeMode">
-                                    <option value="fit">等比縮放（白底填充）</option>
-                                    <option value="cover">等比裁切（填滿）</option>
-                                    <option value="stretch">強制拉伸</option>
-                                </select>
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">輸出格式</label>
-                                <select class="form-input" id="imgResizeFmt">
-                                    <option value="JPEG">JPEG</option>
-                                    <option value="PNG">PNG</option>
-                                    <option value="WEBP">WebP</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="form-group" style="margin:8px 0 0;">
-                            <label class="form-label">品質 (1-100)</label>
-                            <input type="range" id="imgResizeQ" min="1" max="100" value="85" style="width:100%;">
-                        </div>
-                    </div>
-
-                    <div id="imgOpts_convert" class="img-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">轉檔選項</div>
-                        <div class="form-group" style="margin-bottom:8px;">
-                            <label class="form-label">目標格式</label>
-                            <select class="form-input" id="imgConvertFmt">
-                                <option value="PNG">PNG</option>
-                                <option value="JPEG">JPEG</option>
-                                <option value="WEBP">WebP</option>
-                                <option value="BMP">BMP</option>
-                                <option value="GIF">GIF</option>
-                            </select>
-                        </div>
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label class="form-label">品質 (JPEG/WebP)</label>
-                            <input type="range" id="imgConvertQ" min="1" max="100" value="85" style="width:100%;">
-                        </div>
-                    </div>
-
-                    <div id="imgOpts_compress" class="img-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">壓縮選項</div>
-                        <div class="form-group" style="margin-bottom:8px;">
-                            <label class="form-label">品質 (越低檔案越小)</label>
-                            <input type="range" id="imgCompressQ" min="1" max="100" value="70" style="width:100%;">
-                        </div>
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label class="form-label">最大邊長 (px，0=不限)</label>
-                            <input type="number" class="form-input" id="imgCompressMax" value="0" min="0" max="10000">
-                        </div>
-                    </div>
-
-                    <div id="imgOpts_watermark" class="img-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">浮水印選項</div>
-                        <div class="form-group" style="margin-bottom:8px;">
-                            <label class="form-label">浮水印文字</label>
-                            <input type="text" class="form-input" id="imgWmText" value="CONFIDENTIAL" placeholder="浮水印文字">
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">字體大小</label>
-                                <input type="number" class="form-input" id="imgWmSize" value="36" min="8" max="200">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">透明度 (%)</label>
-                                <input type="range" id="imgWmOpacity" min="10" max="100" value="80" style="width:100%;">
-                            </div>
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">位置</label>
-                                <select class="form-input" id="imgWmPos">
-                                    <option value="center">置中</option>
-                                    <option value="tile">平鋪</option>
-                                    <option value="top-left">左上</option>
-                                    <option value="top-right">右上</option>
-                                    <option value="bottom-left">左下</option>
-                                    <option value="bottom-right">右下</option>
-                                </select>
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">顏色</label>
-                                <input type="color" id="imgWmColor" value="#000000" style="width:100%; height:36px; border:1px solid var(--border-color); border-radius:6px;">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 進度條 -->
-                    <div id="imgProgress" style="display:none; margin-top:12px;"></div>
-
-                    <!-- 結果下載 -->
-                    <div id="imgResult" style="display:none; margin-top:12px;"></div>
-
-                    <!-- 操作按鈕 -->
-                    <div style="display:flex; gap:8px; margin-top:16px;">
-                        <button class="crop-btn" id="imgClearBtn" style="display:none;">🗑️ 清除</button>
-                        <button class="btn btn-primary" id="imgProcessBtn" style="display:none; flex:1;">
-                            ⚡ 開始處理
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tool-page" data-tool="gif-tools">
-                <h2 class="step-title">🎞️ GIF 製作</h2>
-                <div class="card">
-                    <div id="gifDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
-                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">🎞️</div>
-                        <div style="font-size:14px; color:var(--text-secondary);">拖放多張圖片到此處（依順序產生動畫）</div>
-                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">支援 JPG, PNG, WebP, GIF</div>
-                    </div>
-                    <input type="file" id="gifFileInput" multiple accept="image/*" style="display:none;">
-                    <div id="gifFileList" style="display:none; margin-top:12px;"></div>
-
-                    <div style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">GIF 選項</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">每幀時間 (ms)</label>
-                                <input type="number" class="form-input" id="gifDuration" value="500" min="50" max="5000">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">縮放模式</label>
-                                <select class="form-input" id="gifResizeMode">
-                                    <option value="fit">等比縮放</option>
-                                    <option value="cover">裁切填滿</option>
-                                    <option value="stretch">拉伸</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">輸出寬度 (0=自動)</label>
-                                <input type="number" class="form-input" id="gifWidth" value="0" min="0" max="2000">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">輸出高度 (0=自動)</label>
-                                <input type="number" class="form-input" id="gifHeight" value="0" min="0" max="2000">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div id="gifProgress" style="display:none; margin-top:12px;"></div>
-                    <div id="gifResult" style="display:none; margin-top:12px;"></div>
-                    <div style="display:flex; gap:8px; margin-top:16px;">
-                        <button class="crop-btn" id="gifClearBtn" style="display:none;">🗑️ 清除</button>
-                        <button class="btn btn-primary" id="gifProcessBtn" style="display:none; flex:1;">⚡ 產生 GIF</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tool-page" data-tool="video-tools">
-                <h2 class="step-title">🎬 影片工具</h2>
-                <div class="card" style="padding:12px;">
-                    <div style="display:flex; gap:6px; overflow-x:auto;">
-                        <button class="filter-btn active vid-action-tab" data-action="merge">
-                            <span class="filter-icon">📎</span><span>合併</span>
-                        </button>
-                        <button class="filter-btn vid-action-tab" data-action="to-gif">
-                            <span class="filter-icon">🎞️</span><span>轉GIF</span>
-                        </button>
-                        <button class="filter-btn vid-action-tab" data-action="compress">
-                            <span class="filter-icon">📦</span><span>壓縮</span>
-                        </button>
-                    </div>
-                </div>
-                <div class="card">
-                    <div id="vidDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
-                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">🎬</div>
-                        <div id="vidDropHint" style="font-size:14px; color:var(--text-secondary);">拖放多個影片檔案</div>
-                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">支援 MP4, AVI, MOV, MKV, WebM（單檔 200MB）</div>
-                    </div>
-                    <input type="file" id="vidFileInput" multiple accept="video/*" style="display:none;">
-                    <div id="vidFileList" style="display:none; margin-top:12px;"></div>
-
-                    <!-- 合併選項（預設顯示） -->
-                    <div id="vidOpts_merge" class="vid-options-panel" style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-size:13px; color:var(--text-secondary);">影片將按列表順序依次合併為一個 MP4 檔案</div>
-                    </div>
-
-                    <!-- 轉GIF選項 -->
-                    <div id="vidOpts_to-gif" class="vid-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">影片轉 GIF</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">幀率 (FPS)</label>
-                                <input type="number" class="form-input" id="vidGifFps" value="10" min="1" max="30">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">輸出寬度 (0=自動)</label>
-                                <input type="number" class="form-input" id="vidGifWidth" value="0" min="0">
-                            </div>
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">起始秒數</label>
-                                <input type="number" class="form-input" id="vidGifStart" value="0" min="0" step="0.5">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">結束秒數 (0=全部)</label>
-                                <input type="number" class="form-input" id="vidGifEnd" value="0" min="0" step="0.5">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 壓縮選項 -->
-                    <div id="vidOpts_compress" class="vid-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">影片壓縮</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">解析度</label>
-                                <select class="form-input" id="vidCompressRes">
-                                    <option value="">維持原始</option>
-                                    <option value="720p">720p</option>
-                                    <option value="480p">480p</option>
-                                    <option value="360p">360p</option>
-                                </select>
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">品質 (CRF, 越高越小)</label>
-                                <input type="range" id="vidCompressCrf" min="18" max="40" value="28" style="width:100%;">
-                            </div>
-                        </div>
-                    </div>
-
-                    <div id="vidProgress" style="display:none; margin-top:12px;"></div>
-                    <div id="vidResult" style="display:none; margin-top:12px;"></div>
-                    <div style="display:flex; gap:8px; margin-top:16px;">
-                        <button class="crop-btn" id="vidClearBtn" style="display:none;">🗑️ 清除</button>
-                        <button class="btn btn-primary" id="vidProcessBtn" style="display:none; flex:1;">⚡ 開始處理</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tool-page" data-tool="pdf-tools">
-                <h2 class="step-title">📕 PDF 工具</h2>
-                <div class="card" style="padding:12px;">
-                    <div style="display:flex; gap:6px; overflow-x:auto;">
-                        <button class="filter-btn active pdf-action-tab" data-action="merge">
-                            <span class="filter-icon">📎</span><span>合併</span>
-                        </button>
-                        <button class="filter-btn pdf-action-tab" data-action="watermark">
-                            <span class="filter-icon">💧</span><span>浮水印</span>
-                        </button>
-                        <button class="filter-btn pdf-action-tab" data-action="protect">
-                            <span class="filter-icon">🔒</span><span>加密</span>
-                        </button>
-                    </div>
-                </div>
-                <div class="card">
-                    <div id="pdfDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
-                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">📕</div>
-                        <div id="pdfDropHint" style="font-size:14px; color:var(--text-secondary);">拖放多個 PDF 檔案到此處</div>
-                    </div>
-                    <input type="file" id="pdfFileInput" multiple accept=".pdf" style="display:none;">
-                    <div id="pdfFileList" style="display:none; margin-top:12px;"></div>
-
-                    <!-- 合併選項 -->
-                    <div id="pdfOpts_merge" class="pdf-options-panel" style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
-                            <input type="checkbox" id="pdfMergeToc"> 自動產生書籤目錄
-                        </label>
-                    </div>
-
-                    <!-- 浮水印選項 -->
-                    <div id="pdfOpts_watermark" class="pdf-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">文字浮水印</div>
-                        <div class="form-group" style="margin-bottom:8px;">
-                            <label class="form-label">浮水印文字</label>
-                            <input type="text" class="form-input" id="pdfWmText" value="CONFIDENTIAL">
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">字體大小</label>
-                                <input type="number" class="form-input" id="pdfWmSize" value="48" min="12" max="200">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">透明度 (%)</label>
-                                <input type="number" class="form-input" id="pdfWmOpacity" value="15" min="5" max="100">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">旋轉角度</label>
-                                <input type="number" class="form-input" id="pdfWmRotation" value="45" min="0" max="360">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 加密選項 -->
-                    <div id="pdfOpts_protect" class="pdf-options-panel" style="display:none; margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div class="form-group" style="margin-bottom:0;">
-                            <label class="form-label">設定密碼</label>
-                            <input type="password" class="form-input" id="pdfPassword" placeholder="輸入 PDF 開啟密碼">
-                        </div>
-                    </div>
-
-                    <div id="pdfProgress" style="display:none; margin-top:12px;"></div>
-                    <div id="pdfResult" style="display:none; margin-top:12px;"></div>
-                    <div style="display:flex; gap:8px; margin-top:16px;">
-                        <button class="crop-btn" id="pdfClearBtn" style="display:none;">🗑️ 清除</button>
-                        <button class="btn btn-primary" id="pdfProcessBtn" style="display:none; flex:1;">⚡ 開始處理</button>
-                    </div>
-                </div>
-            </div>
-
-            <div class="tool-page" data-tool="doc-convert">
-                <h2 class="step-title">🔄 文件轉檔</h2>
-                <div class="card" style="padding:12px;">
-                    <div style="display:flex; gap:6px; overflow-x:auto; -webkit-overflow-scrolling:touch;">
-                        <button class="filter-btn active doc-conv-tab" data-conv="word-to-pdf">
-                            <span class="filter-icon">📄</span><span>Word→PDF</span>
-                        </button>
-                        <button class="filter-btn doc-conv-tab" data-conv="pdf-to-word">
-                            <span class="filter-icon">📕</span><span>PDF→Word</span>
-                        </button>
-                        <button class="filter-btn doc-conv-tab" data-conv="md-to-pdf">
-                            <span class="filter-icon">📝</span><span>MD→PDF</span>
-                        </button>
-                        <button class="filter-btn doc-conv-tab" data-conv="md-to-word">
-                            <span class="filter-icon">📝</span><span>MD→Word</span>
-                        </button>
-                        <button class="filter-btn doc-conv-tab" data-conv="word-to-md">
-                            <span class="filter-icon">📄</span><span>Word→MD</span>
-                        </button>
-                    </div>
-                </div>
-                <div class="card">
-                    <div id="docDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
-                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">🔄</div>
-                        <div id="docDropHint" style="font-size:14px; color:var(--text-secondary);">拖放 .docx 檔案到此處</div>
-                    </div>
-                    <input type="file" id="docFileInput" accept=".docx" style="display:none;">
-                    <div id="docProgress" style="display:none; margin-top:12px;"></div>
-                    <div id="docResult" style="display:none; margin-top:12px;"></div>
-                    <button class="btn btn-primary" id="docConvertBtn" style="display:none; width:100%; margin-top:16px;">
-                        ⚡ Word → PDF
-                    </button>
-                </div>
-            </div>
-
-            <div class="tool-page" data-tool="batch-rename">
-                <h2 class="step-title">✏️ 批次改名</h2>
-                <div class="card">
-                    <div id="renDropzone" style="border:2px dashed var(--border-color); border-radius:10px; padding:40px 20px; text-align:center; cursor:pointer; transition:var(--transition);">
-                        <div style="font-size:36px; margin-bottom:8px; opacity:0.5;">📁</div>
-                        <div style="font-size:14px; color:var(--text-secondary);">拖放任意檔案到此處</div>
-                        <div style="font-size:12px; color:var(--text-secondary); margin-top:4px;">設定改名規則後，下載重命名的 ZIP</div>
-                    </div>
-                    <input type="file" id="renFileInput" multiple style="display:none;">
-                    <div id="renFileInfo" style="margin-top:8px;"></div>
-
-                    <!-- 改名規則 -->
-                    <div style="margin-top:16px; padding:12px; background:var(--bg-light); border-radius:8px;">
-                        <div style="font-weight:600; font-size:13px; margin-bottom:10px;">改名規則</div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">加前綴</label>
-                                <input type="text" class="form-input" id="renPrefix" placeholder="例: IMG_">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">加後綴</label>
-                                <input type="text" class="form-input" id="renSuffix" placeholder="例: _final">
-                            </div>
-                        </div>
-                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">搜尋文字</label>
-                                <input type="text" class="form-input" id="renFind" placeholder="找什麼">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">取代為</label>
-                                <input type="text" class="form-input" id="renReplace" placeholder="換成什麼">
-                            </div>
-                        </div>
-                        <div style="margin-top:10px;">
-                            <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
-                                <input type="checkbox" id="renNumbering"> 加入流水編號
-                            </label>
-                        </div>
-                        <div id="renNumOpts" style="display:none; grid-template-columns:1fr 1fr 1fr; gap:8px; margin-top:8px;">
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">起始號</label>
-                                <input type="number" class="form-input" id="renNumStart" value="1" min="0">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">位數</label>
-                                <input type="number" class="form-input" id="renNumDigits" value="3" min="1" max="10">
-                            </div>
-                            <div class="form-group" style="margin-bottom:0;">
-                                <label class="form-label">位置</label>
-                                <select class="form-input" id="renNumPos">
-                                    <option value="prefix">前綴</option>
-                                    <option value="suffix">後綴</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 即時預覽 -->
-                    <div id="renPreview" style="margin-top:12px; max-height:300px; overflow-y:auto;"></div>
-
-                    <div id="renProgress" style="display:none; margin-top:12px;"></div>
-                    <div id="renResult" style="display:none; margin-top:12px;"></div>
-                    <div style="display:flex; gap:8px; margin-top:16px;">
-                        <button class="crop-btn" id="renClearBtn" style="display:none;">🗑️ 清除</button>
-                        <button class="btn btn-primary" id="renApplyBtn" style="display:none; flex:1;">⚡ 套用改名並下載 ZIP</button>
-                    </div>
-                </div>
-            </div>
-
-        </main>
+      <div className="stroke dash soft" style={{margin:'10px 0'}}/>
+      <div style={{fontSize:'10px', color:'var(--ink-3)', lineHeight:1.5}}>
+        ScanMail+ v2.0 · Paper + Mint 設計系統 · Gemini AI · 繁中介面
+      </div>
     </div>
+  );
+}
 
-    <!-- Side Panel -->
-    <div class="overlay" id="overlay"></div>
-    <aside class="side-panel" id="sidePanel">
-        <div class="panel-header">
-            <span id="panelTitle">功能菜單</span>
-            <button class="panel-close" id="panelCloseBtn">✕</button>
-        </div>
-        <div class="panel-tabs">
-            <button class="panel-tab active" data-tab="contacts">聯絡人</button>
-            <button class="panel-tab" data-tab="history">寄件歷史</button>
-            <button class="panel-tab" data-tab="settings">設定</button>
-        </div>
-        <div class="panel-content">
-            <div class="tab-content active" data-content="contacts">
-                <div class="panel-section">
-                    <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">我的聯絡人</h3>
-                    <div id="panelContactsList"></div>
-                    <div id="panelNoContacts" class="empty-state" style="padding: 20px;">尚無聯絡人</div>
-                    <!-- 群組管理 -->
-                    <div style="margin-top:20px; border-top:1px solid var(--border-color); padding-top:16px;">
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-                            <h3 style="font-size: 14px; font-weight: 600;">收件人群組</h3>
-                            <button class="btn btn-small btn-primary" id="addGroupBtn" style="flex:none;padding:4px 12px;font-size:12px;">➕ 新增</button>
-                        </div>
-                        <div id="addGroupForm" style="display:none;padding:12px;background:var(--bg-light);border-radius:8px;margin-bottom:12px;">
-                            <div class="form-group" style="margin-bottom:8px;">
-                                <input type="text" class="form-input" id="groupName" placeholder="群組名稱（例：系務會議成員）">
-                            </div>
-                            <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">勾選要加入群組的聯絡人：</div>
-                            <div id="groupMemberSelect" style="max-height:200px;overflow-y:auto;"></div>
-                            <div style="display:flex;gap:8px;margin-top:8px;">
-                                <button class="btn btn-secondary btn-small" id="cancelGroupBtn">取消</button>
-                                <button class="btn btn-primary btn-small" id="saveGroupBtn">儲存群組</button>
-                            </div>
-                        </div>
-                        <div id="panelGroupsList"></div>
-                    </div>
-                </div>
-            </div>
-            <div class="tab-content" data-content="history">
-                <div class="panel-section">
-                    <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">最近寄件</h3>
-                    <div id="panelHistoryList"></div>
-                    <div id="panelNoHistory" class="empty-state" style="padding: 20px;">尚無寄件紀錄</div>
-                </div>
-            </div>
-            <div class="tab-content" data-content="settings">
-                <div class="panel-section">
-                    <h3 style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">寄件人資料</h3>
-                    <form class="settings-form" id="settingsForm">
-                        <div class="form-group">
-                            <label class="form-label">姓名</label>
-                            <input type="text" class="form-input" id="senderName" placeholder="您的姓名">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">Email</label>
-                            <input type="email" class="form-input" id="senderEmail" placeholder="您的 Email">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">職稱</label>
-                            <input type="text" class="form-input" id="senderTitle" placeholder="職稱">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">部門</label>
-                            <input type="text" class="form-input" id="senderDept" placeholder="部門">
-                        </div>
-                        <div class="form-group">
-                            <label class="form-label">公司</label>
-                            <input type="text" class="form-input" id="senderOrg" placeholder="公司名稱">
-                        </div>
-                        <button type="submit" class="btn btn-primary">儲存設定</button>
-                    </form>
-                </div>
-            </div>
-        </div>
-    </aside>
+function applyTweaks(t){
+  const root = document.documentElement;
+  // Accent colors
+  const accents = {
+    mint:       { m:'#9fd5ba', m2:'#72c09a', m3:'#4ea07c', m4:'#2d6b52', wash:'#e6f2e9' },
+    sage:       { m:'#b8c9a8', m2:'#8aa377', m3:'#6b8a5f', m4:'#3f5c3a', wash:'#edf1e5' },
+    teal:       { m:'#8ecad0', m2:'#5ba9b2', m3:'#2d8590', m4:'#155862', wash:'#dcecee' },
+    terracotta: { m:'#e6b8a4', m2:'#cf8e75', m3:'#b25a4a', m4:'#7d3a2e', wash:'#f4e3db' },
+  };
+  const a = accents[t.accent] || accents.mint;
+  root.style.setProperty('--mint', a.m);
+  root.style.setProperty('--mint-2', a.m2);
+  root.style.setProperty('--mint-3', a.m3);
+  root.style.setProperty('--mint-4', a.m4);
+  root.style.setProperty('--mint-wash', a.wash);
 
-    <!-- 工具總覽面板（⌘ / ⌘K 啟動器） -->
-    <div class="palette-overlay" id="paletteOverlay" role="dialog" aria-modal="true" aria-label="工具總覽">
-        <div class="palette-modal" id="paletteModal">
-            <div class="palette-search-row">
-                <span class="ps-icon">🔍</span>
-                <input type="text" class="palette-search" id="paletteSearch" placeholder="搜尋工具...（例：壓縮、合併、PDF）" autocomplete="off">
-                <span class="palette-hint">Esc 關閉</span>
-            </div>
-            <div class="palette-list" id="paletteList"></div>
+  // Paper color
+  const papers = {
+    paper: ['#f6f4ec','#eeebdf'],
+    warm:  ['#fdf9ee','#f6efdd'],
+    cool:  ['#f2f4f1','#e6ebe6'],
+    gray:  ['#eeece8','#e4e1d9'],
+  };
+  const p = papers[t.docBg] || papers.paper;
+  root.style.setProperty('--paper', p[0]);
+  root.style.setProperty('--paper-2', p[1]);
+
+  root.dataset.density = t.density;
+}
+
+function Stage(){
+  const [state, store] = window.useStore();
+  const [tweaks, setTweaks] = useState(window.TWEAKS);
+  const [tweaksOpen, setTweaksOpen] = useState(false);
+
+  useEffect(() => { applyTweaks(tweaks); }, [tweaks]);
+
+  // Listen for edit mode toggles
+  useEffect(() => {
+    const onMsg = (e) => {
+      if(e.data?.type === '__activate_edit_mode') setTweaksOpen(true);
+      if(e.data?.type === '__deactivate_edit_mode') setTweaksOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    window.parent.postMessage({type:'__edit_mode_available'}, '*');
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const update = (patch) => {
+    const next = {...tweaks, ...patch};
+    setTweaks(next);
+    window.parent.postMessage({type:'__edit_mode_set_keys', edits: patch}, '*');
+  };
+
+  const view = tweaks.view;
+  const showMobile = view === 'mobile' || view === 'both';
+  const showDesktop = view === 'desktop' || view === 'both';
+
+  return (
+    <div className="stage-root">
+      <div className="stage-top">
+        <div className="stage-brand">
+          <span className="mark">📷</span>
+          <div>
+            ScanMail<span style={{color:'var(--mint-3)'}}>+</span>
+            <small>Hi-Fi 原型 · 掃描 → AI → 寄件</small>
+          </div>
         </div>
+
+        <div className="stage-seg" data-screen-label="view-switcher">
+          <button className={view==='mobile'?'on':''} onClick={() => update({view:'mobile'})}>📱 手機</button>
+          <button className={view==='desktop'?'on':''} onClick={() => update({view:'desktop'})}>💻 桌面</button>
+          <button className={view==='both'?'on':''} onClick={() => update({view:'both'})}>📱💻 並列</button>
+        </div>
+
+        <div className="stage-tweaks">
+          <button className="pill" onClick={() => setTweaksOpen(o => !o)}>
+            🎨 Tweaks {tweaksOpen ? '▴' : '▾'}
+          </button>
+        </div>
+      </div>
+
+      <div className="stage-body" style={{
+        flexDirection: view === 'both' ? 'row' : 'column',
+        alignItems: 'flex-start',
+        justifyContent: 'center',
+        gap: '24px',
+        display:'flex',
+        flexWrap:'wrap',
+      }}>
+        {showDesktop && <div data-screen-label="desktop"><window.DesktopShell/></div>}
+        {showMobile && <div data-screen-label="mobile"><window.MobileShell/></div>}
+      </div>
+
+      <TweaksPanel open={tweaksOpen} onClose={() => setTweaksOpen(false)} tweaks={tweaks} onChange={update}/>
     </div>
+  );
+}
 
-    <!-- 浮動工具切換按鈕 -->
-    <button class="quick-switch-fab" id="quickSwitchFab" title="工具總覽 (按 / 鍵開啟)" aria-label="工具總覽">⌘</button>
-
-    <!-- Toast 通知容器 -->
-    <div class="toast-container" id="toastContainer" aria-live="polite"></div>
-
-    <!-- Scripts (模組化) -->
-    <script src="/static/js/app.js?v=4.0"></script>
-    <script src="/static/js/scanmail.js?v=4.0"></script>
-    <script src="/static/js/image-tools.js?v=4.0"></script>
-    <script src="/static/js/pdf-tools.js?v=4.0"></script>
-    <script src="/static/js/doc-convert.js?v=4.0"></script>
-    <script src="/static/js/gif-tools.js?v=4.0"></script>
-    <script src="/static/js/video-tools.js?v=4.0"></script>
-    <script src="/static/js/batch-rename.js?v=4.0"></script>
+ReactDOM.createRoot(document.getElementById('root')).render(<Stage/>);
+</script>
 </body>
 </html>

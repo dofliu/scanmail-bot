@@ -57,13 +57,7 @@ app.add_middleware(
 
 # ── 頁面路由（必須在 mount 之前）──
 
-@app.get("/")
-async def serve_frontend():
-    index_file = STATIC_DIR / "index.html"
-    if index_file.exists():
-        return FileResponse(str(index_file), media_type="text/html")
-    return {"message": "ScanMail+ API — 請建立 static/index.html"}
-
+# Index will be served automatically by the root StaticFiles mount below.
 
 @app.get("/health")
 async def health_check():
@@ -84,4 +78,4 @@ app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch
 # ── 靜態檔案（必須放最後，否則會攔截其他路由）──
 
 if STATIC_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
