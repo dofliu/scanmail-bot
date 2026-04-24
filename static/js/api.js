@@ -306,6 +306,14 @@ const ScanMailAPI = (() => {
   function renTaskProgress(taskId) { return `${renBase}/task/${taskId}/progress`; }
   function renTaskDownload(taskId) { return `${renBase}/task/${taskId}/download`; }
 
+  function aiRenameScan(directory, onlyExts) {
+    return json(`${renBase}/ai/scan`, { directory, only_exts: onlyExts || '' });
+  }
+
+  function aiRenameApply(items) {
+    return json(`${renBase}/ai/rename`, { items });
+  }
+
   // ══════════════════════════════════════════════
   //  Task progress helper (SSE)
   // ══════════════════════════════════════════════
@@ -377,6 +385,7 @@ const ScanMailAPI = (() => {
     vidMerge, vidToGif, vidCompress, vidTaskProgress, vidTaskDownload,
     // Rename
     renamePreview, renameApply, renTaskProgress, renTaskDownload,
+    aiRenameScan, aiRenameApply,
     // Helpers
     watchTask, downloadBlob, formatBytes, triggerDownload,
   };

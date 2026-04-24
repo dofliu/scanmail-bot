@@ -727,13 +727,167 @@ function DToolVideo(){
 
 function DToolRename(){
   const [files, setFiles] = dUseState([]);
+  const [aiMode, setAiMode] = dUseState(false);
+  const [aiDir, setAiDir] = dUseState('');
+  const [onlyExts, setOnlyExts] = dUseState('');
   const [opts, setOpts] = dUseState({prefix:'',suffix:'',find:'',replace:'',numbering:false,numbering_start:1,numbering_digits:3});
   const [preview, setPreview] = dUseState(null);
-  const doPreview = async()=>{ if(!files.length) return; try{ const r = await window.API.renamePreview(files.map(f=>f.name),opts); setPreview(r.results); }catch(e){} };
+  const [aiRows, setAiRows] = dUseState(null);  // AI 模式的掃描結果（每列可勾選）
+  const [working, setWorking] = dUseState(false);
+  const [aiMsg, setAiMsg] = dUseState('');
+
+  const doPreview = async () => {
+    if (aiMode) {
+      if (!aiDir.trim()) { setAiMsg('請先輸入資料夾路徑'); return; }
+      setWorking(true); setAiMsg('掃描中…（影像需 OCR、呼叫 Gemini）');
+      try {
+        const r = await window.API.aiRenameScan(aiDir.trim(), onlyExts);
+        const rows = r.results.map(x => ({...x, selected: x.can_rename}));
+        setAiRows(rows);
+        const n = rows.filter(x => x.can_rename).length;
+        setAiMsg(`掃描完成：${rows.length} 個檔案，${n} 個可改名`);
+      } catch(e) { setAiMsg(`掃描失敗：${e.message}`); }
+      setWorking(false);
+    } else {
+      if (!files.length) return;
+      try {
+        const r = await window.API.renamePreview(files.map(f=>f.name), opts);
+        setPreview(r.results);
+      } catch(e) { /* silent */ }
+    }
+  };
+
+  const doAiApply = async () => {
+    if (!aiRows) return;
+    const items = aiRows
+      .filter(r => r.selected && r.can_rename && r.renamed && r.renamed !== r.original)
+      .map(r => ({src_path: r.src_path, dst_name: r.renamed}));
+    if (!items.length) { setAiMsg('沒有勾選任何可改名項目'); return; }
+    setWorking(true); setAiMsg(`套用 ${items.length} 個改名…`);
+    try {
+      const r = await window.API.aiRenameApply(items);
+      setAiMsg(`完成：成功 ${r.renamed}，失敗 ${r.failed}`);
+      // 把結果合併回列表（已改名的列更新顯示）
+      const resMap = new Map(r.results.map(x => [x.original, x]));
+      setAiRows(aiRows.map(row => {
+        const res = resMap.get(row.original);
+        if (!res) return row;
+        if (res.result === 'renamed') {
+          return {...row, original: res.renamed, renamed: res.renamed, changed: false, selected: false, reason: 'done', message: '已改名'};
+        }
+        return {...row, message: res.error || res.reason || ''};
+      }));
+    } catch(e) { setAiMsg(`失敗：${e.message}`); }
+    setWorking(false);
+  };
+
+  const toggleRow = (i) => {
+    setAiRows(aiRows.map((r,j) => j===i ? {...r, selected: !r.selected} : r));
+  };
+  const toggleAll = (v) => {
+    setAiRows(aiRows.map(r => r.can_rename ? {...r, selected: v} : r));
+  };
+
   return (
     <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
-      <div><UploadDropzone accept="*" multiple onFiles={f=>setFiles([...files,...f])} icon="📁" label="拖放任意檔案"/><FileList files={files} onRemove={i=>setFiles(files.filter((_,j)=>j!==i))}/>{preview&&<div className="card" style={{padding:'10px',marginTop:'10px',maxHeight:'200px',overflow:'auto'}}>{preview.map((r,i)=><div key={i} style={{fontSize:'11px',padding:'4px 0',borderBottom:'1px dashed var(--line-soft)'}}><span style={{color:'var(--ink-3)'}}>{r.original}</span> → <span style={{fontWeight:500,color:'var(--mint-4)'}}>{r.new_name||r.renamed}</span></div>)}</div>}</div>
-      <div className="card" style={{padding:'16px'}}><div className="label" style={{marginBottom:'10px'}}>設定</div><div className="field-label">前綴</div><input className="input" value={opts.prefix} onChange={e=>setOpts({...opts,prefix:e.target.value})} style={{marginBottom:'8px'}}/><div className="field-label">尋找</div><input className="input" value={opts.find} onChange={e=>setOpts({...opts,find:e.target.value})} style={{marginBottom:'8px'}}/><div className="field-label">取代</div><input className="input" value={opts.replace} onChange={e=>setOpts({...opts,replace:e.target.value})} style={{marginBottom:'8px'}}/><label style={{fontSize:'12px'}}><input type="checkbox" checked={opts.numbering} onChange={e=>setOpts({...opts,numbering:e.target.checked})}/> 流水編號</label><div style={{marginTop:'16px'}}><button className="btn" onClick={doPreview} style={{width:'100%',marginBottom:'8px'}} disabled={!files.length}>👁 預覽</button><ToolProcessor files={files} batch={fs=>window.API.renameApply(fs,opts)} taskProgressUrl={window.API.renTaskProgress} taskDownloadUrl={window.API.renTaskDownload} resultFilename="renamed.zip"/></div></div>
+      <div>
+        {!aiMode && (<>
+          <UploadDropzone accept="*" multiple onFiles={f=>setFiles([...files,...f])} icon="📁" label="拖放任意檔案"/>
+          <FileList files={files} onRemove={i=>setFiles(files.filter((_,j)=>j!==i))}/>
+          {preview && (
+            <div className="card" style={{padding:'10px',marginTop:'10px',maxHeight:'240px',overflow:'auto'}}>
+              {preview.map((r,i) => (
+                <div key={i} style={{fontSize:'11px',padding:'4px 0',borderBottom:'1px dashed var(--line-soft)',opacity: r.changed?1:0.55}}>
+                  <span style={{color:'var(--ink-3)'}}>{r.original}</span>
+                  {' → '}
+                  <span style={{fontWeight:500,color: r.changed?'var(--mint-4)':'var(--ink-3)'}}>{r.renamed}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>)}
+
+        {aiMode && aiRows && (
+          <div className="card" style={{padding:'12px'}}>
+            <div className="row between" style={{marginBottom:'8px'}}>
+              <div style={{fontSize:'12px',color:'var(--ink-3)'}}>{aiRows.length} 個檔案</div>
+              <div className="row" style={{gap:'6px'}}>
+                <button className="btn" style={{fontSize:'11px',padding:'4px 8px'}} onClick={()=>toggleAll(true)}>全選</button>
+                <button className="btn" style={{fontSize:'11px',padding:'4px 8px'}} onClick={()=>toggleAll(false)}>全不選</button>
+              </div>
+            </div>
+            <div style={{maxHeight:'420px',overflow:'auto'}}>
+              {aiRows.map((r,i) => (
+                <div key={i} style={{display:'grid',gridTemplateColumns:'24px 1fr',gap:'6px',padding:'6px 0',borderBottom:'1px dashed var(--line-soft)',opacity: r.can_rename?1:0.5}}>
+                  <div>
+                    {r.can_rename && <input type="checkbox" checked={!!r.selected} onChange={()=>toggleRow(i)}/>}
+                  </div>
+                  <div style={{fontSize:'11px',lineHeight:1.5}}>
+                    <div style={{color:'var(--ink-3)',wordBreak:'break-all'}}>{r.original}</div>
+                    {r.changed ? (
+                      <div style={{color:'var(--mint-4)',fontWeight:500,wordBreak:'break-all'}}>→ {r.renamed}</div>
+                    ) : (
+                      <div style={{color:'var(--ink-3)',fontStyle:'italic'}}>略過 · {r.reason}{r.message?`：${r.message}`:''}</div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{padding:'16px'}}>
+        <div className="label" style={{marginBottom:'10px'}}>模式</div>
+        <label style={{fontSize:'12px',display:'flex',alignItems:'center',gap:'6px',marginBottom:'10px',padding:'8px',background:aiMode?'var(--mint-wash)':'transparent',borderRadius:'6px'}}>
+          <input type="checkbox" checked={aiMode} onChange={e=>{setAiMode(e.target.checked); setPreview(null); setAiRows(null); setAiMsg('');}}/>
+          🤖 AI 智慧改名（辨識內容直接改名）
+        </label>
+
+        {aiMode ? (
+          <>
+            <div style={{fontSize:'11px',color:'var(--ink-3)',marginBottom:'10px',lineHeight:1.5}}>
+              本機路徑模式：直接在目標資料夾改名，<b>不需上傳</b>。
+              僅處理低資訊檔名（IMG_1234、Scan 0001、Invoice-XXXX…），加民國日期前綴。
+            </div>
+            <div className="field-label">資料夾路徑（本機絕對路徑）</div>
+            <input className="input" value={aiDir} onChange={e=>setAiDir(e.target.value)} placeholder="D:\發票\2026Q1" style={{marginBottom:'8px'}}/>
+            <div className="field-label">僅處理副檔名（可留空）</div>
+            <input className="input" value={onlyExts} onChange={e=>setOnlyExts(e.target.value)} placeholder="pdf,docx,png,jpg" style={{marginBottom:'8px'}}/>
+          </>
+        ) : (
+          <>
+            <div className="field-label">前綴</div>
+            <input className="input" value={opts.prefix} onChange={e=>setOpts({...opts,prefix:e.target.value})} style={{marginBottom:'8px'}}/>
+            <div className="field-label">尋找</div>
+            <input className="input" value={opts.find} onChange={e=>setOpts({...opts,find:e.target.value})} style={{marginBottom:'8px'}}/>
+            <div className="field-label">取代</div>
+            <input className="input" value={opts.replace} onChange={e=>setOpts({...opts,replace:e.target.value})} style={{marginBottom:'8px'}}/>
+            <label style={{fontSize:'12px'}}>
+              <input type="checkbox" checked={opts.numbering} onChange={e=>setOpts({...opts,numbering:e.target.checked})}/> 流水編號
+            </label>
+          </>
+        )}
+
+        <div style={{marginTop:'16px'}}>
+          <button className="btn" onClick={doPreview} style={{width:'100%',marginBottom:'8px'}} disabled={working || (!aiMode && !files.length)}>
+            {working ? '處理中…' : (aiMode ? '🤖 AI 掃描預覽' : '👁 預覽')}
+          </button>
+          {aiMode ? (
+            <>
+              <button className="btn primary" onClick={doAiApply} style={{width:'100%',marginBottom:'8px'}} disabled={working || !aiRows || !aiRows.some(r=>r.selected && r.can_rename)}>
+                ✓ 套用改名（直接改）
+              </button>
+              {aiMsg && <div style={{fontSize:'11px',color:'var(--ink-3)',marginTop:'6px'}}>{aiMsg}</div>}
+            </>
+          ) : (
+            <ToolProcessor files={files} batch={fs=>window.API.renameApply(fs,opts)}
+              taskProgressUrl={window.API.renTaskProgress}
+              taskDownloadUrl={window.API.renTaskDownload}
+              resultFilename="renamed.zip"/>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1047,49 +1047,138 @@ function MToolVideo(){
 // ─── TOOL: RENAME ──────────────────────────────────────────
 function MToolRename(){
   const [files, setFiles] = mUseState([]);
+  const [aiMode, setAiMode] = mUseState(false);
+  const [aiDir, setAiDir] = mUseState('');
+  const [onlyExts, setOnlyExts] = mUseState('');
   const [opts, setOpts] = mUseState({prefix:'', suffix:'', find:'', replace:'', numbering:false, numbering_start:1, numbering_digits:3});
   const [preview, setPreview] = mUseState(null);
+  const [aiRows, setAiRows] = mUseState(null);
+  const [working, setWorking] = mUseState(false);
+  const [aiMsg, setAiMsg] = mUseState('');
 
   const doPreview = async () => {
-    if (!files.length) return;
-    try {
-      const r = await window.API.renamePreview(files.map(f=>f.name), opts);
-      setPreview(r.results);
-    } catch(e) { /* handled */ }
+    if (aiMode) {
+      if (!aiDir.trim()) { setAiMsg('請先輸入資料夾路徑'); return; }
+      setWorking(true); setAiMsg('掃描中…');
+      try {
+        const r = await window.API.aiRenameScan(aiDir.trim(), onlyExts);
+        const rows = r.results.map(x => ({...x, selected: x.can_rename}));
+        setAiRows(rows);
+        const n = rows.filter(x => x.can_rename).length;
+        setAiMsg(`${rows.length} 個檔案，${n} 個可改名`);
+      } catch(e) { setAiMsg(`掃描失敗：${e.message}`); }
+      setWorking(false);
+    } else {
+      if (!files.length) return;
+      try {
+        const r = await window.API.renamePreview(files.map(f=>f.name), opts);
+        setPreview(r.results);
+      } catch(e) { /* handled */ }
+    }
   };
+
+  const doAiApply = async () => {
+    if (!aiRows) return;
+    const items = aiRows
+      .filter(r => r.selected && r.can_rename && r.renamed && r.renamed !== r.original)
+      .map(r => ({src_path: r.src_path, dst_name: r.renamed}));
+    if (!items.length) { setAiMsg('沒有勾選項目'); return; }
+    setWorking(true); setAiMsg(`套用 ${items.length} 個改名…`);
+    try {
+      const r = await window.API.aiRenameApply(items);
+      setAiMsg(`成功 ${r.renamed} / 失敗 ${r.failed}`);
+      const resMap = new Map(r.results.map(x => [x.original, x]));
+      setAiRows(aiRows.map(row => {
+        const res = resMap.get(row.original);
+        if (!res) return row;
+        if (res.result === 'renamed') {
+          return {...row, original: res.renamed, renamed: res.renamed, changed: false, selected: false, reason: 'done', message: '已改名'};
+        }
+        return {...row, message: res.error || res.reason || ''};
+      }));
+    } catch(e) { setAiMsg(`失敗：${e.message}`); }
+    setWorking(false);
+  };
+
+  const toggleRow = (i) => { setAiRows(aiRows.map((r,j) => j===i ? {...r, selected: !r.selected} : r)); };
 
   return (
     <MToolShell title="批次改名">
-      <UploadDropzone accept="*" multiple onFiles={(f) => setFiles([...files,...f])} icon="📁" label="拖放任意檔案"/>
-      <FileList files={files} onRemove={(i) => setFiles(files.filter((_,j)=>j!==i))}/>
-      <div className="card fill" style={{padding:'14px', margin:'12px 0'}}>
-        <div className="field-label">前綴</div>
-        <input className="input" value={opts.prefix} onChange={e=>setOpts({...opts,prefix:e.target.value})} placeholder="例: 2026_" style={{marginBottom:'8px'}}/>
-        <div className="field-label">尋找 → 取代</div>
-        <div className="row" style={{gap:'6px', marginBottom:'8px'}}>
-          <input className="input" value={opts.find} onChange={e=>setOpts({...opts,find:e.target.value})} placeholder="尋找" style={{flex:1}}/>
-          <input className="input" value={opts.replace} onChange={e=>setOpts({...opts,replace:e.target.value})} placeholder="取代" style={{flex:1}}/>
-        </div>
-        <div className="row" style={{gap:'6px'}}>
+      <div className="card fill" style={{padding:'14px', margin:'0 0 12px 0'}}>
+        <label style={{fontSize:'12px', display:'flex', alignItems:'center', gap:'6px', padding:'6px', background:aiMode?'var(--mint-wash)':'transparent', borderRadius:'6px'}}>
+          <input type="checkbox" checked={aiMode} onChange={e=>{setAiMode(e.target.checked); setPreview(null); setAiRows(null); setAiMsg('');}}/>
+          🤖 AI 智慧改名（辨識內容直接改）
+        </label>
+      </div>
+
+      {!aiMode && (<>
+        <UploadDropzone accept="*" multiple onFiles={(f) => setFiles([...files,...f])} icon="📁" label="拖放任意檔案"/>
+        <FileList files={files} onRemove={(i) => setFiles(files.filter((_,j)=>j!==i))}/>
+        <div className="card fill" style={{padding:'14px', margin:'12px 0'}}>
+          <div className="field-label">前綴</div>
+          <input className="input" value={opts.prefix} onChange={e=>setOpts({...opts,prefix:e.target.value})} placeholder="例: 2026_" style={{marginBottom:'8px'}}/>
+          <div className="field-label">尋找 → 取代</div>
+          <div className="row" style={{gap:'6px', marginBottom:'8px'}}>
+            <input className="input" value={opts.find} onChange={e=>setOpts({...opts,find:e.target.value})} placeholder="尋找" style={{flex:1}}/>
+            <input className="input" value={opts.replace} onChange={e=>setOpts({...opts,replace:e.target.value})} placeholder="取代" style={{flex:1}}/>
+          </div>
           <label style={{fontSize:'12px'}}>
             <input type="checkbox" checked={opts.numbering} onChange={e=>setOpts({...opts,numbering:e.target.checked})}/> 流水編號
           </label>
         </div>
-      </div>
-      <button className="btn" onClick={doPreview} style={{width:'100%', marginBottom:'8px'}} disabled={!files.length}>👁 預覽改名結果</button>
-      {preview && (
-        <div className="card" style={{padding:'10px', marginBottom:'10px', maxHeight:'160px', overflow:'auto'}}>
-          {preview.map((r,i) => (
-            <div key={i} style={{fontSize:'11px', padding:'4px 0', borderBottom:'1px dashed var(--line-soft)'}}>
-              <span style={{color:'var(--ink-3)'}}>{r.original}</span> → <span style={{fontWeight:500, color:'var(--mint-4)'}}>{r.new_name || r.renamed}</span>
-            </div>
-          ))}
+        <button className="btn" onClick={doPreview} style={{width:'100%', marginBottom:'8px'}} disabled={!files.length}>👁 預覽改名結果</button>
+        {preview && (
+          <div className="card" style={{padding:'10px', marginBottom:'10px', maxHeight:'200px', overflow:'auto'}}>
+            {preview.map((r,i) => (
+              <div key={i} style={{fontSize:'11px', padding:'4px 0', borderBottom:'1px dashed var(--line-soft)', opacity: r.changed?1:0.55}}>
+                <span style={{color:'var(--ink-3)'}}>{r.original}</span>
+                {' → '}
+                <span style={{fontWeight:500, color: r.changed?'var(--mint-4)':'var(--ink-3)'}}>{r.renamed}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        <ToolProcessor files={files}
+          batch={(fs) => window.API.renameApply(fs, opts)}
+          taskProgressUrl={window.API.renTaskProgress} taskDownloadUrl={window.API.renTaskDownload}
+          resultFilename="renamed.zip"/>
+      </>)}
+
+      {aiMode && (<>
+        <div className="card fill" style={{padding:'14px', margin:'0 0 12px 0'}}>
+          <div style={{fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px', lineHeight:1.5}}>
+            本機路徑模式：直接在目標資料夾改名，不需上傳。
+          </div>
+          <div className="field-label">資料夾路徑</div>
+          <input className="input" value={aiDir} onChange={e=>setAiDir(e.target.value)} placeholder="D:\發票\2026Q1" style={{marginBottom:'8px'}}/>
+          <div className="field-label">僅處理副檔名（可留空）</div>
+          <input className="input" value={onlyExts} onChange={e=>setOnlyExts(e.target.value)} placeholder="pdf,docx,png,jpg"/>
         </div>
-      )}
-      <ToolProcessor files={files}
-        batch={(fs) => window.API.renameApply(fs, opts)}
-        taskProgressUrl={window.API.renTaskProgress} taskDownloadUrl={window.API.renTaskDownload}
-        resultFilename="renamed.zip"/>
+        <button className="btn" onClick={doPreview} style={{width:'100%', marginBottom:'8px'}} disabled={working}>
+          {working ? '處理中…' : '🤖 AI 掃描預覽'}
+        </button>
+        {aiRows && (
+          <div className="card" style={{padding:'10px', marginBottom:'10px', maxHeight:'280px', overflow:'auto'}}>
+            {aiRows.map((r,i) => (
+              <div key={i} style={{display:'grid', gridTemplateColumns:'24px 1fr', gap:'6px', padding:'6px 0', borderBottom:'1px dashed var(--line-soft)', opacity: r.can_rename?1:0.55}}>
+                <div>{r.can_rename && <input type="checkbox" checked={!!r.selected} onChange={()=>toggleRow(i)}/>}</div>
+                <div style={{fontSize:'11px', lineHeight:1.5}}>
+                  <div style={{color:'var(--ink-3)', wordBreak:'break-all'}}>{r.original}</div>
+                  {r.changed ? (
+                    <div style={{color:'var(--mint-4)', fontWeight:500, wordBreak:'break-all'}}>→ {r.renamed}</div>
+                  ) : (
+                    <div style={{color:'var(--ink-3)', fontStyle:'italic'}}>略過 · {r.reason}{r.message?`：${r.message}`:''}</div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <button className="btn primary" onClick={doAiApply} style={{width:'100%', marginBottom:'8px'}} disabled={working || !aiRows || !aiRows.some(r=>r.selected && r.can_rename)}>
+          ✓ 套用改名（直接改）
+        </button>
+        {aiMsg && <div style={{fontSize:'11px', color:'var(--ink-3)'}}>{aiMsg}</div>}
+      </>)}
     </MToolShell>
   );
 }

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from app.services.ai_renamer import preview_ai_upload, apply_ai_upload; print\\('OK'\\)\")",
+      "Bash(python -c \"from app.routers.batch_rename import router; print\\([r.path for r in router.routes]\\)\")",
+      "Bash(python -m py_compile app/services/ai_renamer.py app/routers/batch_rename.py)"
+    ]
+  }
+}

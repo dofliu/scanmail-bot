@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from app.core.tasks import submit_task, get_task, task_progress_stream
 from app.services.batch_renamer import preview_rename, apply_rename
+from app.services.ai_renamer import scan_directory, apply_renames
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -76,6 +77,50 @@ async def api_apply(
 
     task_id = submit_task(apply_rename, file_data, rename_map)
     return {"task_id": task_id}
+
+
+class AIScanRequest(BaseModel):
+    directory: str
+    only_exts: str = ""
+
+
+class AIRenameItem(BaseModel):
+    src_path: str
+    dst_name: str
+
+
+class AIRenameRequest(BaseModel):
+    items: list[AIRenameItem]
+
+
+@router.post("/ai/scan")
+async def api_ai_scan(body: AIScanRequest):
+    """AI 智慧改名預覽 — 本機路徑模式，僅對低資訊檔名呼叫 Gemini。"""
+    directory = (body.directory or "").strip()
+    if not directory:
+        raise HTTPException(status_code=400, detail="請提供資料夾路徑")
+    try:
+        results = scan_directory(directory, only_exts=body.only_exts or None)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.exception("AI 掃描失敗")
+        raise HTTPException(status_code=500, detail=f"AI 掃描失敗: {e}")
+    return {"success": True, "results": results}
+
+
+@router.post("/ai/rename")
+async def api_ai_rename(body: AIRenameRequest):
+    """AI 智慧改名套用 — 直接在本機對檔案 os.replace，無 ZIP。"""
+    if not body.items:
+        raise HTTPException(status_code=400, detail="沒有可套用的項目")
+    items = [i.model_dump() for i in body.items]
+    results = apply_renames(items)
+    renamed = sum(1 for r in results if r.get("result") == "renamed")
+    failed = sum(1 for r in results if r.get("result") == "error")
+    return {"success": True, "results": results, "renamed": renamed, "failed": failed}
 
 
 @router.get("/task/{task_id}/progress")
