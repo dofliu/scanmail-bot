@@ -38,3 +38,7 @@ Thumbs.db
 .pytest_cache/
 htmlcov/
 .coverage
+
+# Claude Code（worktrees 與本地設定不應入版控）
+.claude/worktrees/
+.claude/settings.local.json
