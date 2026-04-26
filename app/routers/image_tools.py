@@ -13,6 +13,7 @@ from app.services.image_batch import (
     convert_format, batch_convert,
     compress_image, batch_compress,
     add_text_watermark, batch_watermark,
+    merge_images,
     get_image_info_detail,
     SUPPORTED_FORMATS, FORMAT_MAP,
 )
@@ -194,6 +195,67 @@ async def api_batch_watermark(
         batch_watermark, images, text, font_size, opacity, position, color
     )
     return {"task_id": task_id}
+
+
+# ── 拼接（多張 → 單張）──
+
+@router.post("/merge")
+async def api_merge(
+    files: list[UploadFile] = File(...),
+    direction: str = Form("vertical"),    # vertical | horizontal | grid
+    gap: int = Form(0),
+    bg_color: str = Form("#ffffff"),
+    align: str = Form("center"),          # start | center | end
+    output_format: str = Form("JPEG"),    # JPEG | PNG | WEBP
+    quality: int = Form(90),
+    columns: int = Form(0),               # grid 模式欄數，0=自動
+    normalize: bool = Form(True),
+):
+    """拼接多張圖片成單張 → 回傳 task_id
+
+    使用 /task/{task_id}/progress 監聽進度，
+    /merge/result/{task_id}?format=jpeg 下載結果。
+    """
+    if not files or len(files) < 2:
+        raise HTTPException(status_code=400, detail="至少需要 2 張圖片")
+    images = await _read_files(files)
+    if len(images) < 2:
+        raise HTTPException(status_code=400, detail="有效圖片少於 2 張")
+    task_id = submit_task(
+        merge_images, images,
+        direction, gap, bg_color, align,
+        output_format, quality, columns, normalize,
+    )
+    return {"task_id": task_id, "output_format": output_format}
+
+
+@router.get("/merge/result/{task_id}")
+async def api_merge_download(task_id: str, format: str = "jpeg"):
+    """下載拼接結果（單張圖片，非 ZIP）"""
+    task = get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="任務不存在")
+    if task.status.value != "completed":
+        raise HTTPException(status_code=400, detail=f"任務狀態: {task.status.value}")
+    if not task.result or not isinstance(task.result, bytes):
+        raise HTTPException(status_code=500, detail="任務結果無效")
+
+    fmt = (format or "jpeg").lower()
+    if fmt in ("jpg", "jpeg"):
+        ext, media = "jpg", "image/jpeg"
+    elif fmt == "png":
+        ext, media = "png", "image/png"
+    elif fmt == "webp":
+        ext, media = "webp", "image/webp"
+    elif fmt == "bmp":
+        ext, media = "bmp", "image/bmp"
+    else:
+        ext, media = "jpg", "image/jpeg"
+
+    return Response(
+        content=task.result, media_type=media,
+        headers={"Content-Disposition": f"attachment; filename=merged_{task_id}.{ext}"},
+    )
 
 
 # ── 任務進度 + 下載 ──

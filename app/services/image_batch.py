@@ -268,6 +268,136 @@ def _batch_process(task_id: str, images: list[tuple[str, bytes]],
     return zip_buf.getvalue()
 
 
+# ══════════════════════════════════════════════════════════════
+# 5. 拼接 (multi-image stitching)
+# ══════════════════════════════════════════════════════════════
+
+def _paste_image(canvas: Image.Image, im: Image.Image, pos: tuple[int, int]) -> None:
+    """正確處理透明通道地貼到畫布"""
+    if im.mode in ("RGBA", "LA"):
+        canvas.paste(im, pos, im)
+    else:
+        canvas.paste(im, pos)
+
+
+def merge_images(task_id: str, images: list[tuple[str, bytes]],
+                 direction: str = "vertical",
+                 gap: int = 0,
+                 bg_color: str = "#ffffff",
+                 align: str = "center",
+                 output_format: str = "JPEG",
+                 quality: int = 90,
+                 columns: int = 0,
+                 normalize: bool = True) -> bytes:
+    """拼接多張圖片成單張輸出
+
+    Args:
+        direction: "vertical" / "horizontal" / "grid"
+        gap:       圖片之間的間距（像素）
+        bg_color:  畫布底色（hex 例 "#ffffff"）
+        align:     交叉軸對齊 "start" / "center" / "end"
+        columns:   grid 模式的欄數，0=自動取 sqrt(n)
+        normalize: True 時把所有圖片在主軸上等比縮放到一致寬/高，避免間隙
+    """
+    if not images:
+        raise ValueError("至少需要一張圖片")
+
+    update_task_progress(task_id, 5, f"載入 {len(images)} 張圖片...")
+
+    pil_images: list[Image.Image] = []
+    for i, (name, data) in enumerate(images):
+        try:
+            pil_images.append(_open_image(data))
+        except Exception as e:
+            logger.warning("跳過 %s: %s", name, e)
+        update_task_progress(task_id, 5 + int((i + 1) / len(images) * 25),
+                             f"載入中 ({i+1}/{len(images)})")
+
+    if not pil_images:
+        raise ValueError("沒有可用的圖片")
+
+    update_task_progress(task_id, 35, "計算版面...")
+    bg_rgb = _hex_to_rgb(bg_color)
+    fmt = FORMAT_MAP.get(output_format.lower(), output_format.upper())
+    canvas_mode = "RGBA" if fmt == "PNG" else "RGB"
+    bg_fill = bg_rgb + ((255,) if canvas_mode == "RGBA" else ())
+
+    direction = (direction or "vertical").lower()
+
+    if direction == "horizontal":
+        if normalize:
+            target_h = min(im.height for im in pil_images)
+            pil_images = [
+                im.resize((max(1, int(im.width * target_h / im.height)), target_h), Image.LANCZOS)
+                for im in pil_images
+            ]
+        max_h = max(im.height for im in pil_images)
+        total_w = sum(im.width for im in pil_images) + gap * (len(pil_images) - 1)
+        canvas = Image.new(canvas_mode, (max(1, total_w), max(1, max_h)), bg_fill)
+        x = 0
+        for im in pil_images:
+            if align == "start":
+                y = 0
+            elif align == "end":
+                y = max_h - im.height
+            else:
+                y = (max_h - im.height) // 2
+            _paste_image(canvas, im, (x, y))
+            x += im.width + gap
+
+    elif direction == "grid":
+        n = len(pil_images)
+        cols = columns if columns and columns > 0 else max(1, int(round(n ** 0.5)))
+        rows = (n + cols - 1) // cols
+        cell_w = max(im.width for im in pil_images)
+        cell_h = max(im.height for im in pil_images)
+        if normalize:
+            # 等比縮放到不超過 cell 尺寸（保留比例置中）
+            scaled = []
+            for im in pil_images:
+                ratio = min(cell_w / im.width, cell_h / im.height, 1.0)
+                if ratio < 1.0:
+                    new_size = (max(1, int(im.width * ratio)), max(1, int(im.height * ratio)))
+                    scaled.append(im.resize(new_size, Image.LANCZOS))
+                else:
+                    scaled.append(im)
+            pil_images = scaled
+        canvas_w = cols * cell_w + (cols - 1) * gap
+        canvas_h = rows * cell_h + (rows - 1) * gap
+        canvas = Image.new(canvas_mode, (canvas_w, canvas_h), bg_fill)
+        for i, im in enumerate(pil_images):
+            r, c = divmod(i, cols)
+            cx = c * (cell_w + gap)
+            cy = r * (cell_h + gap)
+            x = cx + (cell_w - im.width) // 2
+            y = cy + (cell_h - im.height) // 2
+            _paste_image(canvas, im, (x, y))
+
+    else:  # vertical
+        if normalize:
+            target_w = min(im.width for im in pil_images)
+            pil_images = [
+                im.resize((target_w, max(1, int(im.height * target_w / im.width))), Image.LANCZOS)
+                for im in pil_images
+            ]
+        max_w = max(im.width for im in pil_images)
+        total_h = sum(im.height for im in pil_images) + gap * (len(pil_images) - 1)
+        canvas = Image.new(canvas_mode, (max(1, max_w), max(1, total_h)), bg_fill)
+        y = 0
+        for im in pil_images:
+            if align == "start":
+                x = 0
+            elif align == "end":
+                x = max_w - im.width
+            else:
+                x = (max_w - im.width) // 2
+            _paste_image(canvas, im, (x, y))
+            y += im.height + gap
+
+    update_task_progress(task_id, 92, "輸出圖片...")
+    return _save_image(canvas, fmt, quality)
+
+
 def get_image_info_detail(data: bytes) -> dict:
     """取得圖片詳細資訊"""
     try:
