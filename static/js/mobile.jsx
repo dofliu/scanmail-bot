@@ -870,10 +870,21 @@ function MSettings(){
 function MToolImage(){
   const [action, setAction] = mUseState('resize');
   const [files, setFiles] = mUseState([]);
-  const [opts, setOpts] = mUseState({width:800, height:600, mode:'fit', format:'JPEG', quality:85, text:'CONFIDENTIAL', fontSize:36, opacity:80, position:'center', color:'#000000'});
-  const actions = [{id:'resize',i:'📐',l:'縮放'},{id:'convert',i:'🔄',l:'轉檔'},{id:'compress',i:'📦',l:'壓縮'},{id:'watermark',i:'💧',l:'浮水印'}];
+  const [opts, setOpts] = mUseState({
+    width:800, height:600, mode:'fit',
+    format:'JPEG', quality:85,
+    text:'CONFIDENTIAL', fontSize:36, opacity:80, position:'center', color:'#000000',
+    direction:'vertical', gap:0, bg_color:'#ffffff', columns:0, normalize:true,
+  });
+  const actions = [
+    {id:'resize',i:'📐',l:'縮放'},
+    {id:'convert',i:'🔄',l:'轉檔'},
+    {id:'compress',i:'📦',l:'壓縮'},
+    {id:'watermark',i:'💧',l:'浮水印'},
+    {id:'merge',i:'🧩',l:'拼接'},
+  ];
 
-  const singleFn = (file) => {
+  const singleFn = action === 'merge' ? null : (file) => {
     if(action==='resize') return window.API.imgResize(file, opts.width, opts.height, opts.mode, opts.format, opts.quality);
     if(action==='convert') return window.API.imgConvert(file, opts.format, opts.quality);
     if(action==='compress') return window.API.imgCompress(file, opts.quality, 0);
@@ -884,7 +895,20 @@ function MToolImage(){
     if(action==='convert') return window.API.imgBatchConvert(fs, opts.format, opts.quality);
     if(action==='compress') return window.API.imgBatchCompress(fs, opts.quality, 0);
     if(action==='watermark') return window.API.imgBatchWatermark(fs, opts.text, opts.fontSize, opts.opacity, opts.position, opts.color);
+    if(action==='merge') return window.API.imgMerge(fs, {
+      direction:opts.direction, gap:opts.gap, bg_color:opts.bg_color, align:'center',
+      output_format:opts.format, quality:opts.quality,
+      columns:opts.columns, normalize:opts.normalize,
+    });
   };
+
+  const isMerge = action === 'merge';
+  const downloadUrl = isMerge
+    ? (tid) => window.API.imgMergeDownload(tid, opts.format)
+    : window.API.imgTaskDownload;
+  const resultFilename = isMerge
+    ? `merged.${(opts.format || 'JPEG').toLowerCase() === 'jpeg' ? 'jpg' : opts.format.toLowerCase()}`
+    : `${action}_result`;
 
   return (
     <MToolShell title="圖片工具">
@@ -893,10 +917,16 @@ function MToolImage(){
           <button key={a.id} className={`chip ${action===a.id?'on':''}`} onClick={() => setAction(a.id)} style={{flexShrink:0}}>{a.i} {a.l}</button>
         ))}
       </div>
-      <UploadDropzone accept="image/*" multiple onFiles={(f) => setFiles([...files,...f])} icon="🖼️" label="拖放或選擇圖片">
-        <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'4px'}}>JPG · PNG · WebP · 最多 50 個</div>
+      <UploadDropzone accept="image/*" multiple onFiles={(f) => setFiles([...files,...f])} icon="🖼️"
+        label={isMerge ? '至少選 2 張要拼接的圖片' : '拖放或選擇圖片'}>
+        <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'4px'}}>
+          {isMerge ? '依清單順序排列 · JPG · PNG · WebP' : 'JPG · PNG · WebP · 最多 50 個'}
+        </div>
       </UploadDropzone>
       <FileList files={files} onRemove={(i) => setFiles(files.filter((_,j)=>j!==i))}/>
+      {isMerge && files.length < 2 && (
+        <div style={{marginTop:'8px', fontSize:'11px', color:'var(--warn)'}}>⚠ 拼接需要至少 2 張圖片</div>
+      )}
 
       <div className="card fill" style={{padding:'14px', margin:'12px 0'}}>
         <div className="label" style={{marginBottom:'8px'}}>{actions.find(a=>a.id===action).l}設定</div>
@@ -909,11 +939,52 @@ function MToolImage(){
         {action === 'convert' && (<div><div className="field-label">輸出格式</div><div className="row" style={{gap:'4px'}}>{['PNG','JPG','WebP','BMP'].map(f=><button key={f} className={`chip ${opts.format===f?'on':''}`} onClick={()=>setOpts({...opts,format:f})}>{f}</button>)}</div></div>)}
         {action === 'compress' && (<div><div className="field-label">品質 {opts.quality}%</div><input type="range" className="slider" min="10" max="100" value={opts.quality} onChange={e=>setOpts({...opts,quality:+e.target.value})}/></div>)}
         {action === 'watermark' && (<><div className="field-label">文字</div><input className="input" value={opts.text} onChange={e=>setOpts({...opts,text:e.target.value})}/></>)}
+        {action === 'merge' && (<>
+          <div className="field-label">排列方向</div>
+          <div className="row" style={{gap:'4px', marginBottom:'10px', flexWrap:'wrap'}}>
+            {[
+              {id:'vertical', l:'⬇ 直向'},
+              {id:'horizontal', l:'➡ 橫向'},
+              {id:'grid', l:'▦ 九宮格'},
+            ].map(d => (
+              <button key={d.id} className={`chip ${opts.direction===d.id?'on':''}`}
+                onClick={() => setOpts({...opts, direction:d.id})}>{d.l}</button>
+            ))}
+          </div>
+          {opts.direction === 'grid' && <>
+            <div className="field-label">欄數（0 = 自動）</div>
+            <input className="input" type="number" min="0" value={opts.columns}
+              onChange={e => setOpts({...opts, columns:+e.target.value})} style={{marginBottom:'8px'}}/>
+          </>}
+          <div className="field-label">間距 {opts.gap}px</div>
+          <input type="range" className="slider" min="0" max="60" value={opts.gap}
+            onChange={e => setOpts({...opts, gap:+e.target.value})} style={{marginBottom:'10px'}}/>
+          <div className="field-label">底色</div>
+          <input type="color" value={opts.bg_color}
+            onChange={e => setOpts({...opts, bg_color:e.target.value})}
+            style={{width:'100%', height:'34px', padding:'2px', marginBottom:'10px',
+                    border:'1.25px solid var(--line-soft)', borderRadius:'8px', background:'var(--paper)'}}/>
+          <div className="field-label">輸出格式</div>
+          <div className="row" style={{gap:'4px', marginBottom:'10px'}}>
+            {['JPEG','PNG','WEBP'].map(f => (
+              <button key={f} className={`chip ${opts.format===f?'on':''}`}
+                onClick={() => setOpts({...opts, format:f})}>{f}</button>
+            ))}
+          </div>
+          <div className="field-label">品質 {opts.quality}%</div>
+          <input type="range" className="slider" min="40" max="100" value={opts.quality}
+            onChange={e => setOpts({...opts, quality:+e.target.value})} style={{marginBottom:'10px'}}/>
+          <label style={{fontSize:'12px', display:'flex', alignItems:'center', gap:'6px'}}>
+            <input type="checkbox" checked={opts.normalize}
+              onChange={e => setOpts({...opts, normalize:e.target.checked})}/>
+            等比對齊（避免空隙）
+          </label>
+        </>)}
       </div>
 
       <ToolProcessor files={files} single={singleFn} batch={batchFn}
-        taskProgressUrl={window.API.imgTaskProgress} taskDownloadUrl={window.API.imgTaskDownload}
-        resultFilename={`${action}_result`}/>
+        taskProgressUrl={window.API.imgTaskProgress} taskDownloadUrl={downloadUrl}
+        resultFilename={resultFilename}/>
     </MToolShell>
   );
 }

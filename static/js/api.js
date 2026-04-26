@@ -186,6 +186,25 @@ const ScanMailAPI = (() => {
     return formData(`${imgBase}/batch/watermark`, fd);
   }
 
+  function imgMerge(files, opts = {}) {
+    const fd = new FormData();
+    files.forEach(f => fd.append('files', f));
+    fd.append('direction', opts.direction || 'vertical');
+    fd.append('gap', opts.gap ?? 0);
+    fd.append('bg_color', opts.bg_color || '#ffffff');
+    fd.append('align', opts.align || 'center');
+    fd.append('output_format', opts.output_format || 'JPEG');
+    fd.append('quality', opts.quality ?? 90);
+    fd.append('columns', opts.columns ?? 0);
+    fd.append('normalize', opts.normalize === false ? 'false' : 'true');
+    return formData(`${imgBase}/merge`, fd);
+  }
+
+  function imgMergeDownload(taskId, format = 'jpeg') {
+    const f = (format || 'jpeg').toLowerCase();
+    return `${imgBase}/merge/result/${taskId}?format=${encodeURIComponent(f)}`;
+  }
+
   function imgTaskProgress(taskId) { return `${imgBase}/task/${taskId}/progress`; }
   function imgTaskDownload(taskId) { return `${imgBase}/task/${taskId}/download`; }
 
@@ -373,6 +392,7 @@ const ScanMailAPI = (() => {
     // Image tools
     imgResize, imgConvert, imgCompress, imgWatermark,
     imgBatchResize, imgBatchConvert, imgBatchCompress, imgBatchWatermark,
+    imgMerge, imgMergeDownload,
     imgTaskProgress, imgTaskDownload,
     // PDF tools
     pdfMerge, pdfTextWatermark, pdfProtect,
