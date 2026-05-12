@@ -17,6 +17,17 @@ from app.services.form_fill.backends import acroform
 logger = logging.getLogger(__name__)
 
 
+def _overlay_font() -> str:
+    """取得 overlay 用的字型名稱（CJK 優先，否則 Helvetica）"""
+    try:
+        # 沿用 doc_converter 已寫好的 CJK 字型註冊
+        from app.services.doc_converter import _register_cjk_font, _get_available_font
+        _register_cjk_font()
+        return _get_available_font()
+    except Exception:
+        return "Helvetica"
+
+
 def fill_form(
     data: bytes,
     fields: list[FormField],
@@ -89,7 +100,7 @@ def _make_overlay(
     drew_anything = False
     buf = io.BytesIO()
     c = rl_canvas.Canvas(buf, pagesize=(page_width, page_height))
-    c.setFont("Helvetica", 11)
+    c.setFont(_overlay_font(), 11)
 
     for f in fields:
         value = values.get(f.name)

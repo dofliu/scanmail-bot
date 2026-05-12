@@ -105,8 +105,12 @@ def fill(data: bytes, values: dict) -> bytes:
     writer = PdfWriter(clone_from=reader)
 
     # 將值套用到每一頁的欄位（pypdf 需要逐頁呼叫）
+    # auto_regenerate=True 讓 viewer 重新渲染外觀（中文等非 ASCII 才會顯示）
     for page in writer.pages:
         try:
+            writer.update_page_form_field_values(page, values, auto_regenerate=True)
+        except TypeError:
+            # 舊版 pypdf 不支援 auto_regenerate kwarg
             writer.update_page_form_field_values(page, values)
         except Exception as e:
             logger.warning("update_page_form_field_values failed: %s", e)
