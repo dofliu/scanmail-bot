@@ -1004,26 +1004,86 @@ function MToolShell({ title, children }){
 function MToolPdf(){
   const [action, setAction] = mUseState('merge');
   const [files, setFiles] = mUseState([]);
-  const [opts, setOpts] = mUseState({text:'CONFIDENTIAL', password:''});
-  const actions = [{id:'merge',i:'📎',l:'合併'},{id:'watermark',i:'💧',l:'浮水印'},{id:'protect',i:'🔒',l:'加密'}];
+  const [opts, setOpts] = mUseState({
+    text: 'CONFIDENTIAL', password: '',
+    addToc: false, addPageNumbers: false,
+    splitRanges: '', splitIndividual: false,
+    compressLevel: 'basic', compressQuality: 60,
+    imgFmt: 'png', imgDpi: 150,
+  });
+  const actions = [
+    {id:'merge',i:'📎',l:'合併'},
+    {id:'split',i:'✂️',l:'分割'},
+    {id:'compress',i:'📦',l:'壓縮'},
+    {id:'to-images',i:'🖼️',l:'轉影像'},
+    {id:'watermark',i:'💧',l:'浮水印'},
+    {id:'protect',i:'🔒',l:'加密'},
+  ];
 
-  const singleFn = action === 'watermark' ? (file) => window.API.pdfTextWatermark(file, opts.text, 48, 0.15, 45, 0, 0, 0)
-    : action === 'protect' ? (file) => window.API.pdfProtect(file, opts.password)
-    : null;
-  const batchFn = action === 'merge' ? (fs) => window.API.pdfMerge(fs) : null;
+  const singleFn =
+    action === 'watermark' ? (f) => window.API.pdfTextWatermark(f, opts.text, 48, 0.15, 45, 0, 0, 0) :
+    action === 'protect'   ? (f) => window.API.pdfProtect(f, opts.password) :
+    action === 'split'     ? (f) => window.API.pdfSplit(f, opts.splitRanges, opts.splitIndividual) :
+    action === 'compress'  ? (f) => window.API.pdfCompress(f, opts.compressLevel, opts.compressQuality) :
+    action === 'to-images' ? (f) => window.API.pdfToImages(f, opts.imgFmt, opts.imgDpi) :
+    null;
+  const batchFn = action === 'merge' ? (fs) => window.API.pdfMerge(fs, opts.addToc, opts.addPageNumbers) : null;
+
+  const resultFilename =
+    action==='merge'     ? 'merged.pdf' :
+    action==='watermark' ? 'watermarked.pdf' :
+    action==='protect'   ? 'protected.pdf' :
+    action==='compress'  ? 'compressed.pdf' :
+    'pdf_result.zip';  // split / to-images
 
   return (
     <MToolShell title="PDF 工具">
-      <div className="row" style={{gap:'6px', marginBottom:'14px'}}>
-        {actions.map(a => <button key={a.id} className={`chip ${action===a.id?'on':''}`} onClick={() => setAction(a.id)}>{a.i} {a.l}</button>)}
+      <div className="row" style={{gap:'6px', marginBottom:'14px', flexWrap:'wrap'}}>
+        {actions.map(a => <button key={a.id} className={`chip ${action===a.id?'on':''}`} onClick={() => { setAction(a.id); setFiles([]); }}>{a.i} {a.l}</button>)}
       </div>
       <UploadDropzone accept=".pdf" multiple={action==='merge'} onFiles={(f) => setFiles([...files,...f])} icon="📕" label="拖放 PDF 檔案"/>
       <FileList files={files} onRemove={(i) => setFiles(files.filter((_,j)=>j!==i))}/>
+
+      {action === 'merge' && (<div style={{margin:'10px 0', display:'flex', flexDirection:'column', gap:'6px'}}>
+        <label style={{fontSize:'12px'}}><input type="checkbox" checked={opts.addToc} onChange={e=>setOpts({...opts, addToc:e.target.checked})}/> 加入書籤目錄</label>
+        <label style={{fontSize:'12px'}}><input type="checkbox" checked={opts.addPageNumbers} onChange={e=>setOpts({...opts, addPageNumbers:e.target.checked})}/> 加上頁碼</label>
+      </div>)}
+
+      {action === 'split' && (<div style={{margin:'10px 0'}}>
+        <div className="field-label">頁面範圍</div>
+        <input className="input" value={opts.splitRanges} onChange={e=>setOpts({...opts, splitRanges:e.target.value})} placeholder="1-3,5,7-9" disabled={opts.splitIndividual}/>
+        <label style={{fontSize:'12px', marginTop:'6px', display:'block'}}><input type="checkbox" checked={opts.splitIndividual} onChange={e=>setOpts({...opts, splitIndividual:e.target.checked})}/> 每頁拆成獨立檔</label>
+      </div>)}
+
+      {action === 'compress' && (<div style={{margin:'10px 0'}}>
+        <div className="field-label">壓縮強度</div>
+        <select className="input" value={opts.compressLevel} onChange={e=>setOpts({...opts, compressLevel:e.target.value})}>
+          <option value="basic">basic（無損）</option>
+          <option value="images">images（重編影像）</option>
+          <option value="deep">deep（最強）</option>
+        </select>
+        {opts.compressLevel !== 'basic' && (<>
+          <div className="field-label" style={{marginTop:'8px'}}>JPEG 品質 ({opts.compressQuality})</div>
+          <input type="range" className="slider" min="20" max="95" value={opts.compressQuality} onChange={e=>setOpts({...opts, compressQuality:+e.target.value})}/>
+        </>)}
+      </div>)}
+
+      {action === 'to-images' && (<div style={{margin:'10px 0'}}>
+        <div className="field-label">格式</div>
+        <select className="input" value={opts.imgFmt} onChange={e=>setOpts({...opts, imgFmt:e.target.value})}>
+          <option value="png">PNG</option>
+          <option value="jpg">JPG</option>
+        </select>
+        <div className="field-label" style={{marginTop:'8px'}}>DPI ({opts.imgDpi})</div>
+        <input type="range" className="slider" min="72" max="300" value={opts.imgDpi} onChange={e=>setOpts({...opts, imgDpi:+e.target.value})}/>
+      </div>)}
+
       {action === 'watermark' && (<div style={{margin:'10px 0'}}><div className="field-label">浮水印文字</div><input className="input" value={opts.text} onChange={e=>setOpts({...opts,text:e.target.value})}/></div>)}
       {action === 'protect' && (<div style={{margin:'10px 0'}}><div className="field-label">密碼</div><input className="input" type="password" value={opts.password} onChange={e=>setOpts({...opts,password:e.target.value})}/></div>)}
+
       <ToolProcessor files={files} single={singleFn} batch={batchFn}
         taskProgressUrl={window.API.pdfTaskProgress} taskDownloadUrl={window.API.pdfTaskDownload}
-        resultFilename={action==='merge'?'merged.pdf':action==='watermark'?'watermarked.pdf':'protected.pdf'}/>
+        resultFilename={resultFilename}/>
     </MToolShell>
   );
 }
