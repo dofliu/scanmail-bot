@@ -797,13 +797,123 @@ function DToolImage(){
 function DToolPdf(){
   const [action, setAction] = dUseState('merge');
   const [files, setFiles] = dUseState([]);
-  const [opts, setOpts] = dUseState({text:'CONFIDENTIAL', password:''});
-  const singleFn = action==='watermark'?(f)=>window.API.pdfTextWatermark(f,opts.text,48,0.15,45,0,0,0):action==='protect'?(f)=>window.API.pdfProtect(f,opts.password):null;
-  const batchFn = action==='merge'?(fs)=>window.API.pdfMerge(fs):null;
+  const [opts, setOpts] = dUseState({
+    text: 'CONFIDENTIAL', password: '',
+    addToc: false, addPageNumbers: false,
+    splitRanges: '', splitIndividual: false,
+    compressLevel: 'basic', compressQuality: 60,
+    imgFmt: 'png', imgDpi: 150,
+  });
+
+  const actions = [
+    {id:'merge',     l:'📎 合併'},
+    {id:'split',     l:'✂️ 分割'},
+    {id:'compress',  l:'📦 壓縮'},
+    {id:'to-images', l:'🖼️ 轉影像'},
+    {id:'watermark', l:'💧 浮水印'},
+    {id:'protect',   l:'🔒 加密'},
+  ];
+
+  const singleFn =
+    action === 'watermark' ? (f) => window.API.pdfTextWatermark(f, opts.text, 48, 0.15, 45, 0, 0, 0) :
+    action === 'protect'   ? (f) => window.API.pdfProtect(f, opts.password) :
+    action === 'split'     ? (f) => window.API.pdfSplit(f, opts.splitRanges, opts.splitIndividual) :
+    action === 'compress'  ? (f) => window.API.pdfCompress(f, opts.compressLevel, opts.compressQuality) :
+    action === 'to-images' ? (f) => window.API.pdfToImages(f, opts.imgFmt, opts.imgDpi) :
+    null;
+  const batchFn = action === 'merge' ? (fs) => window.API.pdfMerge(fs, opts.addToc, opts.addPageNumbers) : null;
+
+  // 結果檔名（split / to-images 是 ZIP）
+  const resultFilename =
+    action === 'split' || action === 'to-images' ? 'pdf_result.zip' : 'pdf_result.pdf';
+
   return (
     <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
-      <div><div className="row" style={{gap:'6px',marginBottom:'14px'}}>{[{id:'merge',l:'📎 合併'},{id:'watermark',l:'💧 浮水印'},{id:'protect',l:'🔒 加密'}].map(a=><button key={a.id} className={`chip ${action===a.id?'on':''}`} onClick={()=>setAction(a.id)}>{a.l}</button>)}</div><UploadDropzone accept=".pdf" multiple={action==='merge'} onFiles={f=>setFiles([...files,...f])} icon="📕" label="拖放 PDF"/><FileList files={files} onRemove={i=>setFiles(files.filter((_,j)=>j!==i))}/></div>
-      <div className="card" style={{padding:'16px'}}><div className="label" style={{marginBottom:'10px'}}>設定</div>{action==='watermark'&&<><div className="field-label">文字</div><input className="input" value={opts.text} onChange={e=>setOpts({...opts,text:e.target.value})}/></>}{action==='protect'&&<><div className="field-label">密碼</div><input className="input" type="password" value={opts.password} onChange={e=>setOpts({...opts,password:e.target.value})}/></>}<div style={{marginTop:'16px'}}><ToolProcessor files={files} single={singleFn} batch={batchFn} taskProgressUrl={window.API.pdfTaskProgress} taskDownloadUrl={window.API.pdfTaskDownload} resultFilename="pdf_result.pdf"/></div></div>
+      <div>
+        <div className="row" style={{gap:'6px', marginBottom:'14px', flexWrap:'wrap'}}>
+          {actions.map(a => (
+            <button key={a.id} className={`chip ${action===a.id?'on':''}`} onClick={()=>{setAction(a.id); setFiles([]);}}>{a.l}</button>
+          ))}
+        </div>
+        <UploadDropzone accept=".pdf" multiple={action==='merge'}
+                        onFiles={f=>setFiles([...files,...f])}
+                        icon="📕" label={action==='merge' ? '拖放多個 PDF' : '拖放 PDF'}/>
+        <FileList files={files} onRemove={i=>setFiles(files.filter((_,j)=>j!==i))}/>
+      </div>
+
+      <div className="card" style={{padding:'16px'}}>
+        <div className="label" style={{marginBottom:'10px'}}>設定</div>
+
+        {action==='merge' && <>
+          <label style={{fontSize:'12px', display:'flex', alignItems:'center', gap:'6px', marginBottom:'8px'}}>
+            <input type="checkbox" checked={opts.addToc} onChange={e=>setOpts({...opts, addToc:e.target.checked})}/>
+            加入書籤目錄（每份檔名為一節）
+          </label>
+          <label style={{fontSize:'12px', display:'flex', alignItems:'center', gap:'6px'}}>
+            <input type="checkbox" checked={opts.addPageNumbers} onChange={e=>setOpts({...opts, addPageNumbers:e.target.checked})}/>
+            加上頁碼（n / N）
+          </label>
+        </>}
+
+        {action==='split' && <>
+          <div className="field-label">頁面範圍（空白＝整份）</div>
+          <input className="input" value={opts.splitRanges}
+                 onChange={e=>setOpts({...opts, splitRanges:e.target.value})}
+                 placeholder="1-3,5,7-9" disabled={opts.splitIndividual}/>
+          <label style={{fontSize:'12px', display:'flex', alignItems:'center', gap:'6px', marginTop:'8px'}}>
+            <input type="checkbox" checked={opts.splitIndividual} onChange={e=>setOpts({...opts, splitIndividual:e.target.checked})}/>
+            每頁拆成獨立檔
+          </label>
+        </>}
+
+        {action==='compress' && <>
+          <div className="field-label">壓縮強度</div>
+          <select className="input" value={opts.compressLevel}
+                  onChange={e=>setOpts({...opts, compressLevel:e.target.value})}>
+            <option value="basic">basic — 無損（content streams）</option>
+            <option value="images">images — 影像重新編碼</option>
+            <option value="deep">deep — images + 縮放 + GC</option>
+          </select>
+          {opts.compressLevel !== 'basic' && <>
+            <div className="field-label" style={{marginTop:'8px'}}>影像 JPEG 品質 ({opts.compressQuality})</div>
+            <input type="range" className="slider" min="20" max="95"
+                   value={opts.compressQuality}
+                   onChange={e=>setOpts({...opts, compressQuality:+e.target.value})}/>
+          </>}
+        </>}
+
+        {action==='to-images' && <>
+          <div className="field-label">格式</div>
+          <select className="input" value={opts.imgFmt}
+                  onChange={e=>setOpts({...opts, imgFmt:e.target.value})}>
+            <option value="png">PNG（無損）</option>
+            <option value="jpg">JPG（較小）</option>
+          </select>
+          <div className="field-label" style={{marginTop:'8px'}}>DPI ({opts.imgDpi})</div>
+          <input type="range" className="slider" min="72" max="300"
+                 value={opts.imgDpi}
+                 onChange={e=>setOpts({...opts, imgDpi:+e.target.value})}/>
+        </>}
+
+        {action==='watermark' && <>
+          <div className="field-label">文字</div>
+          <input className="input" value={opts.text}
+                 onChange={e=>setOpts({...opts, text:e.target.value})}/>
+        </>}
+
+        {action==='protect' && <>
+          <div className="field-label">密碼</div>
+          <input className="input" type="password" value={opts.password}
+                 onChange={e=>setOpts({...opts, password:e.target.value})}/>
+        </>}
+
+        <div style={{marginTop:'16px'}}>
+          <ToolProcessor files={files} single={singleFn} batch={batchFn}
+            taskProgressUrl={window.API.pdfTaskProgress}
+            taskDownloadUrl={window.API.pdfTaskDownload}
+            resultFilename={resultFilename}/>
+        </div>
+      </div>
     </div>
   );
 }

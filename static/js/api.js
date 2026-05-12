@@ -214,11 +214,36 @@ const ScanMailAPI = (() => {
 
   const pdfBase = `${BASE}/tools/pdf`;
 
-  function pdfMerge(files, addToc = false) {
+  function pdfMerge(files, addToc = false, addPageNumbers = false) {
     const fd = new FormData();
     files.forEach(f => fd.append('files', f));
     fd.append('add_toc', addToc);
+    fd.append('add_page_numbers', addPageNumbers);
     return formData(`${pdfBase}/merge`, fd);
+  }
+
+  function pdfSplit(file, ranges = '', individual = false) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('ranges', ranges);
+    fd.append('individual', individual);
+    return formData(`${pdfBase}/split`, fd);
+  }
+
+  function pdfCompress(file, level = 'basic', imageQuality = 60) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('level', level);
+    fd.append('image_quality', imageQuality);
+    return formData(`${pdfBase}/compress`, fd);
+  }
+
+  function pdfToImages(file, fmt = 'png', dpi = 150) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('fmt', fmt);
+    fd.append('dpi', dpi);
+    return formData(`${pdfBase}/to-images`, fd);
   }
 
   function pdfTextWatermark(file, text, fontSize, opacity, rotation, r, g, b) {
@@ -452,6 +477,7 @@ const ScanMailAPI = (() => {
     imgTaskProgress, imgTaskDownload,
     // PDF tools
     pdfMerge, pdfTextWatermark, pdfProtect,
+    pdfSplit, pdfCompress, pdfToImages,
     pdfTaskProgress, pdfTaskDownload,
     // Doc convert
     docConvert,
