@@ -3,9 +3,11 @@
 讓 Gemini 直接看圖回傳 JSON：每個欄位的 label / bbox / type。
 精度不如 AcroForm/PaddleOCR，但對手寫、奇怪版型最強。
 
-座標格式：要求 Gemini 用「0~1000 的相對座標」回傳，本地再依影像實際尺寸換算為 PDF points。
+座標契約：
+- Gemini 用 0~1000 的影像 normalized 座標（原點左上）回傳
+- 本 backend 在組 FormField 時，依 caller 傳入的 page_sizes_pts
+  把座標換算成 PDF points（原點左下），讓 filler 不必再做 backend 分支
 """
-import io
 import json
 import logging
 import re
@@ -43,8 +45,19 @@ SYSTEM_PROMPT = """你是一個表單欄位偵測助手。
 """
 
 
-def detect(images: list[bytes], hint: Optional[str] = None, page_count: int = 1) -> DetectionResult:
-    """以 Gemini Vision 偵測表單欄位"""
+def detect(
+    images: list[bytes],
+    page_sizes_pts: list[tuple[float, float]],
+    hint: Optional[str] = None,
+) -> DetectionResult:
+    """以 Gemini Vision 偵測表單欄位
+
+    Args:
+        images: 每頁影像 PNG bytes
+        page_sizes_pts: 對應每頁的 PDF 頁面尺寸 (w, h) in points，用於座標換算
+        hint: 表單提示（例如「差旅費報銷單」）
+    """
+    page_count = len(images)
     settings = get_settings()
     if not settings.GEMINI_API_KEY:
         logger.error("GEMINI_API_KEY 未設定，無法使用 Gemini Vision backend")
@@ -56,6 +69,13 @@ def detect(images: list[bytes], hint: Optional[str] = None, page_count: int = 1)
             notes="GEMINI_API_KEY 未設定",
         )
 
+    if len(page_sizes_pts) != page_count:
+        logger.warning(
+            "page_sizes_pts 數量 (%d) ≠ images 數量 (%d)，缺的頁面用 A4 預設",
+            len(page_sizes_pts), page_count,
+        )
+        page_sizes_pts = list(page_sizes_pts) + [(595.0, 842.0)] * (page_count - len(page_sizes_pts))
+
     all_fields: list[FormField] = []
     try:
         from google import genai
@@ -64,7 +84,7 @@ def detect(images: list[bytes], hint: Optional[str] = None, page_count: int = 1)
         client = genai.Client(api_key=settings.GEMINI_API_KEY)
 
         for page_num, img_bytes in enumerate(images):
-            user_prompt = _build_user_prompt(hint, page_num, len(images))
+            user_prompt = _build_user_prompt(hint, page_num, page_count)
             image_part = types.Part.from_bytes(data=img_bytes, mime_type="image/png")
 
             response = client.models.generate_content(
@@ -79,7 +99,8 @@ def detect(images: list[bytes], hint: Optional[str] = None, page_count: int = 1)
             )
             text = (response.text or "").strip()
             parsed = _parse_json(text)
-            page_fields = _to_form_fields(parsed.get("fields", []), page_num, img_bytes)
+            pw, ph = page_sizes_pts[page_num]
+            page_fields = _to_form_fields(parsed.get("fields", []), page_num, pw, ph)
             all_fields.extend(page_fields)
 
     except Exception as e:
@@ -124,22 +145,44 @@ def _parse_json(text: str) -> dict:
     return {"fields": []}
 
 
-def _to_form_fields(raw: list[dict], page_num: int, img_bytes: bytes) -> list[FormField]:
-    """將 Gemini 回傳的 normalized bbox → FormField
+def _to_form_fields(
+    raw: list[dict],
+    page_num: int,
+    page_w_pts: float,
+    page_h_pts: float,
+) -> list[FormField]:
+    """把 Gemini normalized 座標換算為 PDF points (origin bottom-left)
 
-    注意：Gemini 回的是「影像座標 0~1000」，但 FormField.bbox 標準是「PDF points」。
-    這裡先保留 normalized 座標，留 TODO 給 filler 階段做精確換算（需要 DPI / 頁面尺寸）。
+    Gemini bbox_norm = [x0, y0, x1, y1] 是影像座標 0~1000、原點左上。
+    PDF points 原點在左下，所以 y 軸要翻轉。
     """
     fields: list[FormField] = []
     for i, item in enumerate(raw):
-        bbox_norm = item.get("bbox_norm") or item.get("bbox") or [0, 0, 0, 0]
-        if len(bbox_norm) != 4:
+        bbox_norm = item.get("bbox_norm") or item.get("bbox")
+        if not bbox_norm or len(bbox_norm) != 4:
             continue
+        try:
+            nx0, ny0, nx1, ny1 = (float(v) for v in bbox_norm)
+        except (TypeError, ValueError):
+            continue
+
+        # normalize to 0..1，並夾在合法範圍內
+        nx0, nx1 = sorted((max(0.0, min(1000.0, nx0)) / 1000.0,
+                           max(0.0, min(1000.0, nx1)) / 1000.0))
+        ny0, ny1 = sorted((max(0.0, min(1000.0, ny0)) / 1000.0,
+                           max(0.0, min(1000.0, ny1)) / 1000.0))
+
+        # 映射到 PDF points + y 軸翻轉
+        x0_pts = nx0 * page_w_pts
+        x1_pts = nx1 * page_w_pts
+        y0_pts = page_h_pts - ny1 * page_h_pts  # 圖像下緣 → PDF 上緣 → 取低值
+        y1_pts = page_h_pts - ny0 * page_h_pts
+
         fields.append(FormField(
             name=f"p{page_num}_g{i}",
             label=str(item.get("label", "")).strip() or f"欄位 {i+1}",
             field_type=str(item.get("field_type", "text")),
-            bbox=tuple(float(v) for v in bbox_norm),  # 注意：normalized 0~1000
+            bbox=(x0_pts, y0_pts, x1_pts, y1_pts),
             page=page_num,
             backend="gemini",
             confidence=float(item.get("confidence", 0.7)),

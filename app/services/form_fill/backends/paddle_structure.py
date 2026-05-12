@@ -25,20 +25,24 @@ def is_available() -> bool:
         return False
 
 
-def detect(images: list[bytes], page_count: int = 1) -> DetectionResult:
+def detect(
+    images: list[bytes],
+    page_sizes_pts: list[tuple[float, float]],
+) -> DetectionResult:
     """以 PaddleOCR PP-Structure 偵測表單欄位
 
     Args:
         images: 每頁的 PNG/JPG bytes 清單
-        page_count: 總頁數（通常 = len(images)）
+        page_sizes_pts: 對應每頁的 PDF 頁面尺寸 (w, h) in points，用於座標換算
 
     Returns:
-        DetectionResult
+        DetectionResult — bbox 必須是 PDF points（origin bottom-left）
     """
     # TODO(M6): 接入 paddleocr.PPStructure(layout=True, table=True, ocr=True, kie=True)
-    #   1. 對每張影像跑 KIE，回傳 [{label, bbox, value?}, ...]
-    #   2. bbox 從影像座標 → PDF points（需要 DPI 反推）
-    #   3. 組成 FormField 列表
+    #   1. 對每張影像跑 KIE，回傳 [{label, bbox_img, value?}, ...]
+    #   2. bbox 從影像 pixel 座標 → PDF points
+    #      （PP-Structure 回傳的影像座標可用 page_sizes_pts 和 image 實際尺寸推算）
+    #   3. 組成 FormField 列表，bbox 統一存 PDF points
     raise NotImplementedError(
         "PaddleOCR backend 尚未實作（M6 里程碑）。"
         "目前 dispatcher 會自動 fallback 到 Gemini Vision。"

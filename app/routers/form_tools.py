@@ -8,18 +8,16 @@ API 端點：
 
 詳細設計：docs/AUTO_FORM_FILL.md
 """
-import io
-import json
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response, StreamingResponse
 
 from app.core.tasks import submit_task, get_task, task_progress_stream
 from app.core.file_manager import save_temp_file, get_temp_path
 from app.services.form_fill import (
-    detect_fields, fill_form, suggest_values,
+    detect_fields, normalize_to_pdf, fill_form, suggest_values,
     DetectionResult, FormField,
 )
 from app.services.form_fill.schema import UnsupportedFormat
@@ -37,30 +35,36 @@ async def api_detect_fields(
 ):
     """偵測表單欄位
 
+    對於影像輸入，會先在邊界轉換成 PDF 後存為 session 檔，
+    後續 /fill 流程一律操作 PDF。
+
     回傳：
         {
-            "session_token": "<uuid>",      # 後續 fill 時帶回
+            "session_token": "<32-hex>.pdf",
             "filename": "<原檔名>",
             "result": { ...DetectionResult... }
         }
     """
-    data = await file.read()
-    if not data:
+    raw = await file.read()
+    if not raw:
         raise HTTPException(status_code=400, detail="空檔案")
 
     mime = file.content_type or _guess_mime(file.filename or "")
 
     try:
-        result: DetectionResult = detect_fields(data, mime, hint=hint)
+        # 邊界：任何輸入 → PDF（影像會被包成一頁 PDF）
+        pdf_data = normalize_to_pdf(raw, mime)
     except UnsupportedFormat as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        result: DetectionResult = detect_fields(pdf_data, hint=hint)
     except Exception as e:
         logger.error("偵測失敗: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"偵測失敗: {e}")
 
-    # 暫存原檔，後續 fill 時直接取用
-    ext = ".pdf" if mime == "application/pdf" else ".bin"
-    path = save_temp_file(data, suffix=ext)
+    # session 一律存 PDF — /fill 不再需要關心原始格式
+    path = save_temp_file(pdf_data, suffix=".pdf")
 
     return {
         "session_token": path.name,
@@ -71,7 +75,7 @@ async def api_detect_fields(
 
 @router.post("/suggest")
 async def api_suggest_values(payload: dict):
-    """對欄位清單套用 semantic mapping，回傳建議值
+    """對欄位清單套用 semantic mapping，回傳建議值 + 標註後的 fields
 
     Request:
         {
@@ -82,6 +86,7 @@ async def api_suggest_values(payload: dict):
     Response:
         {
             "values": { "field_0": "王小明", ... },
+            "fields": [ {...FormField, semantic_key, suggested_value...} ],
             "matched": 5,
             "total": 12
         }
@@ -97,9 +102,11 @@ async def api_suggest_values(payload: dict):
     if contact_id is not None:
         contact = ContactModel.get_by_id(int(contact_id))
 
+    # suggest_values 會 in-place 設定 semantic_key 與 suggested_value
     values = suggest_values(fields, sender, contact)
     return {
         "values": values,
+        "fields": [f.to_dict() for f in fields],
         "matched": len(values),
         "total": len(fields),
     }
@@ -119,11 +126,11 @@ async def api_fill_form(payload: dict):
         { "task_id": "..." }
     """
     token = payload.get("session_token")
-    if not token:
+    if not token or not isinstance(token, str):
         raise HTTPException(status_code=400, detail="缺少 session_token")
     path = get_temp_path(token)
     if not path:
-        raise HTTPException(status_code=404, detail="session 已過期，請重新上傳")
+        raise HTTPException(status_code=404, detail="session 已過期或無效，請重新上傳")
 
     fields_raw = payload.get("fields") or []
     fields = [_field_from_dict(f) for f in fields_raw]

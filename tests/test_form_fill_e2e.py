@@ -16,7 +16,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
 from app.services.form_fill import (
-    detect_fields, fill_form, suggest_values,
+    detect_fields, normalize_to_pdf, fill_form, suggest_values,
 )
 from app.services.form_fill.backends import acroform, pdfplumber_extract
 
@@ -106,7 +106,7 @@ def test_acroform():
     # 確認 backend 偵測正確
     print(_line(f"has_acroform()   : {acroform.has_acroform(data)}"))
 
-    result = detect_fields(data, "application/pdf")
+    result = detect_fields(normalize_to_pdf(data, "application/pdf"))
     suggestions = _show_detection(result, SAMPLE_SENDER, SAMPLE_CONTACT)
 
     assert result.backend_used == "acroform", "AcroForm 表單應該走 Layer 1"
@@ -127,7 +127,7 @@ def test_flat_travel_expense():
     print(_line(f"has_acroform()   : {acroform.has_acroform(data)} (expect False)"))
     print(_line(f"has_text_layer() : {pdfplumber_extract.has_text_layer(data)} (expect True)"))
 
-    result = detect_fields(data, "application/pdf")
+    result = detect_fields(normalize_to_pdf(data, "application/pdf"))
     suggestions = _show_detection(result, SAMPLE_SENDER, SAMPLE_CONTACT)
 
     assert result.backend_used == "pdfplumber", "文字 PDF 應該走 Layer 2"
@@ -144,7 +144,7 @@ def test_flat_meeting_signin():
     data = path.read_bytes()
     print(_line(f"input            : {path.relative_to(ROOT)} ({len(data):,} bytes)"))
 
-    result = detect_fields(data, "application/pdf")
+    result = detect_fields(normalize_to_pdf(data, "application/pdf"))
     suggestions = _show_detection(result, SAMPLE_SENDER, SAMPLE_CONTACT)
 
     assert result.backend_used == "pdfplumber"
@@ -164,20 +164,23 @@ def test_scanned_image():
     has_key = bool(os.environ.get("GEMINI_API_KEY"))
     print(_line(f"GEMINI_API_KEY   : {'set' if has_key else 'NOT SET (will graceful-fail)'}"))
 
-    result = detect_fields(data, "image/png")
+    # 邊界：影像 → PDF（單頁，page size = 影像 pixel 數）
+    pdf_data = normalize_to_pdf(data, "image/png")
+    print(_line(f"normalized       : {len(data)} bytes png → {len(pdf_data)} bytes pdf"))
+
+    result = detect_fields(pdf_data)
     suggestions = _show_detection(result, SAMPLE_SENDER, SAMPLE_CONTACT)
 
-    assert result.backend_used == "gemini", "影像應走 Layer 4"
+    assert result.backend_used in ("gemini", "paddle"), "影像應走 Layer 3/4"
 
     if has_key and result.fields:
-        # 真有 API key：把欄位 + 偵測結果一起傳，filler 會走 overlay 模式
         try:
-            filled_pdf = fill_form(data, result.fields, suggestions)
+            filled_pdf = fill_form(pdf_data, result.fields, suggestions)
             out_path = OUT_DIR / "scanned_leave_form_filled.pdf"
             out_path.write_bytes(filled_pdf)
             print(_line(f"✓ filled output  : {out_path.relative_to(ROOT)}"))
         except Exception as e:
-            print(_line(f"(fill skipped — overlay needs PDF input, got image): {e}"))
+            print(_line(f"(fill failed): {e}"))
     else:
         print(_line("(skip fill — no API key or no fields)"))
 

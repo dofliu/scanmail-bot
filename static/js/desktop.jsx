@@ -1032,10 +1032,11 @@ function DToolForm(){
     setSession(null); setValues({}); setResultUrl(null);
     try {
       const r = await window.API.formDetect(file, hint);
-      setSession({token: r.session_token, result: r.result});
       setMsg(`使用 backend: ${r.result.backend_used} · 偵測到 ${r.result.fields.length} 個欄位`);
-      // 自動套用 semantic mapping
+      // 自動套用 semantic mapping — 用回傳後的 fields 取代原本的（含 semantic_key 標註）
       const s = await window.API.formSuggest(r.result.fields);
+      const enrichedResult = {...r.result, fields: s.fields || r.result.fields};
+      setSession({token: r.session_token, result: enrichedResult});
       setValues(s.values || {});
       if (s.matched > 0) setMsg(prev => `${prev}（已自動填 ${s.matched} 個）`);
     } catch(e) {
