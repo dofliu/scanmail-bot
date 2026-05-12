@@ -148,6 +148,24 @@ const ScanMailAPI = (() => {
     return request(`${imgBase}/compress`, { method: 'POST', body: fd });
   }
 
+  function imgRotate(file, angle = 90, outputFormat = 'auto', quality = 90) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('angle', angle);
+    fd.append('output_format', outputFormat);
+    fd.append('quality', quality);
+    return formData(`${imgBase}/rotate`, fd);
+  }
+
+  function imgFlip(file, axis = 'horizontal', outputFormat = 'auto', quality = 90) {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('axis', axis);
+    fd.append('output_format', outputFormat);
+    fd.append('quality', quality);
+    return formData(`${imgBase}/flip`, fd);
+  }
+
   function imgWatermark(file, text, fontSize, opacity, position, color) {
     const fd = new FormData();
     fd.append('file', file); fd.append('text', text);
@@ -472,6 +490,7 @@ const ScanMailAPI = (() => {
     getSettings, saveSettings,
     // Image tools
     imgResize, imgConvert, imgCompress, imgWatermark,
+    imgRotate, imgFlip,
     imgBatchResize, imgBatchConvert, imgBatchCompress, imgBatchWatermark,
     imgMerge, imgMergeDownload,
     imgTaskProgress, imgTaskDownload,

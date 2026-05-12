@@ -112,3 +112,119 @@ def get_image_info(image_data: bytes) -> dict:
     except Exception as e:
         logger.error("無法讀取圖片資訊: %s", e)
         return {"error": str(e)}
+
+
+# ══════════════════════════════════════════════════════════════
+# 旋轉 / 翻轉
+# ══════════════════════════════════════════════════════════════
+
+def _resolve_output_format(img: Image.Image, requested: str) -> tuple[str, str]:
+    """依輸入圖與使用者選擇決定輸出 (Pillow format, mime suffix)
+
+    requested = "auto" 時沿用輸入格式（PNG 走 PNG，其他走 JPEG）。
+    """
+    if requested.lower() == "auto":
+        fmt = (img.format or "JPEG").upper()
+        if fmt == "JPG":
+            fmt = "JPEG"
+        if fmt not in ("JPEG", "PNG", "WEBP", "BMP", "GIF"):
+            fmt = "JPEG"
+    else:
+        fmt = requested.upper()
+        if fmt == "JPG":
+            fmt = "JPEG"
+    suffix = "jpg" if fmt == "JPEG" else fmt.lower()
+    return fmt, suffix
+
+
+def rotate_image(image_data: bytes, angle: int = 90,
+                 output_format: str = "auto", quality: int = 90) -> bytes:
+    """旋轉圖片
+
+    - 90 / 180 / 270 / -90 / -180 / -270 走 PIL transpose（無損、不裁切）
+    - 其他角度走 Image.rotate(expand=True, resample=BICUBIC)，邊角補白
+
+    Args:
+        angle: 旋轉角度，正值=順時針
+        output_format: "auto" | "JPEG" | "PNG" | "WEBP" | "BMP" | "GIF"
+        quality: JPEG / WEBP 品質 1-100
+
+    Returns:
+        旋轉後的圖片 bytes
+    """
+    img = Image.open(io.BytesIO(image_data))
+    original_format = img.format  # exif_transpose 會清掉 format，先存起來
+    img = ImageOps.exif_transpose(img)  # 消化 EXIF 方向
+    img.format = original_format
+
+    normalized = angle % 360
+
+    # 90° 整數倍走 transpose（無損）
+    if normalized == 0:
+        rotated = img.copy()
+    elif normalized == 90:
+        rotated = img.transpose(Image.ROTATE_270)  # PIL ROTATE_270 = 順時針 90
+    elif normalized == 180:
+        rotated = img.transpose(Image.ROTATE_180)
+    elif normalized == 270:
+        rotated = img.transpose(Image.ROTATE_90)   # PIL ROTATE_90 = 順時針 270
+    else:
+        # 任意角度：PIL Image.rotate 是逆時針，所以 angle 取反
+        # expand=True 自動撐開避免裁切，fillcolor 白
+        rotated = img.rotate(-normalized, resample=Image.BICUBIC,
+                              expand=True, fillcolor="white")
+
+    fmt, _ = _resolve_output_format(img, output_format)
+    if fmt == "JPEG" and rotated.mode in ("RGBA", "P", "LA"):
+        rotated = rotated.convert("RGB")
+
+    buf = io.BytesIO()
+    save_kwargs = {}
+    if fmt in ("JPEG", "WEBP"):
+        save_kwargs["quality"] = max(1, min(100, quality))
+        save_kwargs["optimize"] = True
+    rotated.save(buf, format=fmt, **save_kwargs)
+    result = buf.getvalue()
+    logger.info("圖片旋轉完成: %d° → %s (%d bytes)", normalized, fmt, len(result))
+    return result
+
+
+def flip_image(image_data: bytes, axis: str = "horizontal",
+               output_format: str = "auto", quality: int = 90) -> bytes:
+    """翻轉圖片
+
+    Args:
+        axis: "horizontal"（左右翻轉，鏡像）| "vertical"（上下翻轉）
+        output_format: 同 rotate_image
+        quality: JPEG / WEBP 品質
+
+    Returns:
+        翻轉後的圖片 bytes
+    """
+    axis = (axis or "horizontal").lower()
+    if axis not in ("horizontal", "vertical", "h", "v"):
+        raise ValueError(f"axis 必須是 horizontal 或 vertical，收到：{axis!r}")
+
+    img = Image.open(io.BytesIO(image_data))
+    original_format = img.format
+    img = ImageOps.exif_transpose(img)
+    img.format = original_format
+
+    if axis in ("horizontal", "h"):
+        flipped = ImageOps.mirror(img)   # 左右翻轉
+    else:
+        flipped = ImageOps.flip(img)     # 上下翻轉
+
+    fmt, _ = _resolve_output_format(img, output_format)
+    if fmt == "JPEG" and flipped.mode in ("RGBA", "P", "LA"):
+        flipped = flipped.convert("RGB")
+
+    buf = io.BytesIO()
+    save_kwargs = {}
+    if fmt in ("JPEG", "WEBP"):
+        save_kwargs["quality"] = max(1, min(100, quality))
+        save_kwargs["optimize"] = True
+    flipped.save(buf, format=fmt, **save_kwargs)
+    result = buf.getvalue()
+    logger.info("圖片翻轉完成: axis=%s → %s (%d bytes)", axis, fmt, len(result))
+    return result
