@@ -7,6 +7,7 @@ from fastapi.responses import Response
 from app.services.doc_converter import (
     word_to_pdf, pdf_to_word,
     markdown_to_pdf, markdown_to_word, word_to_markdown,
+    pdf_to_markdown,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,6 +78,19 @@ async def api_word_to_md(file: UploadFile = File(...)):
         result = word_to_markdown(data)
     except Exception as e:
         logger.error("Word → Markdown 失敗: %s", e)
+        raise HTTPException(status_code=500, detail=f"轉換失敗: {e}")
+    return Response(content=result.encode("utf-8"), media_type="text/markdown; charset=utf-8",
+                    headers={"Content-Disposition": "attachment; filename=converted.md"})
+
+
+@router.post("/pdf-to-md")
+async def api_pdf_to_md(file: UploadFile = File(...)):
+    """PDF → Markdown（依字型大小推斷標題層級）"""
+    data = await file.read()
+    try:
+        result = pdf_to_markdown(data)
+    except Exception as e:
+        logger.error("PDF → Markdown 失敗: %s", e)
         raise HTTPException(status_code=500, detail=f"轉換失敗: {e}")
     return Response(content=result.encode("utf-8"), media_type="text/markdown; charset=utf-8",
                     headers={"Content-Disposition": "attachment; filename=converted.md"})

@@ -255,6 +255,85 @@ def word_to_markdown(docx_data: bytes) -> str:
 
 
 # ══════════════════════════════════════════════════════════════
+# 6. PDF → Markdown
+# ══════════════════════════════════════════════════════════════
+
+def pdf_to_markdown(pdf_data: bytes) -> str:
+    """將 PDF 轉為 Markdown 文字
+
+    策略：
+    1. 用 pymupdf 抽出每行文字 + 平均字體大小
+    2. 統計全文字體大小分布，把最大的 1~2 個 size 視為 H1 / H2
+    3. 其餘為內文段落
+    4. 連續空行壓成一個段落分隔
+    """
+    import fitz  # pymupdf
+
+    pdf_doc = fitz.open(stream=pdf_data, filetype="pdf")
+
+    # 第一遍：收集所有 line + avg font size
+    all_lines: list[tuple[str, float, bool]] = []  # (text, size, is_bold)
+    size_counts: dict[int, int] = {}
+
+    for page in pdf_doc:
+        blocks = page.get_text("dict").get("blocks", [])
+        for block in blocks:
+            if block.get("type") != 0:  # 0 = text block
+                continue
+            for line in block.get("lines", []):
+                spans = line.get("spans", [])
+                if not spans:
+                    continue
+                # 行內所有 span 的字級平均（通常一行字級一致）
+                sizes = [s.get("size", 11) for s in spans]
+                avg_size = sum(sizes) / len(sizes)
+                # 任一 span 是粗體就算粗體
+                is_bold = any("Bold" in (s.get("font", "") or "") for s in spans)
+                text = "".join(s.get("text", "") for s in spans).strip()
+                if not text:
+                    continue
+                all_lines.append((text, avg_size, is_bold))
+                bucket = round(avg_size)
+                size_counts[bucket] = size_counts.get(bucket, 0) + 1
+        all_lines.append(("", 0.0, False))  # 頁尾標記分段
+
+    pdf_doc.close()
+
+    # 決定 heading 閾值：取最常見字級為 body，超過 body 的視為 heading
+    if size_counts:
+        body_size = max(size_counts.items(), key=lambda x: x[1])[0]
+    else:
+        body_size = 11
+    h1_threshold = body_size + 6
+    h2_threshold = body_size + 3
+    h3_threshold = body_size + 1
+
+    # 第二遍：組 markdown
+    lines: list[str] = []
+    prev_blank = True
+    for text, size, is_bold in all_lines:
+        if not text:
+            if not prev_blank:
+                lines.append("")
+                prev_blank = True
+            continue
+        prev_blank = False
+        if size >= h1_threshold:
+            lines.append(f"# {text}")
+        elif size >= h2_threshold:
+            lines.append(f"## {text}")
+        elif size >= h3_threshold or is_bold:
+            lines.append(f"### {text}" if size >= h3_threshold else f"**{text}**")
+        else:
+            lines.append(text)
+
+    # 收尾：去掉開頭/結尾多餘空行
+    result = "\n".join(lines).strip() + "\n"
+    logger.info("PDF → Markdown 完成: %d chars (body_size=%d)", len(result), body_size)
+    return result
+
+
+# ══════════════════════════════════════════════════════════════
 # 共用工具
 # ══════════════════════════════════════════════════════════════
 

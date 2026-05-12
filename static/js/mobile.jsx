@@ -1036,6 +1036,7 @@ function MToolConvert(){
     {f:'MD',t:'PDF',dir:'md-pdf',accept:'.md,.markdown'},
     {f:'MD',t:'Word',dir:'md-word',accept:'.md,.markdown'},
     {f:'Word',t:'MD',dir:'word-md',accept:'.docx,.doc'},
+    {f:'PDF',t:'MD',dir:'pdf-md',accept:'.pdf'},
   ];
   const [sel, setSel] = mUseState(0);
   const [files, setFiles] = mUseState([]);

@@ -251,6 +251,7 @@ const ScanMailAPI = (() => {
     const endpoints = {
       'word-pdf': 'word-to-pdf', 'pdf-word': 'pdf-to-word',
       'md-pdf': 'md-to-pdf', 'md-word': 'md-to-word', 'word-md': 'word-to-md',
+      'pdf-md': 'pdf-to-md',
     };
     const ep = endpoints[direction];
     if (!ep) throw new Error('不支援的轉換方向: ' + direction);

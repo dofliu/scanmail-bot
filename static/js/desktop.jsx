@@ -809,7 +809,7 @@ function DToolPdf(){
 }
 
 function DToolConvert(){
-  const convs = [{f:'Word',t:'PDF',dir:'word-pdf',accept:'.docx,.doc'},{f:'PDF',t:'Word',dir:'pdf-word',accept:'.pdf'},{f:'MD',t:'PDF',dir:'md-pdf',accept:'.md'},{f:'MD',t:'Word',dir:'md-word',accept:'.md'},{f:'Word',t:'MD',dir:'word-md',accept:'.docx,.doc'}];
+  const convs = [{f:'Word',t:'PDF',dir:'word-pdf',accept:'.docx,.doc'},{f:'PDF',t:'Word',dir:'pdf-word',accept:'.pdf'},{f:'MD',t:'PDF',dir:'md-pdf',accept:'.md'},{f:'MD',t:'Word',dir:'md-word',accept:'.md'},{f:'Word',t:'MD',dir:'word-md',accept:'.docx,.doc'},{f:'PDF',t:'MD',dir:'pdf-md',accept:'.pdf'}];
   const [sel, setSel] = dUseState(0);
   const [files, setFiles] = dUseState([]);
   return (
