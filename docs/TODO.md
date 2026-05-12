@@ -85,9 +85,37 @@
 - [x] 郵件模板 — 8 種文件類型各有預設模板，支援 `{summary}` `{doc_type}` 變數
 - [x] 自訂模板 CRUD — 覆蓋預設模板
 
+### Phase 9：Auto Form Fill 表單自動填寫（M1 Skeleton）
+
+> 詳細設計：[docs/AUTO_FORM_FILL.md](AUTO_FORM_FILL.md) · 測試結果：[docs/AUTO_FORM_FILL_TEST_RESULTS.md](AUTO_FORM_FILL_TEST_RESULTS.md)
+
+- [x] **分層架構**：dispatcher + 4 backend（acroform / pdfplumber / paddle / gemini）
+- [x] **Layer 1 — AcroForm**：pypdf 偵測 + 寫回，支援 CJK（auto_regenerate）
+- [x] **Layer 2 — pdfplumber**：「Label:____」啟發式 + 多字 chunk 拼接 + dedup + CJK 寫入
+- [x] **Layer 4 — Gemini Vision**：normalized 0~1000 → PDF points 換算（單測通過，真實 API 未測）
+- [x] **邊界**：`normalize_to_pdf()` 統一影像 → PDF；FormField.bbox 一律 PDF points
+- [x] **Semantic Mapping**：rule-based 對應 sender_profile / contact / today
+- [x] **API 路由**：`/api/tools/form/{detect,suggest,fill,task/...}`
+- [x] **前端**：desktop + mobile 工具箱「📝 表單填寫 (Beta)」
+- [x] **共用工具**：`app/services/common/json_parsing.py`（順便重構 ai_analyzer）
+- [x] **安全**：`get_temp_path` 路徑穿越防禦（_SAFE_FILENAME regex + relative_to）
+- [x] **測試**：14 pytest cases + manual demo + 4 fixture forms
+
 ---
 
 ## 待開發功能 🚧
+
+### Auto Form Fill — next iteration
+
+> 真實表單測試發現 Layer 2 對「表格式」表單失效（學生外宿訪視單 case）
+
+- [ ] **M4.5 — Layer 2 表格擴充**：用 `pdfplumber.extract_tables()` 偵測 cell-based 表單
+- [ ] **M4.6 — Layer 2→4 Auto Fallback**：偵測 0 欄位時自動轉影像走 Gemini
+- [ ] **M4 真實 API 測試**：對掃描影像跑 Gemini，量 bbox 平均誤差
+- [ ] **M5 Mapping UI**：前端 PDF 渲染 + bbox 標示 + 拖曳調整
+- [ ] **M7 整合**：填好的 PDF 接 `/api/send` 直接寄、表單模板儲存（記住欄位對應）
+- [ ] **M6 PaddleOCR**（optional）：本地離線 OCR backend
+- [ ] **掃描→表單填寫流程整合**：scan AI 辨識 doc_type=form 時提供「→ 自動填寫」按鈕
 
 ### 掃描體驗
 
@@ -121,7 +149,7 @@
 | 邊界偵測策略 | 5 (Canny, WhiteRegion, Otsu, Laplacian, GrabCut) |
 | 掃描濾鏡 | 7 (auto, scan, color_doc, document, enhance, bw, original) |
 | 郵件模板 | 8 種文件類型預設 + 自訂 |
-| 測試 | 18 |
+| 測試 | 32 (含 Form Fill 14 + review fixes 4) |
 
 ---
 
@@ -141,6 +169,18 @@
 ---
 
 ## 變更日誌
+
+### 2026/05/12 (v3.3.0 — Auto Form Fill M1)
+- 新增表單自動填寫工具（工具箱第 7 個工具，desktop + mobile）
+- 4 層 backend 分層偵測：AcroForm（pypdf）/ pdfplumber 啟發式 / PaddleOCR 預留 / Gemini Vision
+- API 路由：`/api/tools/form/{detect,suggest,fill,task/...}`
+- 設計契約：FormField.bbox 一律 PDF points（origin bottom-left）；`normalize_to_pdf()` 在邊界統一影像 → PDF
+- Semantic Mapping：rule-based 對應 sender_profile / contact / today
+- 安全強化：`get_temp_path` 加路徑穿越防禦（`_SAFE_FILENAME` regex + `relative_to(TEMP_DIR)`）
+- 共用工具：抽出 `app/services/common/json_parsing.py`，重構 `ai_analyzer` 共用
+- SSE watcher 加自動重連（指數退避，3 次）
+- 14 個 pytest case + 4 個 fixture 表單 + manual demo 腳本
+- 已知限制：Layer 2 對表格式 PDF 失效（real-world finding，待 M4.5 解決）
 
 ### 2026/04/02 (v3.2.0)
 - 新增批次寄送（多選收件人 + checkbox UI）

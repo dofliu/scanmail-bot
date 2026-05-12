@@ -95,3 +95,34 @@ Signature:   (empty)
 2. **政府電子表單實測**：找一份真實的 e-Tax / 報名表 AcroForm 跑，看欄位 label tooltip 命名是否友善
 3. **中文 flat PDF**：找一份用 Word 輸出的中文表單測 Layer 2（目前 fixture 是英文 label）
 4. **複合輸入**：AcroForm + 中文混合表單，看寫回後 viewer 顯示
+
+---
+
+## 真實表單實測紀錄
+
+### 2026-05-12 — `1150511-學生外宿訪視單.pdf`（國立勤益科大導師訪問賃居生紀錄表）
+
+**輸入特徵**：
+- 2 頁 PDF，280.7 KB
+- 有完整文字層（pdfplumber 可抽出 655 + 476 字元）
+- **表格式排版**：label 在儲存格內、不接冒號
+- 含大量勾選欄位（`是□否□`、`□木造 □鐵皮加蓋`）
+
+**結果**：
+| backend | 偵測欄位 | 預期 |
+|---------|---------|------|
+| dispatcher 選用 | pdfplumber | ✓（有文字層所以走 Layer 2，正確） |
+| 偵測欄位數 | **0** | ✗（理論上應該抓到 班級 / 學生姓名 / 學號 / ...） |
+
+**根因**（也記錄在 `docs/AUTO_FORM_FILL.md` §14）：
+1. `_LABEL_REGEX` 強制要求「label + 冒號」結尾，這份表單的 label 在 cell 內沒有冒號
+2. keyword 清單沒收 `班級`、`學號`、`房東姓名`、`房東電話`、`訪問日期`、`租屋地點`、`租期`、`租金`
+3. 勾選欄位沒對應的偵測機制
+
+**對應行動項**：
+- M4.5（next）：用 `pdfplumber.extract_tables()` 處理表格式表單
+- M4.6（next）：Layer 2 偵測 0 欄位時自動 fallback Gemini Vision
+- 把這份 PDF 收進 `tests/fixtures/forms/` 當 regression case（待使用者授權後）
+
+**短期 workaround**：
+把 PDF 截圖成 PNG 上傳，可繞過 Layer 2 限制走 Gemini Vision（待 API 實測）。
