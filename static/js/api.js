@@ -334,6 +334,36 @@ const ScanMailAPI = (() => {
   }
 
   // ══════════════════════════════════════════════
+  //  Auto Form Fill   prefix: /api/tools/form
+  // ══════════════════════════════════════════════
+
+  const formBase = `${BASE}/tools/form`;
+
+  function formDetect(file, hint = '') {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (hint) fd.append('hint', hint);
+    return formData(`${formBase}/detect`, fd);
+  }
+
+  function formSuggest(fields, userId = 'default', contactId = null) {
+    const payload = { fields, user_id: userId };
+    if (contactId != null) payload.contact_id = contactId;
+    return json(`${formBase}/suggest`, payload);
+  }
+
+  function formFill(sessionToken, fields, values) {
+    return json(`${formBase}/fill`, {
+      session_token: sessionToken,
+      fields,
+      values,
+    });
+  }
+
+  function formTaskProgress(taskId) { return `${formBase}/task/${taskId}/progress`; }
+  function formTaskDownload(taskId) { return `${formBase}/task/${taskId}/download`; }
+
+  // ══════════════════════════════════════════════
   //  Task progress helper (SSE)
   // ══════════════════════════════════════════════
 
@@ -406,6 +436,8 @@ const ScanMailAPI = (() => {
     // Rename
     renamePreview, renameApply, renTaskProgress, renTaskDownload,
     aiRenameScan, aiRenameApply,
+    // Auto Form Fill
+    formDetect, formSuggest, formFill, formTaskProgress, formTaskDownload,
     // Helpers
     watchTask, downloadBlob, formatBytes, triggerDownload,
   };

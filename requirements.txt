@@ -32,3 +32,10 @@ moviepy>=2.0.0
 
 # ── Security ──
 cryptography>=41.0.0
+
+# ── Auto Form Fill ──
+# Layer 1 (AcroForm) 用既有 pypdf；Layer 2 用 pdfplumber 抽文字+座標
+pdfplumber>=0.11.0
+# Optional：Layer 3 PaddleOCR（>600MB，預設不裝；雲端部署再開）
+# paddleocr>=2.7.0
+# paddlepaddle>=2.5.0

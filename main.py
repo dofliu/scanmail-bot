@@ -17,6 +17,7 @@ from app.routers import doc_convert
 from app.routers import gif_tools
 from app.routers import video_tools
 from app.routers import batch_rename
+from app.routers import form_tools
 
 # Logging
 logging.basicConfig(
@@ -73,6 +74,7 @@ app.include_router(doc_convert.router, prefix="/api/tools/convert", tags=["doc-c
 app.include_router(gif_tools.router, prefix="/api/tools/gif", tags=["gif-tools"])
 app.include_router(video_tools.router, prefix="/api/tools/video", tags=["video-tools"])
 app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch-rename"])
+app.include_router(form_tools.router, prefix="/api/tools/form", tags=["form-tools"])
 
 
 # ── 靜態檔案（必須放最後，否則會攔截其他路由）──
