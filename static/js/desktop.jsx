@@ -665,11 +665,14 @@ function DToolImage(){
     format:'JPEG', quality:85,
     text:'CONFIDENTIAL',
     direction:'vertical', gap:0, bg_color:'#ffffff', columns:0, normalize:true,
+    angle:90, flipAxis:'horizontal',
   });
   const actions = [
     {id:'resize',l:'📐 縮放'},
     {id:'convert',l:'🔄 轉檔'},
     {id:'compress',l:'📦 壓縮'},
+    {id:'rotate',l:'🔁 旋轉'},
+    {id:'flip',l:'↔️ 翻轉'},
     {id:'watermark',l:'💧 浮水印'},
     {id:'merge',l:'🧩 拼接'},
   ];
@@ -678,6 +681,8 @@ function DToolImage(){
     if(action==='resize') return window.API.imgResize(f,opts.width,opts.height,opts.mode,opts.format,opts.quality);
     if(action==='convert') return window.API.imgConvert(f,opts.format,opts.quality);
     if(action==='compress') return window.API.imgCompress(f,opts.quality,0);
+    if(action==='rotate') return window.API.imgRotate(f,opts.angle,'auto',opts.quality);
+    if(action==='flip') return window.API.imgFlip(f,opts.flipAxis,'auto',opts.quality);
     return window.API.imgWatermark(f,opts.text,36,80,'center','#000');
   };
   const batchFn = (fs) => {
@@ -689,6 +694,8 @@ function DToolImage(){
       output_format:opts.format, quality:opts.quality,
       columns:opts.columns, normalize:opts.normalize,
     });
+    // rotate / flip 為單檔處理，沒有 batch 版本（前端會走 single path）
+    if(action==='rotate' || action==='flip') return null;
     return window.API.imgBatchWatermark(fs,opts.text,36,80,'center','#000');
   };
 
@@ -737,6 +744,34 @@ function DToolImage(){
           <div className="field-label">品質 {opts.quality}%</div>
           <input type="range" className="slider" min="10" max="100" value={opts.quality}
             onChange={e => setOpts({...opts, quality:+e.target.value})}/>
+        </>}
+        {action==='rotate' && <>
+          <div className="field-label">角度</div>
+          <div className="row" style={{gap:'4px', marginBottom:'10px', flexWrap:'wrap'}}>
+            {[
+              {v:90,  l:'↻ 90°'},
+              {v:180, l:'⟳ 180°'},
+              {v:270, l:'↺ 270°'},
+            ].map(a => (
+              <button key={a.v} className={`chip ${opts.angle===a.v?'on':''}`}
+                onClick={()=>setOpts({...opts, angle:a.v})}>{a.l}</button>
+            ))}
+          </div>
+          <div className="field-label">自訂角度（覆蓋上方按鈕）</div>
+          <input className="input" type="number" min="-359" max="359" value={opts.angle}
+            onChange={e=>setOpts({...opts, angle:+e.target.value})}/>
+        </>}
+        {action==='flip' && <>
+          <div className="field-label">翻轉方向</div>
+          <div className="row" style={{gap:'4px', marginBottom:'10px', flexWrap:'wrap'}}>
+            {[
+              {v:'horizontal', l:'⇆ 左右翻轉'},
+              {v:'vertical',   l:'⇅ 上下翻轉'},
+            ].map(a => (
+              <button key={a.v} className={`chip ${opts.flipAxis===a.v?'on':''}`}
+                onClick={()=>setOpts({...opts, flipAxis:a.v})}>{a.l}</button>
+            ))}
+          </div>
         </>}
         {action==='watermark' && <>
           <div className="field-label">文字</div>

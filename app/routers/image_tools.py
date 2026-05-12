@@ -17,6 +17,7 @@ from app.services.image_batch import (
     get_image_info_detail,
     SUPPORTED_FORMATS, FORMAT_MAP,
 )
+from app.services.image_processor import rotate_image, flip_image
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +111,72 @@ async def api_compress(
     result = compress_image(data, quality, max_dimension)
     return Response(content=result, media_type="image/jpeg",
                     headers={"Content-Disposition": "attachment; filename=compressed.jpg"})
+
+
+_FORMAT_TO_MIME = {
+    "JPEG": "image/jpeg", "PNG": "image/png", "WEBP": "image/webp",
+    "BMP": "image/bmp", "GIF": "image/gif",
+}
+_FORMAT_TO_EXT = {
+    "JPEG": "jpg", "PNG": "png", "WEBP": "webp", "BMP": "bmp", "GIF": "gif",
+}
+
+
+def _detect_output_mime(result: bytes, requested: str) -> tuple[str, str]:
+    """依輸出 bytes 的 magic 推回 MIME / 副檔名"""
+    if result[:8] == b"\x89PNG\r\n\x1a\n":
+        return _FORMAT_TO_MIME["PNG"], _FORMAT_TO_EXT["PNG"]
+    if result[:2] == b"\xff\xd8":
+        return _FORMAT_TO_MIME["JPEG"], _FORMAT_TO_EXT["JPEG"]
+    if result[:4] == b"RIFF" and result[8:12] == b"WEBP":
+        return _FORMAT_TO_MIME["WEBP"], _FORMAT_TO_EXT["WEBP"]
+    if result[:2] == b"BM":
+        return _FORMAT_TO_MIME["BMP"], _FORMAT_TO_EXT["BMP"]
+    if result[:3] == b"GIF":
+        return _FORMAT_TO_MIME["GIF"], _FORMAT_TO_EXT["GIF"]
+    # 後備
+    fmt = requested.upper() if requested.upper() in _FORMAT_TO_MIME else "JPEG"
+    return _FORMAT_TO_MIME[fmt], _FORMAT_TO_EXT[fmt]
+
+
+@router.post("/rotate")
+async def api_rotate(
+    file: UploadFile = File(...),
+    angle: int = Form(90),
+    output_format: str = Form("auto"),
+    quality: int = Form(90),
+):
+    """旋轉單張圖片（90 / 180 / 270 走無損 transpose，其他角度撐開填白）"""
+    data = await file.read()
+    try:
+        result = rotate_image(data, angle=angle, output_format=output_format, quality=quality)
+    except Exception as e:
+        logger.error("圖片旋轉失敗: %s", e)
+        raise HTTPException(status_code=500, detail=f"旋轉失敗: {e}")
+    mime, ext = _detect_output_mime(result, output_format)
+    return Response(content=result, media_type=mime,
+                    headers={"Content-Disposition": f"attachment; filename=rotated.{ext}"})
+
+
+@router.post("/flip")
+async def api_flip(
+    file: UploadFile = File(...),
+    axis: str = Form("horizontal"),
+    output_format: str = Form("auto"),
+    quality: int = Form(90),
+):
+    """翻轉單張圖片（axis = horizontal 左右鏡像 / vertical 上下翻轉）"""
+    data = await file.read()
+    try:
+        result = flip_image(data, axis=axis, output_format=output_format, quality=quality)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error("圖片翻轉失敗: %s", e)
+        raise HTTPException(status_code=500, detail=f"翻轉失敗: {e}")
+    mime, ext = _detect_output_mime(result, output_format)
+    return Response(content=result, media_type=mime,
+                    headers={"Content-Disposition": f"attachment; filename=flipped.{ext}"})
 
 
 @router.post("/watermark")

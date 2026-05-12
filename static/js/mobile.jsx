@@ -877,11 +877,14 @@ function MToolImage(){
     format:'JPEG', quality:85,
     text:'CONFIDENTIAL', fontSize:36, opacity:80, position:'center', color:'#000000',
     direction:'vertical', gap:0, bg_color:'#ffffff', columns:0, normalize:true,
+    angle:90, flipAxis:'horizontal',
   });
   const actions = [
     {id:'resize',i:'📐',l:'縮放'},
     {id:'convert',i:'🔄',l:'轉檔'},
     {id:'compress',i:'📦',l:'壓縮'},
+    {id:'rotate',i:'🔁',l:'旋轉'},
+    {id:'flip',i:'↔️',l:'翻轉'},
     {id:'watermark',i:'💧',l:'浮水印'},
     {id:'merge',i:'🧩',l:'拼接'},
   ];
@@ -890,6 +893,8 @@ function MToolImage(){
     if(action==='resize') return window.API.imgResize(file, opts.width, opts.height, opts.mode, opts.format, opts.quality);
     if(action==='convert') return window.API.imgConvert(file, opts.format, opts.quality);
     if(action==='compress') return window.API.imgCompress(file, opts.quality, 0);
+    if(action==='rotate') return window.API.imgRotate(file, opts.angle, 'auto', opts.quality);
+    if(action==='flip') return window.API.imgFlip(file, opts.flipAxis, 'auto', opts.quality);
     if(action==='watermark') return window.API.imgWatermark(file, opts.text, opts.fontSize, opts.opacity, opts.position, opts.color);
   };
   const batchFn = (fs) => {
@@ -940,6 +945,25 @@ function MToolImage(){
         )}
         {action === 'convert' && (<div><div className="field-label">輸出格式</div><div className="row" style={{gap:'4px'}}>{['PNG','JPG','WebP','BMP'].map(f=><button key={f} className={`chip ${opts.format===f?'on':''}`} onClick={()=>setOpts({...opts,format:f})}>{f}</button>)}</div></div>)}
         {action === 'compress' && (<div><div className="field-label">品質 {opts.quality}%</div><input type="range" className="slider" min="10" max="100" value={opts.quality} onChange={e=>setOpts({...opts,quality:+e.target.value})}/></div>)}
+        {action === 'rotate' && (<div>
+          <div className="field-label">角度</div>
+          <div className="row" style={{gap:'4px', flexWrap:'wrap'}}>
+            {[{v:90,l:'↻ 90°'},{v:180,l:'⟳ 180°'},{v:270,l:'↺ 270°'}].map(a => (
+              <button key={a.v} className={`chip ${opts.angle===a.v?'on':''}`} onClick={()=>setOpts({...opts, angle:a.v})}>{a.l}</button>
+            ))}
+          </div>
+          <div className="field-label" style={{marginTop:'8px'}}>自訂角度</div>
+          <input className="input" type="number" min="-359" max="359" value={opts.angle}
+            onChange={e=>setOpts({...opts, angle:+e.target.value})}/>
+        </div>)}
+        {action === 'flip' && (<div>
+          <div className="field-label">翻轉方向</div>
+          <div className="row" style={{gap:'4px', flexWrap:'wrap'}}>
+            {[{v:'horizontal',l:'⇆ 左右'},{v:'vertical',l:'⇅ 上下'}].map(a => (
+              <button key={a.v} className={`chip ${opts.flipAxis===a.v?'on':''}`} onClick={()=>setOpts({...opts, flipAxis:a.v})}>{a.l}</button>
+            ))}
+          </div>
+        </div>)}
         {action === 'watermark' && (<><div className="field-label">文字</div><input className="input" value={opts.text} onChange={e=>setOpts({...opts,text:e.target.value})}/></>)}
         {action === 'merge' && (<>
           <div className="field-label">排列方向</div>
