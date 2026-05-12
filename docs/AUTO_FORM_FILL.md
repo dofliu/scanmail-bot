@@ -116,30 +116,40 @@ class DetectionResult:
 
 ## 5. Dispatcher 流程
 
+> 設計契約：對外**兩個入口**，邊界 `normalize_to_pdf` 把任何輸入轉成 PDF；
+> 核心 `detect_fields` 只認 PDF。`FormField.bbox` 一律是 PDF points
+> (origin bottom-left)，各 backend 在 detect 階段就完成座標換算。
+
 ```python
-def detect_fields(data: bytes, mime: str, hint: str | None = None) -> DetectionResult:
-    # 1. 偵測檔案型態
+def normalize_to_pdf(data: bytes, mime: str) -> bytes:
+    """邊界：影像 → 單頁 PDF（page size = pixel 數）；PDF 直接 pass-through"""
     if mime == "application/pdf":
-        if acroform.has_acroform(data):
-            return acroform.detect(data)            # Layer 1
-        if pdfplumber_extract.has_text_layer(data):
-            return pdfplumber_extract.detect(data)  # Layer 2
-        # 純圖片型 PDF → 轉為影像走 Layer 3
-        images = render_pdf_pages_to_images(data)
-        return _detect_from_images(images, hint)
-    elif mime.startswith("image/"):
-        return _detect_from_images([data], hint)
+        return data
+    if mime.startswith("image/"):
+        return _image_to_pdf(data)
     raise UnsupportedFormat(mime)
 
 
-def _detect_from_images(images, hint):
+def detect_fields(data: bytes, hint: str | None = None) -> DetectionResult:
+    # data 必須是 PDF（請先呼叫 normalize_to_pdf）
+    if acroform.has_acroform(data):
+        return acroform.detect(data)                          # Layer 1
+    if pdfplumber_extract.has_text_layer(data):
+        return pdfplumber_extract.detect(data)                # Layer 2
+    # 純圖片型 PDF / 來源就是影像 → 渲染後走 Layer 3/4
+    page_sizes_pts = _get_pdf_page_sizes(data)
+    images = _render_pdf_to_images(data)
+    return _detect_from_images(images, page_sizes_pts, hint)
+
+
+def _detect_from_images(images, page_sizes_pts, hint):
     # Layer 3 優先（本地 / 免費），失敗或不可用時退到 Layer 4
     if paddle_structure.is_available():
         try:
-            return paddle_structure.detect(images)
+            return paddle_structure.detect(images, page_sizes_pts=page_sizes_pts)
         except Exception as e:
             logger.warning("PaddleOCR failed, fallback to Gemini: %s", e)
-    return gemini_vision.detect(images, hint)
+    return gemini_vision.detect(images, page_sizes_pts=page_sizes_pts, hint=hint)
 ```
 
 ---

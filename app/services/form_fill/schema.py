@@ -3,6 +3,14 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 
 
+class Backend:
+    """Backend 名稱常數，避免字串散落各處"""
+    ACROFORM = "acroform"
+    PDFPLUMBER = "pdfplumber"
+    PADDLE = "paddle"
+    GEMINI = "gemini"
+
+
 @dataclass
 class FormField:
     name: str

@@ -8,13 +8,12 @@
 - 本 backend 在組 FormField 時，依 caller 傳入的 page_sizes_pts
   把座標換算成 PDF points（原點左下），讓 filler 不必再做 backend 分支
 """
-import json
 import logging
-import re
 from typing import Optional
 
 from app.config import get_settings
-from app.services.form_fill.schema import FormField, DetectionResult
+from app.services.common.json_parsing import safe_parse_llm_json
+from app.services.form_fill.schema import FormField, DetectionResult, Backend
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +61,7 @@ def detect(
     if not settings.GEMINI_API_KEY:
         logger.error("GEMINI_API_KEY 未設定，無法使用 Gemini Vision backend")
         return DetectionResult(
-            backend_used="gemini",
+            backend_used=Backend.GEMINI,
             page_count=page_count,
             fields=[],
             needs_review=True,
@@ -98,7 +97,7 @@ def detect(
                 ),
             )
             text = (response.text or "").strip()
-            parsed = _parse_json(text)
+            parsed = safe_parse_llm_json(text, default={"fields": []})
             pw, ph = page_sizes_pts[page_num]
             page_fields = _to_form_fields(parsed.get("fields", []), page_num, pw, ph)
             all_fields.extend(page_fields)
@@ -106,7 +105,7 @@ def detect(
     except Exception as e:
         logger.error("Gemini Vision backend 失敗: %s", e, exc_info=True)
         return DetectionResult(
-            backend_used="gemini",
+            backend_used=Backend.GEMINI,
             page_count=page_count,
             fields=[],
             needs_review=True,
@@ -127,22 +126,6 @@ def _build_user_prompt(hint: Optional[str], page_num: int, total: int) -> str:
     if hint:
         parts.append(f"使用者提示：{hint}")
     return "\n".join(parts)
-
-
-def _parse_json(text: str) -> dict:
-    """穩健地從 Gemini 回應中抽出 JSON"""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{[\s\S]*\}", text)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-    logger.warning("Gemini 回應無法解析為 JSON: %s", text[:200])
-    return {"fields": []}
 
 
 def _to_form_fields(
@@ -184,7 +167,7 @@ def _to_form_fields(
             field_type=str(item.get("field_type", "text")),
             bbox=(x0_pts, y0_pts, x1_pts, y1_pts),
             page=page_num,
-            backend="gemini",
+            backend=Backend.GEMINI,
             confidence=float(item.get("confidence", 0.7)),
         ))
     return fields

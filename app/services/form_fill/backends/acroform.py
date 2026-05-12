@@ -9,7 +9,7 @@ from typing import Optional
 
 from pypdf import PdfReader
 
-from app.services.form_fill.schema import FormField, DetectionResult
+from app.services.form_fill.schema import FormField, DetectionResult, Backend
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +24,23 @@ _FT_MAP = {
 
 
 def has_acroform(data: bytes) -> bool:
-    """判斷 PDF 是否包含 AcroForm 欄位"""
+    """判斷 PDF 是否包含 AcroForm 欄位（輕量檢查，不 parse 整份表單）
+
+    只走到 /Root/AcroForm/Fields 確認陣列非空就回 True，
+    避免呼叫 get_fields() 觸發整份 widget tree parse（對大文件可省下顯著時間）。
+    """
     try:
         reader = PdfReader(io.BytesIO(data))
-        root = reader.trailer.get("/Root") if reader.trailer else None
-        if not root:
+        if not reader.trailer:
             return False
-        acro = root.get("/AcroForm") if hasattr(root, "get") else None
-        if not acro:
+        root = reader.trailer.get("/Root")
+        if not root or not hasattr(root, "get"):
             return False
-        # 必須有 Fields 陣列且至少一個欄位
-        fields = reader.get_fields()
-        return bool(fields)
+        acro = root.get("/AcroForm")
+        if not acro or not hasattr(acro, "get"):
+            return False
+        fields_arr = acro.get("/Fields")
+        return bool(fields_arr) and len(fields_arr) > 0
     except Exception as e:
         logger.debug("has_acroform check failed: %s", e)
         return False
@@ -75,13 +80,13 @@ def detect(data: bytes) -> DetectionResult:
             field_type=field_type,
             bbox=bbox,
             page=page_num,
-            backend="acroform",
+            backend=Backend.ACROFORM,
             confidence=1.0,
         ))
 
     logger.info("AcroForm detected: %d fields across %d pages", len(fields), page_count)
     return DetectionResult(
-        backend_used="acroform",
+        backend_used=Backend.ACROFORM,
         page_count=page_count,
         fields=fields,
         needs_review=False,

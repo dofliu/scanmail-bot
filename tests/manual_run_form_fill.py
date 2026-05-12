@@ -1,12 +1,12 @@
-"""Auto Form Fill 端對端測試
+"""Auto Form Fill 端對端 demo 腳本（人類看的版本）
 
 對 4 個測試 fixture 跑 detect → suggest → fill 流程，
 報告每一層 backend 的偵測精度與填寫結果。
 
 執行：
-    python -m pytest tests/test_form_fill_e2e.py -v -s
-    # 或單獨跑：
-    python tests/test_form_fill_e2e.py
+    python tests/manual_run_form_fill.py
+
+CI / pytest 用：請改跑 tests/test_form_fill.py（純 assert，無 print）
 """
 import os
 import sys

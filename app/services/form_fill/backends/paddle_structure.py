@@ -16,13 +16,28 @@ from app.services.form_fill.schema import DetectionResult
 logger = logging.getLogger(__name__)
 
 
+_AVAILABILITY_CACHE: bool | None = None
+
+
 def is_available() -> bool:
-    """快速檢查 paddleocr 是否可用（不真正載入模型）"""
+    """檢查 paddleocr 是否可用（不真正載入模型）
+
+    需要同時驗證 paddleocr **和** paddlepaddle 都裝好；只裝其中一個會 import 時炸。
+    結果會 cache，避免每次 detect 都做一次模組查找。
+    """
+    global _AVAILABILITY_CACHE
+    if _AVAILABILITY_CACHE is not None:
+        return _AVAILABILITY_CACHE
     try:
         import importlib.util
-        return importlib.util.find_spec("paddleocr") is not None
+        ok = (
+            importlib.util.find_spec("paddleocr") is not None
+            and importlib.util.find_spec("paddle") is not None
+        )
     except Exception:
-        return False
+        ok = False
+    _AVAILABILITY_CACHE = ok
+    return ok
 
 
 def detect(

@@ -12,7 +12,7 @@ import logging
 import re
 from typing import Optional
 
-from app.services.form_fill.schema import FormField, DetectionResult
+from app.services.form_fill.schema import FormField, DetectionResult, Backend
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ def detect(data: bytes) -> DetectionResult:
     """從可選取文字的 PDF 偵測欄位"""
     if not is_available():
         return DetectionResult(
-            backend_used="pdfplumber",
+            backend_used=Backend.PDFPLUMBER,
             page_count=0,
             fields=[],
             needs_review=True,
@@ -119,14 +119,14 @@ def detect(data: bytes) -> DetectionResult:
                             field_type=_guess_type(label),
                             bbox=bbox_pdf,
                             page=page_num,
-                            backend="pdfplumber",
+                            backend=Backend.PDFPLUMBER,
                             confidence=0.65,
                         ))
                         break  # 該起點已命中，跳到下一個 i
 
     logger.info("pdfplumber detected: %d candidate fields", len(fields))
     return DetectionResult(
-        backend_used="pdfplumber",
+        backend_used=Backend.PDFPLUMBER,
         page_count=page_count,
         fields=fields,
         needs_review=True,
