@@ -278,21 +278,73 @@ pdfplumber>=0.11.0
 
 ## 12. 開發里程碑
 
-| 階段 | 範圍 | 預計 |
+| 階段 | 範圍 | 狀態 |
 |-----|------|------|
-| **M1 Skeleton** | 模組結構、API 路由、dispatcher 介面、最小前端 | ✅ 本 PR |
-| M2 Layer 1 | AcroForm 完整偵測與填寫 | next |
-| M3 Layer 2 | pdfplumber 文字表單偵測 + 啟發式配對 | next |
-| M4 Layer 4 | Gemini Vision backend（最少限度可用） | next |
-| M5 Mapping UI | 前端欄位映射、預覽、可拖曳調整 bbox | next |
-| M6 Layer 3 | PaddleOCR PP-Structure 接入（Optional） | later |
-| M7 整合寄送 | 接 `/api/send`、模板儲存 | later |
+| **M1 Skeleton** | 模組結構、API 路由、dispatcher 介面、最小前端（desktop + mobile） | ✅ 已合併（PR #14） |
+| **M2 Layer 1 (AcroForm)** | pypdf 完整偵測 + 寫回，含 `auto_regenerate=True` 處理 CJK | ✅ 已合併 |
+| **M3 Layer 2 (pdfplumber)** | 「Label: ____」啟發式偵測，多字 chunk 拼接、dedup、CJK 寫入 | ✅ 已合併（含 limitation：見 §14） |
+| **M4 Layer 4 (Gemini)** | normalized 0~1000 → PDF points 換算，graceful-fail when no API key | ⚠️ 已合併但**真實 API 尚未實測** |
+| **M4.5 Layer 2 表格擴充** | pdfplumber `extract_tables()` 支援表格式表單（無冒號 label） | 🔜 next（real-world finding） |
+| **M4.6 Layer 2→4 Auto Fallback** | Layer 2 偵測 0 欄位時自動轉影像走 Gemini | 🔜 next |
+| **M5 Mapping UI** | 前端 PDF 渲染 + bbox 標示 + 可拖曳調整、欄位映射 | ⏳ later |
+| **M6 Layer 3 (PaddleOCR)** | PP-Structure KIE 接入，本地離線 OCR | ⏳ later（依需求） |
+| **M7 整合寄送** | 接 `/api/send`、表單模板儲存、scan→form 流程整合 | ⏳ later |
 
 ---
 
 ## 13. 安全 / 隱私
 
 - 表單可能含個資（身分證、銀行帳號），偵測結果**只暫存於記憶體 / temp file**，沿用 `app/core/file_manager.py` 的 TTL 機制
+- `get_temp_path` 用 `_SAFE_FILENAME` regex + `relative_to(TEMP_DIR)` 雙重防禦路徑穿越（PR #14 加入）
 - 送 Gemini 前應依使用者設定提供 opt-out 開關（敏感表單建議走本地 backend）
 - 寫回的 PDF 不保留原始檔的 metadata（防 PII 殘留）
+
+---
+
+## 14. 已知限制（M1 階段，2026-05 實測）
+
+### Layer 2 (pdfplumber) — 對「表格式表單」失效
+
+**現象**：
+真實案例 `1150511-學生外宿訪視單.pdf`（國立勤益科大學生賃居生紀錄表）— 有完整文字層，但 dispatcher 進到 Layer 2 後偵測**0 個欄位**。
+
+**根因**：
+`backends/pdfplumber_extract.py` 的 `_LABEL_REGEX` 要求 label「**必須以冒號結尾**」（為了避免抓到 header 文字）：
+```python
+_LABEL_REGEX = re.compile(rf"^\s*({_LABEL_KEYWORDS})\s*[:：﹕]\s*$")
+```
+
+但很多台灣公文/校務表單採用**表格 cell 排版**：
+```
+| 班級 | _____ | 學生姓名 | _____ | 學號 | _____ | 聯絡電話 | _____ |
+```
+label 在 cell 裡、沒有冒號，正則完全不命中。加上勾選欄位（`是□否□`）也不在偵測範圍。
+
+**對應里程碑**：M4.5 + M4.6
+- M4.5：用 `pdfplumber.extract_tables()` 直接抓表格結構，把「label cell + 相鄰空 cell」配對成欄位
+- M4.6：當 Layer 2 偵測欄位數 < 閾值時，自動把 PDF 渲染成影像走 Gemini Vision（需 API key）
+
+### Layer 4 (Gemini) — bbox 精度尚未實測
+
+skeleton 的座標換算邏輯在單元測試中正確（`test_c3_gemini_bbox_conversion`），但**真實 Gemini Vision 回的 bbox 平均誤差**還沒實際量過。預期：
+- 印刷體欄位：5–15px 內
+- 手寫 / 不規則：可能 > 20px，需要 M5 拖曳調整 UI 補救
+
+### Semantic Mapping — 規則涵蓋率有限
+
+`semantic_mapper.py` 目前 8 條規則對應 sender_profile / contact 的欄位。實際表單常見的「金額」「事由」「目的地」等沒有對應來源。M7 的「表單模板儲存」會解這個問題（記住每張表單上次的 user input）。
+
+---
+
+## 15. 真實表單測試清單
+
+未來收集到的真實表單請放 `tests/fixtures/forms/`，並在這裡記錄狀態。
+
+| 表單檔名 | 類型 | backend | 偵測精度 | 備註 |
+|----------|------|---------|---------|------|
+| `acroform_application.pdf` (合成) | AcroForm | acroform | 7/7 (100%) | M1 baseline |
+| `flat_travel_expense.pdf` (合成) | Label:value | pdfplumber | 10/10 | M1 baseline |
+| `flat_meeting_signin.pdf` (合成) | Label:value | pdfplumber | 8/8（去重後） | M1 baseline |
+| `scanned_leave_form.png` (合成) | 影像 | gemini (skip) | — | 無 API key 時 graceful fail |
+| `1150511-學生外宿訪視單.pdf` (real) | 表格式 | pdfplumber | **0** | 暴露 Layer 2 限制 → M4.5 |
 
