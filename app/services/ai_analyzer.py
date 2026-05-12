@@ -87,71 +87,7 @@ USER_PROMPT_TEMPLATE = """請分析這張文件照片，產生適合寄送的電
 請根據文件內容和收件人身份，調整郵件的正式程度和用語。"""
 
 
-import re
-
-def _parse_json_response(text: str) -> dict:
-    """從 AI 回應中穩健地提取 JSON（處理各種格式問題）"""
-
-    # 策略 1：直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # 策略 2：移除 markdown code block
-    cleaned = re.sub(r'^```(?:json)?\s*\n?', '', text, flags=re.MULTILINE)
-    cleaned = re.sub(r'\n?```\s*$', '', cleaned, flags=re.MULTILINE)
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    # 策略 3：用正則找出最大的 {...} 區塊
-    match = re.search(r'\{[\s\S]*\}', text)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-
-    # 策略 4：修復常見問題（尾端逗號、未結束字串）
-    if match:
-        fixed = match.group()
-        # 移除尾端逗號
-        fixed = re.sub(r',\s*([}\]])', r'\1', fixed)
-        try:
-            return json.loads(fixed)
-        except json.JSONDecodeError:
-            pass
-
-    # 策略 5：處理被截斷的 JSON（MAX_TOKENS 導致）
-    # 找到以 { 開頭的文字，嘗試逐步修復
-    brace_start = text.find('{')
-    if brace_start >= 0:
-        truncated = text[brace_start:]
-        # 嘗試找到最後一個完整的 "key": "value" 或 "key": value
-        # 先截斷到最後一個逗號或完整值之後
-        last_complete = truncated
-        # 移除尾端不完整的部分（最後一個未閉合的字串值）
-        last_complete = re.sub(r',\s*"[^"]*"\s*:\s*"[^"]*$', '', last_complete)
-        last_complete = re.sub(r',\s*"[^"]*"\s*:\s*\[[^\]]*$', '', last_complete)
-        last_complete = re.sub(r',\s*"[^"]*"\s*:\s*$', '', last_complete)
-        last_complete = re.sub(r',\s*"[^"]*$', '', last_complete)
-        # 移除尾端逗號
-        last_complete = re.sub(r',\s*$', '', last_complete)
-        # 補上缺少的閉合括號
-        open_braces = last_complete.count('{') - last_complete.count('}')
-        open_brackets = last_complete.count('[') - last_complete.count(']')
-        last_complete += ']' * max(0, open_brackets) + '}' * max(0, open_braces)
-        try:
-            result = json.loads(last_complete)
-            logger.info("策略5：成功修復截斷的 JSON")
-            return result
-        except json.JSONDecodeError:
-            pass
-
-    # 全部失敗
-    raise json.JSONDecodeError("無法從 AI 回應中提取有效 JSON", text, 0)
+from app.services.common.json_parsing import parse_llm_json as _parse_json_response  # noqa: E402
 
 
 def get_fallback_result() -> dict:

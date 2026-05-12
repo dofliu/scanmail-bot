@@ -25,6 +25,7 @@ function MobileShell(){
       case 'tool-gif': return <MToolGif/>;
       case 'tool-video': return <MToolVideo/>;
       case 'tool-rename': return <MToolRename/>;
+      case 'tool-form': return <MToolForm/>;
       case 'settings': return <MSettings/>;
       default: return <MHome/>;
     }
@@ -673,6 +674,7 @@ function MTools(){
     {id:'gif', ic:'🎞️', label:'GIF 製作', sub:'圖片序列 → 動畫'},
     {id:'video', ic:'🎬', label:'影片工具', sub:'合併 · 轉 GIF · 壓縮'},
     {id:'rename', ic:'✏️', label:'批次改名', sub:'前後綴 · 取代 · 編號'},
+    {id:'form', ic:'📝', label:'表單填寫 (Beta)', sub:'AcroForm · OCR · AI 偵測'},
   ];
   return (
     <>
@@ -1250,6 +1252,96 @@ function MToolRename(){
         </button>
         {aiMsg && <div style={{fontSize:'11px', color:'var(--ink-3)'}}>{aiMsg}</div>}
       </>)}
+    </MToolShell>
+  );
+}
+
+// ─── TOOL: AUTO FORM FILL (Beta) ───────────────────────────
+function MToolForm(){
+  const [file, setFile] = mUseState(null);
+  const [hint, setHint] = mUseState('');
+  const [busy, setBusy] = mUseState(false);
+  const [msg, setMsg] = mUseState('');
+  const [session, setSession] = mUseState(null);   // {token, result}
+  const [values, setValues] = mUseState({});
+  const [resultUrl, setResultUrl] = mUseState(null);
+
+  const onPick = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (f) { setFile(f); setSession(null); setResultUrl(null); setMsg(''); }
+  };
+
+  const doDetect = async () => {
+    if (!file) return;
+    setBusy(true); setMsg('偵測中…'); setSession(null); setValues({}); setResultUrl(null);
+    try {
+      const r = await window.API.formDetect(file, hint);
+      const s = await window.API.formSuggest(r.result.fields);
+      const enriched = {...r.result, fields: s.fields || r.result.fields};
+      setSession({token: r.session_token, result: enriched});
+      setValues(s.values || {});
+      setMsg(`backend: ${r.result.backend_used} · ${enriched.fields.length} 欄位${s.matched ? `（已填 ${s.matched}）` : ''}`);
+    } catch(e) {
+      setMsg('偵測失敗：' + e.message);
+    }
+    setBusy(false);
+  };
+
+  const doFill = async () => {
+    if (!session) return;
+    setBusy(true); setMsg('產生 PDF…');
+    try {
+      const r = await window.API.formFill(session.token, session.result.fields, values);
+      await window.API.watchTask(window.API.formTaskProgress(r.task_id), p => p.message && setMsg(p.message));
+      setResultUrl(window.API.formTaskDownload(r.task_id));
+      setMsg('完成');
+    } catch(e) {
+      setMsg('填寫失敗：' + e.message);
+    }
+    setBusy(false);
+  };
+
+  const fields = session?.result?.fields || [];
+
+  return (
+    <MToolShell title="表單填寫 (Beta)">
+      <div className="card" style={{padding:'12px', marginBottom:'10px'}}>
+        <label style={{display:'block', fontSize:'12px', fontWeight:600, marginBottom:'6px'}}>選擇表單檔</label>
+        <input type="file" accept=".pdf,image/*" onChange={onPick} style={{width:'100%', fontSize:'12px'}}/>
+        {file && <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'6px'}}>{file.name}</div>}
+
+        <div className="field-label" style={{marginTop:'10px'}}>表單提示（可選）</div>
+        <input className="input" value={hint} onChange={e=>setHint(e.target.value)} placeholder="例：差旅費單"/>
+
+        <button className="btn" onClick={doDetect} disabled={busy || !file} style={{width:'100%', marginTop:'10px'}}>
+          {busy ? '處理中…' : '🔍 偵測欄位'}
+        </button>
+      </div>
+
+      {fields.length > 0 && (
+        <div className="card" style={{padding:'12px', marginBottom:'10px'}}>
+          <div className="label" style={{marginBottom:'8px'}}>欄位（{fields.length}）</div>
+          <div style={{maxHeight:'40vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:'6px'}}>
+            {fields.map(f => (
+              <div key={f.name} style={{borderBottom:'1px dashed var(--ink-5)', paddingBottom:'4px'}}>
+                <div style={{fontSize:'11px', display:'flex', justifyContent:'space-between'}}>
+                  <span style={{fontWeight:600}}>{f.label || f.name}</span>
+                  <span style={{color:'var(--ink-3)'}}>p{f.page+1} · {(f.confidence*100).toFixed(0)}%</span>
+                </div>
+                <input className="input" style={{fontSize:'12px'}} value={values[f.name] || ''}
+                       onChange={e=>setValues({...values, [f.name]: e.target.value})}
+                       placeholder={f.suggested_value || ''}/>
+              </div>
+            ))}
+          </div>
+          <button className="btn primary" onClick={doFill} disabled={busy} style={{width:'100%', marginTop:'10px'}}>
+            ✍️ 填寫並產生 PDF
+          </button>
+          {resultUrl && <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginTop:'8px'}}>⬇ 下載</a>}
+        </div>
+      )}
+
+      {msg && <div style={{fontSize:'11px', color:'var(--ink-3)', padding:'8px'}}>{msg}</div>}
     </MToolShell>
   );
 }

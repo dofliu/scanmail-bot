@@ -1,6 +1,7 @@
 """暫存檔案管理 — 上傳/下載/自動清理"""
 import io
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -17,6 +18,10 @@ TEMP_DIR.mkdir(exist_ok=True)
 # 檔案存活時間（秒）
 FILE_TTL = 30 * 60  # 30 分鐘
 
+# 安全 filename pattern：save_temp_file 產生的 uuid4().hex + 副檔名
+# 用於防止 get_temp_path 接到使用者輸入時被路徑穿越攻擊
+_SAFE_FILENAME = re.compile(r"^[a-f0-9]{32}(\.[a-z0-9]{1,8})?$")
+
 
 def save_temp_file(data: bytes, suffix: str = ".bin") -> Path:
     """儲存暫存檔案，回傳路徑"""
@@ -28,10 +33,25 @@ def save_temp_file(data: bytes, suffix: str = ".bin") -> Path:
 
 
 def get_temp_path(filename: str) -> Optional[Path]:
-    """取得暫存檔案路徑（驗證檔案存在）"""
+    """取得暫存檔案路徑（驗證檔案存在且位於 TEMP_DIR 內）
+
+    防禦：拒絕不符合 save_temp_file 命名格式的 filename，
+    並驗證 resolve 後仍位於 TEMP_DIR 之下（防路徑穿越）。
+    """
+    if not filename or not _SAFE_FILENAME.match(filename):
+        logger.warning("get_temp_path 拒絕不安全的 filename: %r", filename)
+        return None
+
     path = TEMP_DIR / filename
-    if path.exists() and path.is_file():
-        return path
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(TEMP_DIR.resolve())
+    except (ValueError, OSError):
+        logger.warning("get_temp_path 拒絕逃出 TEMP_DIR 的路徑: %s", filename)
+        return None
+
+    if resolved.exists() and resolved.is_file():
+        return resolved
     return None
 
 

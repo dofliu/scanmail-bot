@@ -334,21 +334,76 @@ const ScanMailAPI = (() => {
   }
 
   // ══════════════════════════════════════════════
+  //  Auto Form Fill   prefix: /api/tools/form
+  // ══════════════════════════════════════════════
+
+  const formBase = `${BASE}/tools/form`;
+
+  function formDetect(file, hint = '') {
+    const fd = new FormData();
+    fd.append('file', file);
+    if (hint) fd.append('hint', hint);
+    return formData(`${formBase}/detect`, fd);
+  }
+
+  function formSuggest(fields, userId = 'default', contactId = null) {
+    const payload = { fields, user_id: userId };
+    if (contactId != null) payload.contact_id = contactId;
+    return json(`${formBase}/suggest`, payload);
+  }
+
+  function formFill(sessionToken, fields, values) {
+    return json(`${formBase}/fill`, {
+      session_token: sessionToken,
+      fields,
+      values,
+    });
+  }
+
+  function formTaskProgress(taskId) { return `${formBase}/task/${taskId}/progress`; }
+  function formTaskDownload(taskId) { return `${formBase}/task/${taskId}/download`; }
+
+  // ══════════════════════════════════════════════
   //  Task progress helper (SSE)
   // ══════════════════════════════════════════════
 
-  function watchTask(progressUrl, onProgress) {
+  // SSE watcher with auto-reconnect.
+  //  - 任務未完成時連線中斷會重試（指數退避），不直接 reject
+  //  - 已收到 completed/failed 事件後關閉，視為終態，不再重連
+  //  - 連線重試上限 (default 3 次) 用盡後才 reject
+  function watchTask(progressUrl, onProgress, { maxRetries = 3 } = {}) {
     return new Promise((resolve, reject) => {
-      const es = new EventSource(progressUrl);
-      es.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (onProgress) onProgress(data);
-          if (data.status === 'completed') { es.close(); resolve(data); }
-          else if (data.status === 'failed') { es.close(); reject(new Error(data.error || '處理失敗')); }
-        } catch (e) { /* ignore parse errors */ }
+      let es = null;
+      let settled = false;
+      let retries = 0;
+
+      const cleanup = () => { if (es) { try { es.close(); } catch (_) {} es = null; } };
+      const finish = (fn, val) => { if (!settled) { settled = true; cleanup(); fn(val); } };
+
+      const connect = () => {
+        if (settled) return;
+        es = new EventSource(progressUrl);
+        es.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (onProgress) onProgress(data);
+            if (data.status === 'completed') return finish(resolve, data);
+            if (data.status === 'failed') return finish(reject, new Error(data.error || '處理失敗'));
+          } catch (e) { /* ignore parse errors */ }
+        };
+        es.onerror = () => {
+          if (settled) return;
+          cleanup();
+          if (retries >= maxRetries) {
+            return finish(reject, new Error(`連線中斷（重試 ${retries} 次後仍失敗）`));
+          }
+          const delay = Math.min(8000, 500 * Math.pow(2, retries));
+          retries += 1;
+          setTimeout(connect, delay);
+        };
       };
-      es.onerror = () => { es.close(); reject(new Error('連線中斷')); };
+
+      connect();
     });
   }
 
@@ -406,6 +461,8 @@ const ScanMailAPI = (() => {
     // Rename
     renamePreview, renameApply, renTaskProgress, renTaskDownload,
     aiRenameScan, aiRenameApply,
+    // Auto Form Fill
+    formDetect, formSuggest, formFill, formTaskProgress, formTaskDownload,
     // Helpers
     watchTask, downloadBlob, formatBytes, triggerDownload,
   };

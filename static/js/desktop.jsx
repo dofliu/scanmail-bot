@@ -611,6 +611,7 @@ function DTools(){
     {id:'gif', ic:'🎞️', t:'GIF 製作', desc:'圖片序列產生動畫', color:'#f5e4dc'},
     {id:'video', ic:'🎬', t:'影片工具', desc:'合併、轉 GIF、壓縮', color:'#e8e1ef'},
     {id:'rename', ic:'✏️', t:'批次改名', desc:'前後綴、取代、編號', color:'#e2efe7'},
+    {id:'form', ic:'📝', t:'表單填寫', desc:'AcroForm + OCR + AI 偵測 (Beta)', color:'#fff4d6'},
   ];
 
   const renderTool = () => {
@@ -621,6 +622,7 @@ function DTools(){
       case 'gif': return <DToolGif/>;
       case 'video': return <DToolVideo/>;
       case 'rename': return <DToolRename/>;
+      case 'form': return <DToolForm/>;
       default: return null;
     }
   };
@@ -1008,6 +1010,122 @@ function DToolRename(){
               taskDownloadUrl={window.API.renTaskDownload}
               resultFilename="renamed.zip"/>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AUTO FORM FILL (Beta) ────────────────────────────────
+function DToolForm(){
+  const [file, setFile] = dUseState(null);
+  const [hint, setHint] = dUseState('');
+  const [busy, setBusy] = dUseState(false);
+  const [msg, setMsg] = dUseState('');
+  const [session, setSession] = dUseState(null);   // {token, result}
+  const [values, setValues] = dUseState({});       // {field_name: string}
+  const [resultUrl, setResultUrl] = dUseState(null);
+
+  const doDetect = async () => {
+    if (!file) return;
+    setBusy(true); setMsg('偵測欄位中…');
+    setSession(null); setValues({}); setResultUrl(null);
+    try {
+      const r = await window.API.formDetect(file, hint);
+      setMsg(`使用 backend: ${r.result.backend_used} · 偵測到 ${r.result.fields.length} 個欄位`);
+      // 自動套用 semantic mapping — 用回傳後的 fields 取代原本的（含 semantic_key 標註）
+      const s = await window.API.formSuggest(r.result.fields);
+      const enrichedResult = {...r.result, fields: s.fields || r.result.fields};
+      setSession({token: r.session_token, result: enrichedResult});
+      setValues(s.values || {});
+      if (s.matched > 0) setMsg(prev => `${prev}（已自動填 ${s.matched} 個）`);
+    } catch(e) {
+      setMsg(`偵測失敗：${e.message}`);
+    }
+    setBusy(false);
+  };
+
+  const doFill = async () => {
+    if (!session) return;
+    setBusy(true); setMsg('產生填寫後的 PDF…');
+    try {
+      const r = await window.API.formFill(session.token, session.result.fields, values);
+      await window.API.watchTask(window.API.formTaskProgress(r.task_id), p => {
+        if (p.message) setMsg(p.message);
+      });
+      setResultUrl(window.API.formTaskDownload(r.task_id));
+      setMsg('完成！可下載填寫後的 PDF。');
+    } catch(e) {
+      setMsg(`填寫失敗：${e.message}`);
+    }
+    setBusy(false);
+  };
+
+  const fields = session?.result?.fields || [];
+
+  return (
+    <div style={{display:'grid', gridTemplateColumns:'1fr 380px', gap:'16px'}}>
+      <div>
+        <UploadDropzone accept=".pdf,image/*" onFiles={f=>setFile(f[0] || null)} icon="📝"
+                        label="拖放表單（PDF 或圖檔）"/>
+        {file && <FileList files={[file]} onRemove={()=>setFile(null)}/>}
+
+        {fields.length > 0 && (
+          <div className="card" style={{padding:'14px', marginTop:'12px'}}>
+            <div className="label" style={{marginBottom:'10px'}}>
+              欄位清單（{fields.length}）— backend: <b>{session.result.backend_used}</b>
+              {session.result.needs_review && <span style={{color:'#c89400', marginLeft:'8px'}}>· 建議人工確認</span>}
+            </div>
+            <div style={{maxHeight:'440px', overflowY:'auto', display:'flex', flexDirection:'column', gap:'8px'}}>
+              {fields.map(f => (
+                <div key={f.name} style={{display:'grid', gridTemplateColumns:'160px 1fr 80px', gap:'8px', alignItems:'center', padding:'6px 0', borderBottom:'1px dashed var(--ink-5)'}}>
+                  <div style={{fontSize:'12px'}}>
+                    <div style={{fontWeight:600}}>{f.label || f.name}</div>
+                    <div style={{color:'var(--ink-3)'}}>p{f.page+1} · {f.field_type}</div>
+                  </div>
+                  <input className="input" value={values[f.name] || ''}
+                         onChange={e=>setValues({...values, [f.name]: e.target.value})}
+                         placeholder={f.suggested_value || ''}/>
+                  <div style={{fontSize:'10px', color: f.confidence < 0.5 ? '#c89400' : 'var(--ink-3)'}}>
+                    {(f.confidence*100).toFixed(0)}%
+                    {f.semantic_key && <div>→ {f.semantic_key}</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="card" style={{padding:'16px'}}>
+        <div className="label" style={{marginBottom:'10px'}}>動作</div>
+        <div className="field-label">表單提示（選填，給 AI 用）</div>
+        <input className="input" value={hint} onChange={e=>setHint(e.target.value)}
+               placeholder="例：差旅費報銷單" style={{marginBottom:'10px'}}/>
+
+        <button className="btn" onClick={doDetect} disabled={busy || !file}
+                style={{width:'100%', marginBottom:'8px'}}>
+          {busy ? '處理中…' : '🔍 偵測欄位'}
+        </button>
+        <button className="btn primary" onClick={doFill} disabled={busy || !session}
+                style={{width:'100%', marginBottom:'8px'}}>
+          ✍️ 填寫並產生 PDF
+        </button>
+
+        {resultUrl && (
+          <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginBottom:'8px'}}>
+            ⬇ 下載 PDF
+          </a>
+        )}
+
+        {msg && <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'10px', lineHeight:1.5}}>{msg}</div>}
+
+        <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'12px', lineHeight:1.5, padding:'10px', background:'#fff4d6', borderRadius:'6px'}}>
+          <b>Beta 版說明：</b><br/>
+          自動依輸入型態選擇 backend：<br/>
+          1. AcroForm PDF → pypdf（最精準）<br/>
+          2. 文字 PDF → pdfplumber 啟發式<br/>
+          3. 掃描影像 → Gemini Vision
         </div>
       </div>
     </div>

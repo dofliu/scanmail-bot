@@ -304,3 +304,16 @@ def _get_available_font() -> str:
     if "CJKFont" in pdfmetrics.getRegisteredFontNames():
         return "CJKFont"
     return "Helvetica"
+
+
+# ─── 公開介面 ───────────────────────────────────────────────
+# 給其他模組（例如 form_fill.filler）使用，避免直接 import 私有名稱
+
+def ensure_cjk_font() -> str:
+    """確保已註冊 CJK 字型並回傳可用的 ReportLab 字型名稱。
+
+    若系統有 NotoSansCJK / WenQuanYi / DejaVu 之類字型則回 "CJKFont"，
+    否則 fallback 為 "Helvetica"（無中文支援）。
+    """
+    _register_cjk_font()
+    return _get_available_font()
