@@ -54,7 +54,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-_cors_origins = get_settings().cors_origins
+# getattr fallback：測試會以僅含 DATABASE_PATH 的精簡 stub 取代 get_settings
+_cors_origins = getattr(get_settings(), "cors_origins", ["*"])
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
