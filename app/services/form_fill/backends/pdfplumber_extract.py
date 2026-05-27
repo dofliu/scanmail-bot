@@ -68,6 +68,12 @@ _LABEL_REGEX = re.compile(
     rf"^\s*({_LABEL_KEYWORDS})\s*[:：﹕]\s*$",
     re.IGNORECASE,
 )
+# 表格 cell 版本：cell 內常無冒號（如單獨一格寫「姓名」），故冒號可有可無，
+# 但仍要求整格幾乎只有 label 文字，避免把長句誤判為欄位
+_TABLE_LABEL_REGEX = re.compile(
+    rf"^\s*({_LABEL_KEYWORDS})\s*[:：﹕]?\s*$",
+    re.IGNORECASE,
+)
 
 
 def detect(data: bytes) -> DetectionResult:
@@ -124,6 +130,9 @@ def detect(data: bytes) -> DetectionResult:
                         ))
                         break  # 該起點已命中，跳到下一個 i
 
+            # M4.5：表格式表單 — label 在某 cell、相鄰空白 cell 為填寫處
+            _detect_table_fields(page, page_num, fields, seen_keys)
+
     logger.info("pdfplumber detected: %d candidate fields", len(fields))
     return DetectionResult(
         backend_used=Backend.PDFPLUMBER,
@@ -132,6 +141,80 @@ def detect(data: bytes) -> DetectionResult:
         needs_review=True,
         notes="啟發式偵測（必須有冒號的 label 才算），建議使用者確認欄位範圍",
     )
+
+
+def _detect_table_fields(page, page_num: int, fields: list, seen_keys: set) -> None:
+    """從表格 cell 偵測欄位（M4.5）
+
+    啟發式：若某 cell 文字命中 label 關鍵字（整格幾乎只有 label），且其
+    右側或下方相鄰 cell 為空，則把該空白 cell 視為填寫欄位。
+    結果 in-place 併入 fields，並用 seen_keys 去重。
+    """
+    try:
+        tables = page.find_tables()
+    except Exception as e:
+        logger.debug("find_tables failed on page %d: %s", page_num, e)
+        return
+
+    ph = float(page.height)
+
+    for table in tables:
+        try:
+            text_grid = table.extract()
+            rows = table.rows
+        except Exception as e:
+            logger.debug("table.extract failed: %s", e)
+            continue
+
+        for i, row in enumerate(rows):
+            cells = row.cells  # list[bbox|None]，與 text_grid[i] 同欄位對齊
+            text_row = text_grid[i] if i < len(text_grid) else []
+            for j, cell_bbox in enumerate(cells):
+                if cell_bbox is None:
+                    continue
+                text = (text_row[j] or "").strip() if j < len(text_row) else ""
+                if not text or not _TABLE_LABEL_REGEX.match(text):
+                    continue
+                label = _TABLE_LABEL_REGEX.match(text).group(1).strip()
+
+                target = _adjacent_blank_cell(rows, text_grid, i, j, cells)
+                if target is None:
+                    continue
+
+                x0, top, x1, bottom = (float(v) for v in target)
+                key = (page_num, label.lower(), round(top))
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+
+                fields.append(FormField(
+                    name=f"p{page_num}_t{len(fields)}",
+                    label=label,
+                    field_type=_guess_type(label),
+                    bbox=(x0, ph - bottom, x1, ph - top),
+                    page=page_num,
+                    backend=Backend.PDFPLUMBER,
+                    confidence=0.6,
+                ))
+
+
+def _adjacent_blank_cell(rows, text_grid, i, j, cells):
+    """回傳 label cell (i, j) 右側或下方的空白 cell bbox；都沒有則 None"""
+    # 右側同列
+    if j + 1 < len(cells) and cells[j + 1] is not None:
+        text_row = text_grid[i] if i < len(text_grid) else []
+        right_text = (text_row[j + 1] or "").strip() if j + 1 < len(text_row) else ""
+        if not right_text:
+            return cells[j + 1]
+    # 下方同欄
+    if i + 1 < len(rows):
+        below_cells = rows[i + 1].cells
+        below_text_row = text_grid[i + 1] if i + 1 < len(text_grid) else []
+        if j < len(below_cells) and below_cells[j] is not None:
+            below_text = (below_text_row[j] or "").strip() if j < len(below_text_row) else ""
+            if not below_text:
+                return below_cells[j]
+    return None
 
 
 def _group_words_into_lines(words: list, y_tolerance: float = 3.0) -> list[list]:

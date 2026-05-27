@@ -26,6 +26,12 @@ env/
 # Database
 *.db
 *.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Archives
+*.zip
 
 # OS
 .DS_Store

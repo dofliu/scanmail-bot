@@ -11,7 +11,10 @@ from pathlib import Path
 
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.colors import black, gray
+from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas as rl_canvas
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     NameObject, DictionaryObject, ArrayObject, NumberObject,
@@ -189,12 +192,52 @@ def make_scanned_image():
     return path
 
 
+# ════════════════════════════════════════════════════════════
+# 5. 表格式表單 — label 在 cell、相鄰空白 cell 為填寫處（Layer 2 M4.5 對象）
+# ════════════════════════════════════════════════════════════
+
+def make_table_form():
+    """建立以表格框線排版的表單（cell-based），測試 M4.5 表格偵測。
+
+    用英文 label（reportlab 內建字型無法渲染中文），且 label 皆命中
+    pdfplumber_extract._LABEL_KEYWORDS，每個 label cell 右側留空白 cell。
+    """
+    path = OUT / "table_visit_form.pdf"
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(str(path), pagesize=A4,
+                            topMargin=25 * mm, leftMargin=20 * mm)
+
+    title = Paragraph("Student Home Visit Form", styles["Title"])
+
+    # 4 欄：label | value(blank) | label | value(blank)
+    data = [
+        ["Name", "", "Title", ""],
+        ["Department", "", "Email", ""],
+        ["Phone", "", "Date", ""],
+        ["Address", "", "Purpose", ""],
+    ]
+    col_w = [35 * mm, 50 * mm, 35 * mm, 50 * mm]
+    table = Table(data, colWidths=col_w, rowHeights=14 * mm)
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.6, black),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 11),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 6),
+    ]))
+
+    doc.build([title, table])
+    print(f"  ✓ {path.name}")
+    return path
+
+
 def main():
     print("Generating test forms...")
     make_acroform()
     make_flat_travel_expense()
     make_flat_meeting_signin()
     make_scanned_image()
+    make_table_form()
     print(f"\nAll fixtures saved to: {OUT}")
 
 

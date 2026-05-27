@@ -85,10 +85,14 @@ def detect_fields(data: bytes, hint: Optional[str] = None) -> DetectionResult:
     # Layer 2: text-extractable PDF
     if pdfplumber_extract.has_text_layer(data):
         logger.info("Form detect: using pdfplumber backend")
-        return pdfplumber_extract.detect(data)
+        result = pdfplumber_extract.detect(data)
+        if result.fields:
+            return result
+        # M4.6：Layer 2 抓不到任何欄位（常見於純表格/特殊版型）→ 自動轉影像走 Layer 3/4
+        logger.info("Form detect: pdfplumber found 0 fields, falling back to image backends")
 
-    # 沒有文字層 → 渲染成影像走 Layer 3/4
-    logger.info("Form detect: PDF has no text layer, rendering pages to images")
+    # 沒有文字層（或 Layer 2 偵測 0 欄位）→ 渲染成影像走 Layer 3/4
+    logger.info("Form detect: rendering pages to images")
     page_sizes_pts = _get_pdf_page_sizes(data)
     images = _render_pdf_to_images(data)
     return _detect_from_images(images, page_sizes_pts, hint)

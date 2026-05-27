@@ -20,6 +20,8 @@ _sessions: dict[str, SessionData] = {}
 
 
 def get_user_id(request: Request) -> str:
+    # 注意：X-User-Id 未經驗證，可被任意 client 偽造。本平台目前無身分驗證，
+    # 僅適合內網/單人使用，請勿在未加驗證層的情況下對公網開放。
     return request.headers.get("X-User-Id", "default_user") or "default_user"
 
 

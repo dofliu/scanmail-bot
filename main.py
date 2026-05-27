@@ -8,8 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import get_settings
 from app.database import init_db
 from app.core.file_manager import cleanup_temp_files
+from app.utils.crypto import is_default_key
 from app.routers import scanmail
 from app.routers import image_tools
 from app.routers import pdf_tools
@@ -35,6 +37,11 @@ async def lifespan(app: FastAPI):
     logger.info("ScanMail+ 啟動中...")
     init_db()
     logger.info("資料庫初始化完成")
+    if is_default_key():
+        logger.warning(
+            "ENCRYPTION_KEY 仍為公開預設值 — SMTP 密碼等同未加密。"
+            "正式部署請在 .env 設定獨立的 ENCRYPTION_KEY。"
+        )
     yield
     cleanup_temp_files()
     logger.info("ScanMail+ 關閉")
@@ -43,14 +50,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ScanMail+",
     description="智慧文件處理平台 — 掃描郵寄 + 多媒體工具",
-    version="3.0.0",
+    version="3.3.0",
     lifespan=lifespan,
 )
 
+_cors_origins = get_settings().cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    # 以 X-User-Id header（非 cookie）識別，故 wildcard 來源時不啟用 credentials
+    # （瀏覽器本就拒絕 "*" + credentials 的組合）
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -62,7 +72,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "ScanMail+", "version": "3.1.0"}
+    return {"status": "ok", "service": "ScanMail+", "version": "3.3.0"}
 
 
 # ── API 路由掛載 ──

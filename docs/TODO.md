@@ -100,6 +100,8 @@
 - [x] **共用工具**：`app/services/common/json_parsing.py`（順便重構 ai_analyzer）
 - [x] **安全**：`get_temp_path` 路徑穿越防禦（_SAFE_FILENAME regex + relative_to）
 - [x] **測試**：14 pytest cases + manual demo + 4 fixture forms
+- [x] **M4.5 — Layer 2 表格擴充**：`page.find_tables()` 偵測 cell-based 表單（label cell + 相鄰空白 cell）
+- [x] **M4.6 — Layer 2→4 Auto Fallback**：Layer 2 偵測 0 欄位時自動轉影像走 Gemini
 
 ---
 
@@ -107,10 +109,6 @@
 
 ### Auto Form Fill — next iteration
 
-> 真實表單測試發現 Layer 2 對「表格式」表單失效（學生外宿訪視單 case）
-
-- [ ] **M4.5 — Layer 2 表格擴充**：用 `pdfplumber.extract_tables()` 偵測 cell-based 表單
-- [ ] **M4.6 — Layer 2→4 Auto Fallback**：偵測 0 欄位時自動轉影像走 Gemini
 - [ ] **M4 真實 API 測試**：對掃描影像跑 Gemini，量 bbox 平均誤差
 - [ ] **M5 Mapping UI**：前端 PDF 渲染 + bbox 標示 + 拖曳調整
 - [ ] **M7 整合**：填好的 PDF 接 `/api/send` 直接寄、表單模板儲存（記住欄位對應）
@@ -169,6 +167,14 @@
 ---
 
 ## 變更日誌
+
+### 2026/05/27 (專案改進)
+- Form Fill M4.5：Layer 2 新增表格 cell 偵測（`page.find_tables()`），解決表格式表單失效問題
+- Form Fill M4.6：Layer 2 偵測 0 欄位時自動 fallback 到影像 backend（Gemini）
+- 安全：加密金鑰改走 `Settings` 單一來源 + 啟動警告；CORS 改為可設定 `ALLOWED_ORIGINS` 並修正 credentials 組合
+- Repo 衛生：移除誤入版控的 `scanBot.zip` / db journal / 真實發票 PDF，補強 `.gitignore`
+- 新增 CI：`pyproject.toml` pytest 設定 + GitHub Actions（Python 3.10/3.11）
+- 統一版本號為 3.3.0；新增表格表單 fixture 與 M4.5/M4.6 測試
 
 ### 2026/05/12 (v3.3.0 — Auto Form Fill M1)
 - 新增表單自動填寫工具（工具箱第 7 個工具，desktop + mobile）
