@@ -102,11 +102,11 @@ def test_pdfplumber_fill_with_cjk():
 
 def test_gemini_graceful_fail_without_key(monkeypatch):
     """無 GEMINI_API_KEY 時應 graceful fail 而非 crash"""
-    import os
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    # config 是 cached，需要清掉
+    # key 可能來自環境變數或 .env；Settings.model_config 有 env_file=".env"，
+    # 所以單純 delenv + cache_clear 會在重建時又從 .env 讀回 key。
+    # 直接在 cached Settings 實例上清空，才是「未設定 key」的正確模擬層級。
     from app.config import get_settings
-    get_settings.cache_clear()
+    monkeypatch.setattr(get_settings(), "GEMINI_API_KEY", "")
 
     data = _load("scanned_leave_form.png")
     pdf_data = normalize_to_pdf(data, "image/png")
