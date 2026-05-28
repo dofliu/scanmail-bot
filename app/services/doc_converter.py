@@ -2,8 +2,10 @@
 
 純 Python 實作，不依賴 LibreOffice。
 """
+import glob
 import io
 import logging
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -347,8 +349,41 @@ def _escape_xml(text: str) -> str:
 
 _cjk_registered = False
 
+def _cjk_font_candidates() -> list[str]:
+    """跨平台 CJK 字型候選清單（依優先序）。
+
+    刻意**不**納入 DejaVu 等無中文 glyph 的字型——那會「註冊成功卻把中文
+    渲染成空白（\\x00）」，反而遮蔽問題（即 CI 上中文測試失敗的真因）。
+    """
+    paths = [
+        # Linux：對應 fonts-noto-cjk / fonts-wqy-zenhei / fonts-arphic-uming
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/arphic/uming.ttc",
+    ]
+    # Windows：新細明 / 細明 / 微軟正黑 / 標楷（皆可被 ReportLab 內嵌並含中文）
+    windir = os.environ.get("WINDIR", r"C:\Windows")
+    paths += [os.path.join(windir, "Fonts", f)
+              for f in ("msjh.ttc", "mingliu.ttc", "simsun.ttc", "kaiu.ttf")]
+    # macOS
+    paths += [
+        "/System/Library/Fonts/PingFang.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+    ]
+    # 萬用 glob：吃進不同套件版本造成的檔名差異（如 NotoSansCJK-VF.otf.ttc）
+    for pat in (
+        "/usr/share/fonts/**/NotoSansCJK*.tt[cf]",
+        "/usr/share/fonts/**/NotoSerifCJK*.tt[cf]",
+        "/usr/share/fonts/**/wqy-*.ttc",
+    ):
+        paths += sorted(glob.glob(pat, recursive=True))
+    return paths
+
+
 def _register_cjk_font():
-    """嘗試註冊系統中的 CJK 字型"""
+    """註冊系統中第一個可用的 CJK 字型（跨 Linux/Windows/macOS）"""
     global _cjk_registered
     if _cjk_registered:
         return
@@ -356,24 +391,20 @@ def _register_cjk_font():
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
 
-    # 嘗試常見的中文字型路徑
-    font_paths = [
-        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        "/usr/share/fonts/truetype/arphic/uming.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ]
-
-    for path in font_paths:
+    seen = set()
+    for path in _cjk_font_candidates():
+        if path in seen or not os.path.exists(path):
+            continue
+        seen.add(path)
         try:
             pdfmetrics.registerFont(TTFont("CJKFont", path))
             _cjk_registered = True
             logger.info("已註冊 CJK 字型: %s", path)
             return
         except Exception:
-            continue
+            continue  # 非 TrueType / 無法內嵌 → 換下一個候選
 
+    logger.warning("找不到可用的 CJK 字型，中文可能無法正確渲染")
     _cjk_registered = True  # 標記為已嘗試，避免重複
 
 
@@ -391,8 +422,8 @@ def _get_available_font() -> str:
 def ensure_cjk_font() -> str:
     """確保已註冊 CJK 字型並回傳可用的 ReportLab 字型名稱。
 
-    若系統有 NotoSansCJK / WenQuanYi / DejaVu 之類字型則回 "CJKFont"，
-    否則 fallback 為 "Helvetica"（無中文支援）。
+    若系統有 NotoSansCJK / WenQuanYi / 新細明等含中文 glyph 的字型則回
+    "CJKFont"，否則 fallback 為 "Helvetica"（無中文支援）。
     """
     _register_cjk_font()
     return _get_available_font()
