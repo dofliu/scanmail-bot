@@ -270,7 +270,7 @@ scanmail-bot/
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
-### API 端點總覽（73 個）
+### API 端點總覽（81 個）
 
 | 群組 | 主要端點 | 數量 |
 |------|------|------|
@@ -284,7 +284,8 @@ scanmail-bot/
 | 文件轉檔 | `/api/tools/convert/word-to-pdf`, `pdf-to-word`, `md-to-*`, `word-to-md` | 5 |
 | GIF 製作 | `/api/tools/gif/create` | 3 |
 | 影片工具 | `/api/tools/video/merge`, `to-gif`, `compress` | 5 |
-| 批次改名 | `/api/tools/rename/preview`, `apply` | 4 |
+| 批次改名 | `/api/tools/rename/preview`, `apply` | 6 |
+| 表單填寫 | `/api/tools/form/detect`, `suggest`, `fill`, `task/*` | 5 |
 
 ---
 
@@ -302,6 +303,16 @@ curl http://localhost:8000/health
 ```
 
 ---
+
+## 安全性說明
+
+> 部署前請務必閱讀。
+
+- **身分驗證**：目前以 `X-User-Id` header 識別使用者，**未經驗證、可被偽造**。
+  本平台僅適合**內網或單人使用**，請勿在未加驗證層（反向代理 / VPN / 登入）的情況下對公網開放。
+- **加密金鑰**：SMTP 密碼以 `ENCRYPTION_KEY` 加密儲存。預設值是公開的，**正式部署務必在 `.env` 設定獨立金鑰**，
+  否則等同未加密（啟動時會出現警告）。
+- **CORS**：預設 `ALLOWED_ORIGINS=*`（全開）。對外部署時請在 `.env` 收斂為實際網域（逗號分隔）。
 
 ## 授權
 

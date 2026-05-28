@@ -1,7 +1,9 @@
 """環境變數與設定管理"""
-import os
 from functools import lru_cache
 from pydantic_settings import BaseSettings
+
+# 公開的預設加密金鑰 — 僅供開發；正式部署務必以環境變數覆蓋
+DEFAULT_ENCRYPTION_KEY = "scanmail-bot-default-secret-key"
 
 
 class Settings(BaseSettings):
@@ -31,8 +33,15 @@ class Settings(BaseSettings):
     MAX_IMAGE_SIZE_MB: int = 10
     LOG_LEVEL: str = "INFO"
 
+    # CORS — 允許的來源（逗號分隔，預設全開；正式部署請收斂）
+    ALLOWED_ORIGINS: str = "*"
+
     # 加密金鑰
-    ENCRYPTION_KEY: str = "scanmail-bot-default-secret-key"
+    ENCRYPTION_KEY: str = DEFAULT_ENCRYPTION_KEY
+
+    @property
+    def cors_origins(self) -> list[str]:
+        return [o.strip() for o in self.ALLOWED_ORIGINS.split(",") if o.strip()]
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
