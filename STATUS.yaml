@@ -3,8 +3,8 @@ name_zh: 文件掃描郵件平台
 category: personal_tools
 progress: 90
 status: production
-last_updated: "2026-04-24"
-next_milestone: "OCR accuracy improvements + AI 檔案重命名優化"
+last_updated: "2026-06-04"
+next_milestone: "Docker deployment + security hardening"
 technologies:
   - Python
   - FastAPI
@@ -14,4 +14,4 @@ outputs:
   - tool
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "81 API endpoints, 8 tool categories"
+key_metrics: "81 API endpoints, 8 tool categories, 163 tests"
