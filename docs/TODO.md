@@ -1,6 +1,6 @@
 # ScanMail+ 開發規劃與 TODO
 
-> 最後更新：2026/04/02
+> 最後更新：2026/06/04
 
 ---
 
@@ -130,7 +130,7 @@
 - [ ] Docker 容器化部署測試
 - [ ] 使用者認證（多使用者支援）
 - [ ] API Rate Limiting
-- [ ] 擴充 pytest 測試覆蓋率
+- [x] 擴充 pytest 測試覆蓋率 (Sprint 1)
 
 ---
 
@@ -147,7 +147,7 @@
 | 邊界偵測策略 | 5 (Canny, WhiteRegion, Otsu, Laplacian, GrabCut) |
 | 掃描濾鏡 | 7 (auto, scan, color_doc, document, enhance, bw, original) |
 | 郵件模板 | 8 種文件類型預設 + 自訂 |
-| 測試 | 32 (含 Form Fill 14 + review fixes 4) |
+| 測試 | 164 (含 Form Fill 14 + review fixes 4 + Sprint 1 52) |
 
 ---
 
