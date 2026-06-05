@@ -3,10 +3,11 @@ import base64
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Request, HTTPException, UploadFile, File
+from fastapi import APIRouter, Request, HTTPException, UploadFile, File, Depends
 from pydantic import BaseModel
 
 from app.core.sessions import get_user_id, get_session
+from app.core.rate_limiter import sensitive_rate_limit
 from app.core.file_manager import make_thumbnail
 from app.models.contact import ContactModel
 from app.models.history import HistoryModel
@@ -66,7 +67,7 @@ class PageReorderRequest(BaseModel):
 
 # ── 上傳圖片 ──
 
-@router.post("/upload")
+@router.post("/upload", dependencies=[Depends(sensitive_rate_limit)])
 async def upload_image(request: Request, file: UploadFile = File(...)):
     user_id = get_user_id(request)
     session = get_session(user_id)
@@ -320,7 +321,7 @@ async def clear_pages(request: Request):
 
 # ── AI 分析 ──
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[Depends(sensitive_rate_limit)])
 async def analyze_image(request: Request, body: AnalyzeRequest):
     user_id = get_user_id(request)
     session = get_session(user_id)
@@ -365,7 +366,7 @@ async def analyze_image(request: Request, body: AnalyzeRequest):
 
 # ── 寄送郵件 ──
 
-@router.post("/send")
+@router.post("/send", dependencies=[Depends(sensitive_rate_limit)])
 async def send_email_api(request: Request, body: SendRequest):
     user_id = get_user_id(request)
     session = get_session(user_id)
@@ -506,7 +507,7 @@ class BatchSendRequest(BaseModel):
     filename: Optional[str] = None
 
 
-@router.post("/send/batch")
+@router.post("/send/batch", dependencies=[Depends(sensitive_rate_limit)])
 async def batch_send_email(request: Request, body: BatchSendRequest):
     """批次寄送 — 同一份文件寄給多位收件人"""
     user_id = get_user_id(request)

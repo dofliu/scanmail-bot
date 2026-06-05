@@ -68,7 +68,7 @@ def make_acroform():
 
     c.showPage()
     c.save()
-    print(f"  ✓ {path.name}")
+    print(f"  [OK] {path.name}")
     return path
 
 
@@ -109,7 +109,7 @@ def make_flat_travel_expense():
 
     c.showPage()
     c.save()
-    print(f"  ✓ {path.name}")
+    print(f"  [OK] {path.name}")
     return path
 
 
@@ -145,7 +145,7 @@ def make_flat_meeting_signin():
 
     c.showPage()
     c.save()
-    print(f"  ✓ {path.name}")
+    print(f"  [OK] {path.name}")
     return path
 
 
@@ -188,7 +188,7 @@ def make_scanned_image():
         draw.line([(x, 0), (x + 30, H)], fill=(245, 245, 245), width=1)
 
     img.save(path, "PNG")
-    print(f"  ✓ {path.name}")
+    print(f"  [OK] {path.name}")
     return path
 
 
@@ -227,7 +227,7 @@ def make_table_form():
     ]))
 
     doc.build([title, table])
-    print(f"  ✓ {path.name}")
+    print(f"  [OK] {path.name}")
     return path
 
 

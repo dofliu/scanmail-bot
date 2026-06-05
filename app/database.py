@@ -120,6 +120,8 @@ def get_connection() -> sqlite3.Connection:
 
 def init_db():
     """初始化資料庫 — 建立所有表格"""
+    db_path = Path(get_db_path())
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = get_connection()
     try:
         conn.executescript(SCHEMA_SQL)

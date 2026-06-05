@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     SENDER_ORG: str = "國立勤益科技大學"
     
     # 應用設定
-    DATABASE_PATH: str = "scanmail.db"
+    DATABASE_PATH: str = "data/scanmail.db"
     SESSION_TIMEOUT_MINUTES: int = 30
     MAX_IMAGE_SIZE_MB: int = 10
     LOG_LEVEL: str = "INFO"

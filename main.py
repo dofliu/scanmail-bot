@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.database import init_db
 from app.core.file_manager import cleanup_temp_files
 from app.utils.crypto import is_default_key
+from app.core.rate_limiter import rate_limit
 from app.routers import scanmail
 from app.routers import image_tools
 from app.routers import pdf_tools
@@ -78,14 +79,14 @@ async def health_check():
 
 # ── API 路由掛載 ──
 
-app.include_router(scanmail.router, prefix="/api", tags=["scanmail"])
-app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"])
-app.include_router(pdf_tools.router, prefix="/api/tools/pdf", tags=["pdf-tools"])
-app.include_router(doc_convert.router, prefix="/api/tools/convert", tags=["doc-convert"])
-app.include_router(gif_tools.router, prefix="/api/tools/gif", tags=["gif-tools"])
-app.include_router(video_tools.router, prefix="/api/tools/video", tags=["video-tools"])
-app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch-rename"])
-app.include_router(form_tools.router, prefix="/api/tools/form", tags=["form-tools"])
+app.include_router(scanmail.router, prefix="/api", tags=["scanmail"], dependencies=[Depends(rate_limit)])
+app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"], dependencies=[Depends(rate_limit)])
+app.include_router(pdf_tools.router, prefix="/api/tools/pdf", tags=["pdf-tools"], dependencies=[Depends(rate_limit)])
+app.include_router(doc_convert.router, prefix="/api/tools/convert", tags=["doc-convert"], dependencies=[Depends(rate_limit)])
+app.include_router(gif_tools.router, prefix="/api/tools/gif", tags=["gif-tools"], dependencies=[Depends(rate_limit)])
+app.include_router(video_tools.router, prefix="/api/tools/video", tags=["video-tools"], dependencies=[Depends(rate_limit)])
+app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch-rename"], dependencies=[Depends(rate_limit)])
+app.include_router(form_tools.router, prefix="/api/tools/form", tags=["form-tools"], dependencies=[Depends(rate_limit)])
 
 
 # ── 靜態檔案（必須放最後，否則會攔截其他路由）──

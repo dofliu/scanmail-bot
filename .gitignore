@@ -45,6 +45,8 @@ Thumbs.db
 htmlcov/
 .coverage
 tests/fixtures/filled/
+temp/
+data/
 
 # Claude Code（worktrees 與本地設定不應入版控）
 .claude/worktrees/

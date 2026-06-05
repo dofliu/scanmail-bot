@@ -161,7 +161,7 @@ docker build -f deploy/Dockerfile -t scanmail-plus .
 
 docker run -d --name scanmail-plus -p 8000:8000 \
   -v $(pwd)/.env:/app/.env \
-  -v $(pwd)/scanmail.db:/app/scanmail.db \
+  -v $(pwd)/data:/app/data \
   scanmail-plus
 ```
 
