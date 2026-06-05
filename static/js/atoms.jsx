@@ -4,12 +4,12 @@ const { useState, useEffect, useRef, useCallback } = React;
 // ─── Paper Doc Placeholder ─────────────────────────────────────
 function PaperDoc({ w = '75%', tint = 'paper', lines = 8, rotate = 0, children }){
   const bg = tint === 'mint' ? 'var(--mint-wash)' :
-             tint === 'dark' ? '#2a342d' : '#fff';
-  const col = tint === 'dark' ? 'rgba(255,255,255,0.3)' : 'var(--line-soft)';
+             tint === 'dark' ? 'var(--paper-3)' : 'var(--paper)';
+  const col = 'var(--line-soft)';
   return (
     <div style={{
       width:w, aspectRatio:'0.72', background:bg,
-      boxShadow:'0 3px 10px rgba(31,42,36,0.12)',
+      boxShadow:'var(--shadow-paper)',
       padding:'16px 14px', position:'relative',
       transform:`rotate(${rotate}deg)`,
       border:'1px solid var(--line-soft)',
@@ -44,7 +44,16 @@ function CropCorners({ color = 'var(--mint-3)' }){
 // ─── Page thumbnail (real or mock) ──────────────────────────────
 function PageThumb({ page, active, onClick, onRemove, idx }){
   const hasThumb = page.thumb && page.thumb !== 'mock';
-  const map = {
+  const isDark = document.documentElement.dataset.theme === 'dark';
+  const map = isDark ? {
+    auto:{bg:'var(--paper-2)', tint:'var(--mint-3)'},
+    scan:{bg:'var(--paper-3)', tint:'var(--ink-2)'},
+    color_doc:{bg:'var(--paper-2)', tint:'var(--danger)'},
+    document:{bg:'var(--paper)', tint:'var(--ink-3)'},
+    enhance:{bg:'var(--paper-2)', tint:'var(--info)'},
+    bw:{bg:'var(--paper-3)', tint:'var(--ink)'},
+    original:{bg:'var(--paper)', tint:'var(--ink-2)'},
+  } : {
     auto:{bg:'#fff', tint:'#4ea07c'},
     scan:{bg:'#f8f8f4', tint:'#2a2a2a'},
     color_doc:{bg:'#fff', tint:'#b25a4a'},
@@ -67,7 +76,7 @@ function PageThumb({ page, active, onClick, onRemove, idx }){
           transform:`rotate(${page.rotation||0}deg)`, transition:'transform 0.2s',
         }}/>
       ) : (
-        <div style={{aspectRatio:'0.72', background:m.bg, padding:'6px', border:'1px solid #e0dcc8', transform:`rotate(${page.rotation}deg)`, transition:'transform 0.2s'}}>
+        <div style={{aspectRatio:'0.72', background:m.bg, padding:'6px', border:'1px solid var(--line-soft)', transform:`rotate(${page.rotation}deg)`, transition:'transform 0.2s'}}>
           {[90,70,60,85,75,50].map((w,i) => (
             <div key={i} style={{height:'3px', width:w+'%', background:m.tint, opacity:0.5, marginBottom:'4px', borderRadius:'1px'}}/>
           ))}

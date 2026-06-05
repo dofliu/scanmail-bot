@@ -42,6 +42,51 @@
   /* Density */
   --gap: 16px;
   --pad: 16px;
+  --grid-color: rgba(31,42,36,0.015);
+  --stage-top-bg: rgba(246,244,236,0.92);
+}
+
+[data-theme="dark"] {
+  /* Dark Slate Green */
+  --paper: #121c17;
+  --paper-2: #1b2620;
+  --paper-3: #24312a;
+  --ink: #f2f7f4;
+  --ink-2: #d1ded7;
+  --ink-3: #9fb0a6;
+  --ink-4: #6b7e73;
+  --line: #f2f7f4;
+  --line-soft: #2d3d34;
+
+  /* Mint / sage greens (adjusted for dark contrast) */
+  --mint: #2d6b52;
+  --mint-2: #4ea07c;
+  --mint-3: #72c09a;
+  --mint-4: #9fd5ba;
+  --mint-wash: #1b3026;
+  --mint-paper: #16241d;
+  --sage: #53634e;
+  --sage-2: #8aa377;
+
+  /* Accents */
+  --accent: #72c09a;
+  --warn: #d49c51;
+  --danger: #c56b5b;
+  --info: #7c9eb8;
+
+  /* Shadow overrides */
+  --shadow-paper: 0 1px 0 #1b2620, 0 2px 8px rgba(0,0,0,0.4);
+  --shadow-lift: 0 4px 12px rgba(0,0,0,0.5), 0 1px 0 #1b2620;
+
+  /* Custom grid and stage top bg */
+  --grid-color: rgba(255, 255, 255, 0.015);
+  --stage-top-bg: rgba(18, 28, 23, 0.92);
+}
+
+[data-theme="dark"] body {
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(114,192,154,0.08) 0%, transparent 40%),
+    var(--paper);
 }
 
 [data-density="tight"]{ --gap:10px; --pad:10px; }
@@ -64,8 +109,8 @@ body{
 body::before{
   content:''; position:fixed; inset:0; pointer-events:none; z-index:0;
   background-image:
-    repeating-linear-gradient(0deg, transparent 0 40px, rgba(31,42,36,0.015) 40px 41px),
-    repeating-linear-gradient(90deg, transparent 0 40px, rgba(31,42,36,0.015) 40px 41px);
+    repeating-linear-gradient(0deg, transparent 0 40px, var(--grid-color) 40px 41px),
+    repeating-linear-gradient(90deg, transparent 0 40px, var(--grid-color) 40px 41px);
 }
 
 button{font-family:inherit; cursor:pointer; border:none; background:none; color:inherit; padding:0;}
@@ -81,7 +126,7 @@ input,select,textarea{font-family:inherit; color:inherit;}
 }
 .stage-top{
   position:sticky; top:0; z-index:80;
-  background:rgba(246,244,236,0.92);
+  background:var(--stage-top-bg);
   backdrop-filter:blur(6px);
   border-bottom:1.25px solid var(--line-soft);
   padding:10px 20px;

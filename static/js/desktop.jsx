@@ -1297,6 +1297,15 @@ function DSettings(){
 
   return (
     <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px'}}>
+      <div className="card" style={{padding:'20px', gridColumn:'1 / span 2'}}>
+        <div className="hand" style={{fontSize:'20px', fontWeight:700, marginBottom:'14px'}}>系統設定</div>
+        <div style={{display:'flex', alignItems:'center', gap:'16px'}}>
+          <span style={{fontSize:'14px', fontWeight:500}}>深色主題</span>
+          <button className="pill" onClick={() => store.toggleTheme()} style={{padding:'6px 16px', fontSize:'13px'}}>
+            {state.theme === 'dark' ? '🌙 深色模式已啟用' : '☀️ 淺色模式已啟用'}
+          </button>
+        </div>
+      </div>
       <div className="card" style={{padding:'20px'}}>
         <div className="hand" style={{fontSize:'20px', fontWeight:700, marginBottom:'14px'}}>寄件人資料</div>
         <div className="field-label">姓名</div>

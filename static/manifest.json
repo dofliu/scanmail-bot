@@ -1,0 +1,24 @@
+{
+  "name": "ScanMail+",
+  "short_name": "ScanMail+",
+  "description": "ScanMail+ — AI 智慧文件處理平台 (📷 掃描郵寄 + 🛠️ 多功能工具箱)",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f4ec",
+  "theme_color": "#141c18",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}

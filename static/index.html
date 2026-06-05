@@ -4,6 +4,8 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>ScanMail+ · Hi-Fi</title>
+<link rel="manifest" href="manifest.json"/>
+<meta name="theme-color" content="#141c18"/>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Architects+Daughter&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="css/palette.css"/>
 
@@ -22,15 +24,27 @@
   }/*EDITMODE-END*/;
   window.TWEAKS = TWEAKS;
 
-  // ── 裝置偵測 & 模式判斷 ────────────────────────────────
-  // Preview 模式：?preview=1 或嵌入 iframe（Claude Design 編輯器）
-  // Live 模式：直接依裝置渲染對應 shell，不顯示原型框
-  (function initAppMode(){
+    // ── 裝置偵測 & 模式判斷 & 主題初始化 ────────────────────────────────
     const url = new URL(location.href);
     const forced = url.searchParams.get('view'); // 'mobile' | 'desktop' | 'both'
     const previewParam = url.searchParams.has('preview');
     let inIframe = false;
     try { inIframe = (window.self !== window.top); } catch(e){ inIframe = true; }
+
+    // 主題初始化
+    const savedTheme = localStorage.getItem('theme');
+    const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const theme = savedTheme || systemTheme;
+    document.documentElement.dataset.theme = theme;
+
+    // PWA Service Worker 註冊
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(err => {
+          console.error('ServiceWorker 註冊失敗: ', err);
+        });
+      });
+    }
 
     // 只有明確要求 preview（URL 參數）或 Claude Design 編輯器（iframe）才進原型模式
     const isPreview = previewParam || (inIframe && forced === 'both');
@@ -124,14 +138,43 @@ function TweaksPanel({ open, onClose, tweaks, onChange }){
 
 function applyTweaks(t){
   const root = document.documentElement;
+  const isDark = root.dataset.theme === 'dark';
+
+  // Ink & other dark-mode responsive properties
+  if (isDark) {
+    root.style.setProperty('--ink', '#f2f7f4');
+    root.style.setProperty('--ink-2', '#d1ded7');
+    root.style.setProperty('--ink-3', '#9fb0a6');
+    root.style.setProperty('--ink-4', '#6b7e73');
+    root.style.setProperty('--line', '#f2f7f4');
+    root.style.setProperty('--line-soft', '#2d3d34');
+    root.style.setProperty('--grid-color', 'rgba(255,255,255,0.015)');
+    root.style.setProperty('--stage-top-bg', 'rgba(18,28,23,0.92)');
+  } else {
+    root.style.setProperty('--ink', '#1f2a24');
+    root.style.setProperty('--ink-2', '#3d4b42');
+    root.style.setProperty('--ink-3', '#6b766e');
+    root.style.setProperty('--ink-4', '#9aa39b');
+    root.style.setProperty('--line', '#1f2a24');
+    root.style.setProperty('--line-soft', '#c4beae');
+    root.style.setProperty('--grid-color', 'rgba(31,42,36,0.015)');
+    root.style.setProperty('--stage-top-bg', 'rgba(246,244,236,0.92)');
+  }
+
   // Accent colors
-  const accents = {
+  const accentsLight = {
     mint:       { m:'#9fd5ba', m2:'#72c09a', m3:'#4ea07c', m4:'#2d6b52', wash:'#e6f2e9' },
     sage:       { m:'#b8c9a8', m2:'#8aa377', m3:'#6b8a5f', m4:'#3f5c3a', wash:'#edf1e5' },
     teal:       { m:'#8ecad0', m2:'#5ba9b2', m3:'#2d8590', m4:'#155862', wash:'#dcecee' },
     terracotta: { m:'#e6b8a4', m2:'#cf8e75', m3:'#b25a4a', m4:'#7d3a2e', wash:'#f4e3db' },
   };
-  const a = accents[t.accent] || accents.mint;
+  const accentsDark = {
+    mint:       { m:'#2d6b52', m2:'#4ea07c', m3:'#72c09a', m4:'#9fd5ba', wash:'#1b3026' },
+    sage:       { m:'#3d503f', m2:'#53634e', m3:'#8aa377', m4:'#b8c9a8', wash:'#1c271d' },
+    teal:       { m:'#155862', m2:'#2d8590', m3:'#5ba9b2', m4:'#8ecad0', wash:'#172d31' },
+    terracotta: { m:'#7d3a2e', m2:'#b25a4a', m3:'#cf8e75', m4:'#e6b8a4', wash:'#311e17' },
+  };
+  const a = (isDark ? accentsDark[t.accent] : accentsLight[t.accent]) || (isDark ? accentsDark.mint : accentsLight.mint);
   root.style.setProperty('--mint', a.m);
   root.style.setProperty('--mint-2', a.m2);
   root.style.setProperty('--mint-3', a.m3);
@@ -139,18 +182,25 @@ function applyTweaks(t){
   root.style.setProperty('--mint-wash', a.wash);
 
   // Paper color
-  const papers = {
+  const papersLight = {
     paper: ['#f6f4ec','#eeebdf'],
     warm:  ['#fdf9ee','#f6efdd'],
     cool:  ['#f2f4f1','#e6ebe6'],
     gray:  ['#eeece8','#e4e1d9'],
   };
-  const p = papers[t.docBg] || papers.paper;
+  const papersDark = {
+    paper: ['#121c17','#1b2620'],
+    warm:  ['#1a1914','#24231b'],
+    cool:  ['#111a1e','#192429'],
+    gray:  ['#181a1b','#232527'],
+  };
+  const p = (isDark ? papersDark[t.docBg] : papersLight[t.docBg]) || (isDark ? papersDark.paper : papersLight.paper);
   root.style.setProperty('--paper', p[0]);
   root.style.setProperty('--paper-2', p[1]);
 
   root.dataset.density = t.density;
 }
+window.applyTweaks = applyTweaks;
 
 // ── 原型/預覽模式 Stage（含切換 + Tweaks）─────────────
 function PreviewStage(){
@@ -197,6 +247,17 @@ function PreviewStage(){
         </div>
 
         <div className="stage-tweaks">
+          <button className="pill" onClick={() => {
+            const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+            document.documentElement.dataset.theme = next;
+            localStorage.setItem('theme', next);
+            if (window.SMStore) {
+              window.SMStore.set({ theme: next });
+            }
+            applyTweaks(tweaks);
+          }} style={{marginRight: '8px'}}>
+            {document.documentElement.dataset.theme === 'dark' ? '☀️ 淺色' : '🌙 深色'}
+          </button>
           <button className="pill" onClick={() => setTweaksOpen(o => !o)}>
             🎨 Tweaks {tweaksOpen ? '▴' : '▾'}
           </button>

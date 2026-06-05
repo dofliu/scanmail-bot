@@ -27,6 +27,7 @@
     view: 'mobile',
     density: 'default',
     tweaksOpen: false,
+    theme: localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
 
     // Mobile nav
     mTab: 'home',
@@ -120,6 +121,14 @@
     },
     setView(view){
       state.view = view;
+      notify();
+    },
+    toggleTheme(){
+      const nextTheme = state.theme === 'dark' ? 'light' : 'dark';
+      state.theme = nextTheme;
+      localStorage.setItem('theme', nextTheme);
+      document.documentElement.dataset.theme = nextTheme;
+      if(window.applyTweaks) window.applyTweaks(window.TWEAKS);
       notify();
     },
 

@@ -1,6 +1,6 @@
 # ScanMail+ 開發規劃與 TODO
 
-> 最後更新：2026/06/04
+> 最後更新：2026/06/05
 
 ---
 
@@ -122,8 +122,8 @@
 
 ### 使用者體驗
 
-- [ ] PWA 支援 — manifest.json + Service Worker → 手機可安裝
-- [ ] 深色模式
+- [x] PWA 支援 — manifest.json + Service Worker → 手機可安裝
+- [x] 深色模式
 
 ### 部署與維運
 

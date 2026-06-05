@@ -849,6 +849,16 @@ function MSettings(){
     <>
       <MHeader title="設定" back/>
       <div className="m-body">
+        <div className="label" style={{marginBottom:'6px'}}>系統設定</div>
+        <div className="card" style={{padding:'12px', marginBottom:'12px'}}>
+          <div className="row between" style={{alignItems:'center'}}>
+            <span style={{fontSize:'13px', fontWeight:500, color:'var(--ink)'}}>深色主題</span>
+            <button className="pill" onClick={() => store.toggleTheme()} style={{fontSize:'12px', padding:'6px 12px'}}>
+              {state.theme === 'dark' ? '🌙 已啟用' : '☀️ 已停用'}
+            </button>
+          </div>
+        </div>
+
         <div className="label" style={{marginBottom:'6px'}}>寄件人資料</div>
         <div className="card" style={{padding:'12px', marginBottom:'12px'}}>
           <div className="field-label">姓名</div>
