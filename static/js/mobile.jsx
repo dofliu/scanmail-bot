@@ -1360,15 +1360,24 @@ function MToolForm(){
   const [session, setSession] = mUseState(null);   // {token, result}
   const [values, setValues] = mUseState({});
   const [resultUrl, setResultUrl] = mUseState(null);
+  const [activeFieldId, setActiveFieldId] = mUseState(null);
+  const [showVisual, setShowVisual] = mUseState(false);
 
   const onPick = (e) => {
     const f = e.target.files && e.target.files[0];
-    if (f) { setFile(f); setSession(null); setResultUrl(null); setMsg(''); }
+    if (f) {
+      setFile(f);
+      setSession(null);
+      setResultUrl(null);
+      setMsg('');
+      setActiveFieldId(null);
+      setShowVisual(false);
+    }
   };
 
   const doDetect = async () => {
     if (!file) return;
-    setBusy(true); setMsg('偵測中…'); setSession(null); setValues({}); setResultUrl(null);
+    setBusy(true); setMsg('偵測中…'); setSession(null); setValues({}); setResultUrl(null); setActiveFieldId(null);
     try {
       const r = await window.API.formDetect(file, hint);
       const s = await window.API.formSuggest(r.result.fields);
@@ -1413,26 +1422,77 @@ function MToolForm(){
         </button>
       </div>
 
+      {file && (
+        <div style={{marginBottom:'10px'}}>
+          <button className="btn text" onClick={() => setShowVisual(!showVisual)} style={{width:'100%', fontSize:'12px', display:'flex', alignItems:'center', justifyContent:'center', gap:'4px', padding:'6px'}}>
+            {showVisual ? '👁️ 隱藏表單影像' : '👁️ 顯示表單影像'}
+          </button>
+          {showVisual && (
+            <div style={{background:'var(--paper-2)', borderRadius:'8px', padding:'8px', maxHeight:'380px', overflowY:'auto', border:'1px solid var(--line-soft)', marginTop:'4px', display:'flex', justifyContent:'center'}}>
+              <window.FormVisualEditor
+                file={file}
+                fields={fields}
+                activeFieldId={activeFieldId}
+                setActiveFieldId={setActiveFieldId}
+                onFieldsUpdate={(updatedFields) => {
+                  setSession(prev => ({
+                    ...prev,
+                    result: {
+                      ...prev.result,
+                      fields: updatedFields
+                    }
+                  }));
+                }}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
       {fields.length > 0 && (
         <div className="card" style={{padding:'12px', marginBottom:'10px'}}>
           <div className="label" style={{marginBottom:'8px'}}>欄位（{fields.length}）</div>
           <div style={{maxHeight:'40vh', overflowY:'auto', display:'flex', flexDirection:'column', gap:'6px'}}>
-            {fields.map(f => (
-              <div key={f.name} style={{borderBottom:'1px dashed var(--ink-5)', paddingBottom:'4px'}}>
-                <div style={{fontSize:'11px', display:'flex', justifyContent:'space-between'}}>
-                  <span style={{fontWeight:600}}>{f.label || f.name}</span>
-                  <span style={{color:'var(--ink-3)'}}>p{f.page+1} · {(f.confidence*100).toFixed(0)}%</span>
+            {fields.map(f => {
+              const isActive = f.name === activeFieldId;
+              return (
+                <div
+                  key={f.name}
+                  style={{
+                    border:`1px solid ${isActive ? 'var(--primary)' : 'transparent'}`,
+                    borderRadius:'6px',
+                    padding:'6px',
+                    backgroundColor: isActive ? 'var(--line-very-soft)' : 'transparent',
+                    transition:'all 0.15s'
+                  }}
+                  onClick={() => {
+                    setActiveFieldId(f.name);
+                    setShowVisual(true);
+                  }}
+                >
+                  <div style={{fontSize:'11px', display:'flex', justifyContent:'space-between', marginBottom:'4px'}}>
+                    <span style={{fontWeight:600}}>{f.label || f.name}</span>
+                    <span style={{color:'var(--ink-3)'}}>p{f.page+1} · {(f.confidence*100).toFixed(0)}%</span>
+                  </div>
+                  <input
+                    className="input"
+                    style={{fontSize:'12px', padding:'4px 8px'}}
+                    value={values[f.name] || ''}
+                    onChange={e=>setValues({...values, [f.name]: e.target.value})}
+                    onFocus={() => {
+                      setActiveFieldId(f.name);
+                      setShowVisual(true);
+                    }}
+                    placeholder={f.suggested_value || ''}
+                  />
                 </div>
-                <input className="input" style={{fontSize:'12px'}} value={values[f.name] || ''}
-                       onChange={e=>setValues({...values, [f.name]: e.target.value})}
-                       placeholder={f.suggested_value || ''}/>
-              </div>
-            ))}
+              );
+            })}
           </div>
           <button className="btn primary" onClick={doFill} disabled={busy} style={{width:'100%', marginTop:'10px'}}>
             ✍️ 填寫並產生 PDF
           </button>
-          {resultUrl && <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginTop:'8px'}}>⬇ 下載</a>}
+          {resultUrl && <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginTop:'8px', background:'rgba(46,130,93,0.1)', border:'1.5px solid var(--primary)', color:'var(--primary)'}}>⬇ 下載填寫後的 PDF</a>}
         </div>
       )}
 

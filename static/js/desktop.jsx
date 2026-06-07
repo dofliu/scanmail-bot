@@ -1161,6 +1161,306 @@ function DToolRename(){
   );
 }
 
+// ─── VISUAL FORM PREVIEW & INTERACTIVE BBOX (Sprint 4) ───
+function BBoxOverlay({ field, pageSize, renderedSize, isActive, onSelect, onDragResize }) {
+  const { bbox } = field;
+  if (!bbox) return null;
+
+  const pw = pageSize.w;
+  const ph = pageSize.h;
+
+  const left = (bbox[0] / pw) * 100;
+  const top = ((ph - bbox[3]) / ph) * 100;
+  const width = ((bbox[2] - bbox[0]) / pw) * 100;
+  const height = ((bbox[3] - bbox[1]) / ph) * 100;
+
+  const handleMouseDown = (e, action) => {
+    e.stopPropagation();
+    e.preventDefault();
+    onSelect();
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const initialBbox = [...bbox];
+
+    const scaleX = pw / renderedSize.w;
+    const scaleY = ph / renderedSize.h;
+
+    const handleMouseMove = (moveEvent) => {
+      const dx = (moveEvent.clientX - startX) * scaleX;
+      const dy = (moveEvent.clientY - startY) * scaleY;
+
+      let newBbox = [...initialBbox];
+
+      if (action === 'move') {
+        newBbox[0] = initialBbox[0] + dx;
+        newBbox[2] = initialBbox[2] + dx;
+        newBbox[1] = initialBbox[1] - dy;
+        newBbox[3] = initialBbox[3] - dy;
+      } else if (action === 'tl') {
+        newBbox[0] = Math.min(initialBbox[0] + dx, initialBbox[2] - 5);
+        newBbox[3] = Math.max(initialBbox[3] - dy, initialBbox[1] + 5);
+      } else if (action === 'tr') {
+        newBbox[2] = Math.max(initialBbox[2] + dx, initialBbox[0] + 5);
+        newBbox[3] = Math.max(initialBbox[3] - dy, initialBbox[1] + 5);
+      } else if (action === 'bl') {
+        newBbox[0] = Math.min(initialBbox[0] + dx, initialBbox[2] - 5);
+        newBbox[1] = Math.min(initialBbox[1] - dy, initialBbox[3] - 5);
+      } else if (action === 'br') {
+        newBbox[2] = Math.max(initialBbox[2] + dx, initialBbox[0] + 5);
+        newBbox[1] = Math.min(initialBbox[1] - dy, initialBbox[3] - 5);
+      }
+
+      // Constrain inside page bounds
+      newBbox[0] = Math.max(0, Math.min(newBbox[0], pw));
+      newBbox[2] = Math.max(0, Math.min(newBbox[2], pw));
+      newBbox[1] = Math.max(0, Math.min(newBbox[1], ph));
+      newBbox[3] = Math.max(0, Math.min(newBbox[3], ph));
+
+      onDragResize(newBbox);
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+  };
+
+  const isLowConf = field.confidence < 0.5;
+  const color = isActive ? 'rgba(46, 130, 93, 0.25)' : (isLowConf ? 'rgba(200, 148, 0, 0.15)' : 'rgba(46, 130, 93, 0.12)');
+  const borderColor = isActive ? '#2e825d' : (isLowConf ? '#c89400' : 'rgba(46, 130, 93, 0.6)');
+  const borderStyle = isActive ? 'solid' : 'dashed';
+  const borderWidth = isActive ? '2px' : '1.5px';
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: `${left}%`,
+        top: `${top}%`,
+        width: `${width}%`,
+        height: `${height}%`,
+        backgroundColor: color,
+        border: `${borderWidth} ${borderStyle} ${borderColor}`,
+        boxSizing: 'border-box',
+        cursor: 'move',
+        zIndex: isActive ? 5 : 2
+      }}
+      onMouseDown={(e) => handleMouseDown(e, 'move')}
+    >
+      {/* Label Badge */}
+      <div
+        style={{
+          position: 'absolute',
+          top: '-16px',
+          left: '-1px',
+          backgroundColor: borderColor,
+          color: '#fff',
+          padding: '1px 5px',
+          fontSize: '9px',
+          fontWeight: 600,
+          borderRadius: '3px 3px 0 0',
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none'
+        }}
+      >
+        {field.label || field.name}
+      </div>
+
+      {/* Resize Handles (Only show when active) */}
+      {isActive && (
+        <>
+          <div style={{ width: '6px', height: '6px', backgroundColor: '#fff', border: '1.5px solid #2e825d', borderRadius: '50%', position: 'absolute', top: '-3px', left: '-3px', cursor: 'nwse-resize', zIndex: 10 }} onMouseDown={(e) => handleMouseDown(e, 'tl')} />
+          <div style={{ width: '6px', height: '6px', backgroundColor: '#fff', border: '1.5px solid #2e825d', borderRadius: '50%', position: 'absolute', top: '-3px', right: '-3px', cursor: 'nesw-resize', zIndex: 10 }} onMouseDown={(e) => handleMouseDown(e, 'tr')} />
+          <div style={{ width: '6px', height: '6px', backgroundColor: '#fff', border: '1.5px solid #2e825d', borderRadius: '50%', position: 'absolute', bottom: '-3px', left: '-3px', cursor: 'nesw-resize', zIndex: 10 }} onMouseDown={(e) => handleMouseDown(e, 'bl')} />
+          <div style={{ width: '6px', height: '6px', backgroundColor: '#fff', border: '1.5px solid #2e825d', borderRadius: '50%', position: 'absolute', bottom: '-3px', right: '-3px', cursor: 'nwse-resize', zIndex: 10 }} onMouseDown={(e) => handleMouseDown(e, 'br')} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function FormPagePreview({ pageNum, pdfDoc, imageUrl, imageSize, isPdf, fields, activeFieldId, setActiveFieldId, onFieldsUpdate, onPageSize }) {
+  const canvasRef = dUseRef(null);
+  const [renderedSize, setRenderedSize] = dUseState({ w: 0, h: 0 });
+  const [pageSize, setPageSize] = dUseState({ w: 0, h: 0 });
+
+  React.useEffect(() => {
+    if (!isPdf || !pdfDoc || !canvasRef.current) return;
+
+    pdfDoc.getPage(pageNum + 1).then((page) => {
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
+
+      const unscaledViewport = page.getViewport({ scale: 1.0 });
+      const pw = unscaledViewport.width;
+      const ph = unscaledViewport.height;
+      setPageSize({ w: pw, h: ph });
+      onPageSize(pageNum, pw, ph);
+
+      const scale = 500 / pw;
+      const viewport = page.getViewport({ scale });
+
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      setRenderedSize({ w: viewport.width, h: viewport.height });
+
+      const renderContext = {
+        canvasContext: context,
+        viewport: viewport
+      };
+      page.render(renderContext);
+    });
+  }, [pdfDoc, pageNum, isPdf]);
+
+  React.useEffect(() => {
+    if (isPdf || !imageSize) return;
+    setPageSize({ w: imageSize.w, h: imageSize.h });
+    onPageSize(pageNum, imageSize.w, imageSize.h);
+    const renderedW = Math.min(500, imageSize.w);
+    const renderedH = (renderedW / imageSize.w) * imageSize.h;
+    setRenderedSize({ w: renderedW, h: renderedH });
+  }, [imageSize, isPdf]);
+
+  if (pageSize.w === 0 || renderedSize.w === 0) {
+    return <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--ink-3)', fontSize: '12px' }}>載入頁面 {pageNum + 1}...</div>;
+  }
+
+  const pageFields = fields.filter((f) => f.page === pageNum);
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: `${renderedSize.w}px`,
+        height: `${renderedSize.h}px`,
+        boxShadow: '0 4px 10px rgba(0,0,0,0.08)',
+        border: '1px solid var(--line-soft)',
+        borderRadius: '6px',
+        backgroundColor: '#fff',
+        margin: '0 auto',
+        userSelect: 'none'
+      }}
+    >
+      {isPdf ? (
+        <canvas ref={canvasRef} style={{ display: 'block', borderRadius: '5px' }} />
+      ) : (
+        <img src={imageUrl} style={{ display: 'block', width: '100%', height: '100%', borderRadius: '5px', pointerEvents: 'none' }} alt="" />
+      )}
+      
+      <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}>
+        {pageFields.map((field) => (
+          <BBoxOverlay
+            key={field.name}
+            field={field}
+            pageSize={pageSize}
+            renderedSize={renderedSize}
+            isActive={field.name === activeFieldId}
+            onSelect={() => setActiveFieldId(field.name)}
+            onDragResize={(newBbox) => {
+              const updated = fields.map(f => f.name === field.name ? { ...f, bbox: newBbox } : f);
+              onFieldsUpdate(updated);
+            }}
+          />
+        ))}
+      </div>
+      
+      <div style={{ position: 'absolute', bottom: '6px', right: '6px', background: 'rgba(20,28,24,0.75)', color: '#fff', padding: '2px 8px', borderRadius: '10px', fontSize: '9px', fontWeight: 600 }}>
+        第 {pageNum + 1} 頁
+      </div>
+    </div>
+  );
+}
+
+function FormVisualEditor({ file, fields, activeFieldId, setActiveFieldId, onFieldsUpdate }) {
+  const [loading, setLoading] = dUseState(true);
+  const [pdfDoc, setPdfDoc] = dUseState(null);
+  const [numPages, setNumPages] = dUseState(0);
+  const [pageSizes, setPageSizes] = dUseState({});
+  const [imageUrl, setImageUrl] = dUseState(null);
+  const [imageSize, setImageSize] = dUseState(null);
+  const isPdf = file && file.type === 'application/pdf';
+
+  React.useEffect(() => {
+    setLoading(true);
+    setPdfDoc(null);
+    setPageSizes({});
+    setImageUrl(null);
+    setImageSize(null);
+    setNumPages(0);
+
+    if (!file) return;
+
+    const fileUrl = URL.createObjectURL(file);
+
+    if (isPdf) {
+      if (!window.pdfjsLib) {
+        setLoading(false);
+        return;
+      }
+      window.pdfjsLib.getDocument(fileUrl).promise.then(
+        (pdf) => {
+          setPdfDoc(pdf);
+          setNumPages(pdf.numPages);
+          setLoading(false);
+        },
+        (err) => {
+          console.error("PDF loading error:", err);
+          setLoading(false);
+        }
+      );
+    } else {
+      setImageUrl(fileUrl);
+      const img = new Image();
+      img.src = fileUrl;
+      img.onload = () => {
+        setImageSize({ w: img.naturalWidth, h: img.naturalHeight });
+        setPageSizes({ 0: { w: img.naturalWidth, h: img.naturalHeight } });
+        setNumPages(1);
+        setLoading(false);
+      };
+      img.onerror = () => {
+        setLoading(false);
+      };
+    }
+
+    return () => {
+      URL.revokeObjectURL(fileUrl);
+    };
+  }, [file]);
+
+  if (loading) {
+    return <LoadingSpinner text="載入檔案預覽中..." />;
+  }
+
+  const pagesArray = Array.from({ length: numPages }, (_, i) => i);
+
+  return (
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      {pagesArray.map((pageNum) => (
+        <FormPagePreview
+          key={pageNum}
+          pageNum={pageNum}
+          pdfDoc={pdfDoc}
+          imageUrl={imageUrl}
+          imageSize={imageSize}
+          isPdf={isPdf}
+          fields={fields}
+          activeFieldId={activeFieldId}
+          setActiveFieldId={setActiveFieldId}
+          onFieldsUpdate={onFieldsUpdate}
+          onPageSize={(pNum, w, h) => {
+            setPageSizes(prev => ({ ...prev, [pNum]: { w, h } }));
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 // ─── AUTO FORM FILL (Beta) ────────────────────────────────
 function DToolForm(){
   const [file, setFile] = dUseState(null);
@@ -1170,15 +1470,15 @@ function DToolForm(){
   const [session, setSession] = dUseState(null);   // {token, result}
   const [values, setValues] = dUseState({});       // {field_name: string}
   const [resultUrl, setResultUrl] = dUseState(null);
+  const [activeFieldId, setActiveFieldId] = dUseState(null);
 
   const doDetect = async () => {
     if (!file) return;
     setBusy(true); setMsg('偵測欄位中…');
-    setSession(null); setValues({}); setResultUrl(null);
+    setSession(null); setValues({}); setResultUrl(null); setActiveFieldId(null);
     try {
       const r = await window.API.formDetect(file, hint);
       setMsg(`使用 backend: ${r.result.backend_used} · 偵測到 ${r.result.fields.length} 個欄位`);
-      // 自動套用 semantic mapping — 用回傳後的 fields 取代原本的（含 semantic_key 標註）
       const s = await window.API.formSuggest(r.result.fields);
       const enrichedResult = {...r.result, fields: s.fields || r.result.fields};
       setSession({token: r.session_token, result: enrichedResult});
@@ -1211,67 +1511,113 @@ function DToolForm(){
   return (
     <div style={{display:'grid', gridTemplateColumns:'1fr 380px', gap:'16px'}}>
       <div>
-        <UploadDropzone accept=".pdf,image/*" onFiles={f=>setFile(f[0] || null)} icon="📝"
-                        label="拖放表單（PDF 或圖檔）"/>
-        {file && <FileList files={[file]} onRemove={()=>setFile(null)}/>}
+        {!file && (
+          <UploadDropzone accept=".pdf,image/*" onFiles={f=>setFile(f[0] || null)} icon="📝"
+                          label="拖放表單（PDF 或圖檔）"/>
+        )}
 
-        {fields.length > 0 && (
-          <div className="card" style={{padding:'14px', marginTop:'12px'}}>
-            <div className="label" style={{marginBottom:'10px'}}>
-              欄位清單（{fields.length}）— backend: <b>{session.result.backend_used}</b>
-              {session.result.needs_review && <span style={{color:'#c89400', marginLeft:'8px'}}>· 建議人工確認</span>}
+        {file && (
+          <div className="card" style={{padding:'16px', display:'flex', flexDirection:'column', background:'var(--paper)', minHeight:'520px'}}>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px'}}>
+              <div className="hand" style={{fontWeight:700, fontSize:'16px'}}>表單影像與視覺微調</div>
+              <button className="btn text" style={{padding:'2px 8px', color:'#d32f2f'}} onClick={() => { setFile(null); setSession(null); setValues({}); setResultUrl(null); setActiveFieldId(null); }}>
+                🗑️ 清除表單
+              </button>
             </div>
-            <div style={{maxHeight:'440px', overflowY:'auto', display:'flex', flexDirection:'column', gap:'8px'}}>
-              {fields.map(f => (
-                <div key={f.name} style={{display:'grid', gridTemplateColumns:'160px 1fr 80px', gap:'8px', alignItems:'center', padding:'6px 0', borderBottom:'1px dashed var(--ink-5)'}}>
-                  <div style={{fontSize:'12px'}}>
-                    <div style={{fontWeight:600}}>{f.label || f.name}</div>
-                    <div style={{color:'var(--ink-3)'}}>p{f.page+1} · {f.field_type}</div>
-                  </div>
-                  <input className="input" value={values[f.name] || ''}
-                         onChange={e=>setValues({...values, [f.name]: e.target.value})}
-                         placeholder={f.suggested_value || ''}/>
-                  <div style={{fontSize:'10px', color: f.confidence < 0.5 ? '#c89400' : 'var(--ink-3)'}}>
-                    {(f.confidence*100).toFixed(0)}%
-                    {f.semantic_key && <div>→ {f.semantic_key}</div>}
-                  </div>
-                </div>
-              ))}
+            
+            <div style={{flex:1, display:'flex', justifyContent:'center', overflowY:'auto', maxHeight:'650px', background:'var(--paper-2)', borderRadius:'8px', padding:'16px', border:'1px solid var(--line-soft)'}}>
+              <FormVisualEditor
+                file={file}
+                fields={fields}
+                activeFieldId={activeFieldId}
+                setActiveFieldId={setActiveFieldId}
+                onFieldsUpdate={(updatedFields) => {
+                  setSession(prev => ({
+                    ...prev,
+                    result: {
+                      ...prev.result,
+                      fields: updatedFields
+                    }
+                  }));
+                }}
+              />
             </div>
           </div>
         )}
       </div>
 
-      <div className="card" style={{padding:'16px'}}>
-        <div className="label" style={{marginBottom:'10px'}}>動作</div>
-        <div className="field-label">表單提示（選填，給 AI 用）</div>
-        <input className="input" value={hint} onChange={e=>setHint(e.target.value)}
-               placeholder="例：差旅費報銷單" style={{marginBottom:'10px'}}/>
+      <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
+        <div className="card" style={{padding:'16px'}}>
+          <div className="label" style={{marginBottom:'10px'}}>動作</div>
+          <div className="field-label">表單提示（選填，給 AI 用）</div>
+          <input className="input" value={hint} onChange={e=>setHint(e.target.value)}
+                 placeholder="例：差旅費報銷單" style={{marginBottom:'10px'}}/>
 
-        <button className="btn" onClick={doDetect} disabled={busy || !file}
-                style={{width:'100%', marginBottom:'8px'}}>
-          {busy ? '處理中…' : '🔍 偵測欄位'}
-        </button>
-        <button className="btn primary" onClick={doFill} disabled={busy || !session}
-                style={{width:'100%', marginBottom:'8px'}}>
-          ✍️ 填寫並產生 PDF
-        </button>
+          <button className="btn" onClick={doDetect} disabled={busy || !file}
+                  style={{width:'100%', marginBottom:'8px'}}>
+            {busy ? '處理中…' : '🔍 偵測欄位'}
+          </button>
+          <button className="btn primary" onClick={doFill} disabled={busy || !session}
+                  style={{width:'100%', marginBottom:'8px'}}>
+            ✍️ 填寫並產生 PDF
+          </button>
 
-        {resultUrl && (
-          <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginBottom:'8px'}}>
-            ⬇ 下載 PDF
-          </a>
-        )}
+          {resultUrl && (
+            <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginBottom:'8px', background:'rgba(46,130,93,0.1)', border:'1.5px solid var(--primary)', color:'var(--primary)'}}>
+              ⬇ 下載填寫後的 PDF
+            </a>
+          )}
 
-        {msg && <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'10px', lineHeight:1.5}}>{msg}</div>}
+          {msg && <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'10px', lineHeight:1.5}}>{msg}</div>}
 
-        <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'12px', lineHeight:1.5, padding:'10px', background:'#fff4d6', borderRadius:'6px'}}>
-          <b>Beta 版說明：</b><br/>
-          自動依輸入型態選擇 backend：<br/>
-          1. AcroForm PDF → pypdf（最精準）<br/>
-          2. 文字 PDF → pdfplumber 啟發式<br/>
-          3. 掃描影像 → Gemini Vision
+          <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'12px', lineHeight:1.5, padding:'10px', background:'var(--line-very-soft)', borderRadius:'6px'}}>
+            <b>說明：</b>自動依輸入型態選擇最佳解析方式（AcroForm / pdfplumber 文字層 / AI Vision）。在左側點選、拖曳或縮放框線，可精準微調填寫位置。
+          </div>
         </div>
+
+        {fields.length > 0 && (
+          <div className="card" style={{padding:'14px', flex:1, display:'flex', flexDirection:'column', maxHeight:'450px'}}>
+            <div className="label" style={{marginBottom:'10px'}}>
+              欄位資料填寫（{fields.length}）
+            </div>
+            <div style={{overflowY:'auto', flex:1, display:'flex', flexDirection:'column', gap:'6px', paddingRight:'4px'}}>
+              {fields.map(f => {
+                const isActive = f.name === activeFieldId;
+                return (
+                  <div
+                    key={f.name}
+                    style={{
+                      display:'flex',
+                      flexDirection:'column',
+                      gap:'4px',
+                      padding:'8px',
+                      borderRadius:'6px',
+                      border:`1px solid ${isActive ? 'var(--primary)' : 'var(--line-very-soft)'}`,
+                      backgroundColor: isActive ? 'var(--line-very-soft)' : 'transparent',
+                      transition:'all 0.15s'
+                    }}
+                    onClick={() => setActiveFieldId(f.name)}
+                  >
+                    <div style={{display:'flex', justifyContent:'between', alignItems:'center'}}>
+                      <span style={{fontSize:'12px', fontWeight:600}}>{f.label || f.name}</span>
+                      <span style={{fontSize:'9px', color:'var(--ink-3)', marginLeft:'auto'}}>
+                        p{f.page+1} · {f.field_type} · {(f.confidence*100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <input
+                      className="input"
+                      value={values[f.name] || ''}
+                      onChange={e=>setValues({...values, [f.name]: e.target.value})}
+                      onFocus={() => setActiveFieldId(f.name)}
+                      placeholder={f.suggested_value || ''}
+                      style={{fontSize:'13px', padding:'4px 8px'}}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1336,4 +1682,4 @@ function DSettings(){
   );
 }
 
-Object.assign(window, { DesktopShell });
+Object.assign(window, { DesktopShell, FormVisualEditor });
