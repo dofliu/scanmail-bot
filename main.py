@@ -1,7 +1,12 @@
 """ScanMail+ — 智慧文件處理平台 (FastAPI App Factory)"""
 import logging
+import mimetypes
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Explicitly register mime types to avoid Windows Registry overrides (.js served as text/plain)
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 
 from fastapi import FastAPI, Depends
 from fastapi.staticfiles import StaticFiles
