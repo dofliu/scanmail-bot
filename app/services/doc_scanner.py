@@ -114,12 +114,12 @@ def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int,
     # 面積分：偏好 10%~60%
     if ratio < 0.05:
         area_s = 0
-    elif ratio < 0.10:
-        area_s = (ratio - 0.05) / 0.05 * 0.5
-    elif ratio < 0.60:
-        area_s = 0.5 + 0.5 * (1.0 - abs(ratio - 0.30) / 0.30)
-    elif ratio < 0.80:
-        area_s = 0.5 * (1.0 - (ratio - 0.60) / 0.20)
+    elif ratio < 0.15:
+        area_s = (ratio - 0.05) / 0.10
+    elif ratio < 0.65:
+        area_s = 1.0
+    elif ratio < 0.85:
+        area_s = 1.0 - (ratio - 0.65) / 0.20
     else:
         area_s = 0
 
@@ -146,7 +146,12 @@ def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int,
         aspect = min(w_avg, h_avg) / max(w_avg, h_avg)
     else:
         aspect = 0
-    aspect_s = max(0, 1.0 - abs(aspect - 0.72) * 2.5)
+    
+    # 偏好常見文件/卡片寬高比 (0.4 到 1.0 之間都不扣分)
+    if 0.4 <= aspect <= 1.0:
+        aspect_s = 1.0
+    else:
+        aspect_s = max(0, 1.0 - min(abs(aspect - 0.4), abs(aspect - 1.0)) * 2.5)
 
     geo_score = area_s * 0.30 + rectangularity * 0.30 + border_s * 0.25 + aspect_s * 0.15
 
@@ -262,6 +267,106 @@ def _score_edge_gradient(gray: np.ndarray, corners: np.ndarray,
         return avg_grad / 20.0 * 0.3
 
 
+def _intersect_lines(l1: dict, l2: dict) -> Optional[tuple[float, float]]:
+    """Find intersection of two lines Ax + By + C = 0"""
+    D = l1["A"] * l2["B"] - l2["A"] * l1["B"]
+    if abs(D) < 1e-5:
+        return None
+    x = (l1["B"] * l2["C"] - l2["B"] * l1["C"]) / D
+    y = (l2["A"] * l1["C"] - l1["A"] * l2["C"]) / D
+    return (x, y)
+
+
+def _reconstruct_quad_from_poly(poly: np.ndarray, img_w: int, img_h: int) -> Optional[np.ndarray]:
+    """
+    Given a polygon with 5 or 6 vertices, find the best 4 lines (edges) and
+    compute their intersections to reconstruct a 4-cornered quad.
+    """
+    import itertools
+    pts = poly.reshape(-1, 2)
+    n = len(pts)
+    if n not in (5, 6):
+        return None
+
+    # Compute edges and classify as horizontal or vertical
+    edges = []
+    horizontals = []
+    verticals = []
+
+    for i in range(n):
+        p1 = pts[i]
+        p2 = pts[(i + 1) % n]
+        dx = p2[0] - p1[0]
+        dy = p2[1] - p1[1]
+        length = math.hypot(dx, dy)
+        if length < 1e-3:
+            continue
+        
+        # Represent line as Ax + By + C = 0
+        A = dy
+        B = -dx
+        C = dx * p1[1] - dy * p1[0]
+        
+        edge_info = {
+            "p1": p1,
+            "p2": p2,
+            "A": A,
+            "B": B,
+            "C": C,
+            "length": length,
+            "is_horizontal": abs(dx) > abs(dy)
+        }
+        edges.append(edge_info)
+        if edge_info["is_horizontal"]:
+            horizontals.append(edge_info)
+        else:
+            verticals.append(edge_info)
+
+    # We need to choose exactly 2 horizontal lines and 2 vertical lines
+    if len(horizontals) < 2 or len(verticals) < 2:
+        return None
+
+    best_reconstructed = None
+    best_reconstructed_score = -1.0
+
+    # Try all combinations of 2 horizontals and 2 verticals
+    for h1, h2 in itertools.combinations(horizontals, 2):
+        for v1, v2 in itertools.combinations(verticals, 2):
+            pt1 = _intersect_lines(h1, v1)
+            pt2 = _intersect_lines(h1, v2)
+            pt3 = _intersect_lines(h2, v1)
+            pt4 = _intersect_lines(h2, v2)
+
+            if pt1 is None or pt2 is None or pt3 is None or pt4 is None:
+                continue
+
+            quad = np.array([pt1, pt2, pt4, pt3], dtype=np.float32)
+            ordered = _order_points(quad)
+
+            # Check if all points are within a reasonable boundary (allow 15% margin outside image)
+            margin_w = img_w * 0.15
+            margin_h = img_h * 0.15
+            valid_bounds = True
+            for pt in ordered:
+                if not (-margin_w <= pt[0] <= img_w + margin_w and -margin_h <= pt[1] <= img_h + margin_h):
+                    valid_bounds = False
+                    break
+            
+            if not valid_bounds:
+                continue
+
+            # Prioritize the combination of edges that have the maximum total length in the original polygon,
+            # which ensures we reconstruct from the main boundaries instead of cut-off/noise segments.
+            score = h1["length"] + h2["length"] + v1["length"] + v2["length"]
+            if score > best_reconstructed_score:
+                best_reconstructed_score = score
+                best_reconstructed = ordered
+
+    if best_reconstructed is not None:
+        return best_reconstructed.astype(np.int32)
+    return None
+
+
 def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
                     img: np.ndarray = None) -> Optional[tuple]:
     """從二值遮罩中找出最佳的文件四邊形
@@ -280,6 +385,7 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
         if peri < 100:
             continue
 
+        # 1. Standard approximation on raw contour
         for eps in [0.015, 0.02, 0.03, 0.04, 0.05, 0.06]:
             approx = cv2.approxPolyDP(c, eps * peri, True)
             if len(approx) == 4:
@@ -290,8 +396,40 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
                         best_score = score
                         best_pts = pts
                 break
+            elif len(approx) in (5, 6):
+                # Try 5/6-side reconstruction on raw contour
+                reconstructed = _reconstruct_quad_from_poly(approx, img_w, img_h)
+                if reconstructed is not None and _is_valid_doc_quad(reconstructed, img_w, img_h):
+                    score = _score_doc_quad(reconstructed, img_w, img_h, img)
+                    if score > best_score:
+                        best_score = score
+                        best_pts = reconstructed
+                    break
 
-        # 最小外接矩形 fallback
+        # 2. Convex Hull approximation (to bridge finger/occlusion dents)
+        hull = cv2.convexHull(c)
+        hull_peri = cv2.arcLength(hull, True)
+        for eps in [0.015, 0.02, 0.03, 0.04, 0.05, 0.06]:
+            approx_hull = cv2.approxPolyDP(hull, eps * hull_peri, True)
+            if len(approx_hull) == 4:
+                pts = approx_hull.reshape(4, 2)
+                if _is_valid_doc_quad(pts, img_w, img_h):
+                    score = _score_doc_quad(pts, img_w, img_h, img)
+                    if score > best_score:
+                        best_score = score
+                        best_pts = pts
+                break
+            elif len(approx_hull) in (5, 6):
+                # Try 5/6-side reconstruction on convex hull
+                reconstructed = _reconstruct_quad_from_poly(approx_hull, img_w, img_h)
+                if reconstructed is not None and _is_valid_doc_quad(reconstructed, img_w, img_h):
+                    score = _score_doc_quad(reconstructed, img_w, img_h, img)
+                    if score > best_score:
+                        best_score = score
+                        best_pts = reconstructed
+                    break
+
+        # 3. 最小外接矩形 fallback
         c_area = cv2.contourArea(c)
         if c_area > img_w * img_h * 0.05:
             rect = cv2.minAreaRect(c)

@@ -103,6 +103,68 @@ class TestDocScanner:
         result = scan_document(data, auto_detect=False)
         assert result["image"] is not None
 
+    def test_reconstruct_quad_from_pentagon(self):
+        from app.services.doc_scanner import _reconstruct_quad_from_poly
+        # Define a pentagon that represents a 400x300 rectangle with the bottom-left corner cut off
+        # Original: (100, 100), (500, 100), (500, 400), (100, 400)
+        # Cut corner between (100, 350) and (150, 400)
+        poly = np.array([
+            [100, 100],
+            [500, 100],
+            [500, 400],
+            [150, 400],
+            [100, 350]
+        ], dtype=np.int32)
+        
+        reconstructed = _reconstruct_quad_from_poly(poly, 800, 600)
+        assert reconstructed is not None
+        assert len(reconstructed) == 4
+        
+        # Check that the reconstructed corners match the original rectangle corners
+        # Ordering is: TL, TR, BR, BL
+        expected = np.array([[100, 100], [500, 100], [500, 400], [100, 400]], dtype=np.float32)
+        np.testing.assert_allclose(reconstructed, expected, atol=1.0)
+
+    def test_reconstruct_quad_from_hexagon(self):
+        from app.services.doc_scanner import _reconstruct_quad_from_poly
+        # Define a hexagon that represents a 400x300 rectangle with two corners cut off:
+        # Bottom-left: cut between (100, 350) and (150, 400)
+        # Top-right: cut between (450, 100) and (500, 150)
+        poly = np.array([
+            [100, 100],
+            [450, 100],
+            [500, 150],
+            [500, 400],
+            [150, 400],
+            [100, 350]
+        ], dtype=np.int32)
+        
+        reconstructed = _reconstruct_quad_from_poly(poly, 800, 600)
+        assert reconstructed is not None
+        assert len(reconstructed) == 4
+        
+        expected = np.array([[100, 100], [500, 100], [500, 400], [100, 400]], dtype=np.float32)
+        np.testing.assert_allclose(reconstructed, expected, atol=1.0)
+
+    def test_detect_document_edges_with_finger_occlusion(self):
+        import cv2
+        from app.services.doc_scanner import detect_document_edges
+        # Create an image with a clear document shape, but with a black dent in one corner (simulating a finger blocking the corner)
+        img = np.random.randint(60, 130, (600, 800, 3), dtype=np.uint8)
+        # Draw the document: white rectangle from (200, 100) to (600, 500)
+        cv2.rectangle(img, (200, 100), (600, 500), (240, 240, 235), -1)
+        # Draw a black circle at the bottom-left corner of the document (200, 500) to simulate occlusion
+        cv2.circle(img, (200, 500), 30, (80, 80, 80), -1)
+        
+        _, buf = cv2.imencode('.jpg', img)
+        corners = detect_document_edges(buf.tobytes())
+        assert corners is not None
+        assert len(corners) == 4
+        
+        # Check that the corners are reconstructed close to the original (200, 100), (600, 100), (600, 500), (200, 500)
+        expected = np.array([[200, 100], [600, 100], [600, 500], [200, 500]], dtype=np.float32)
+        np.testing.assert_allclose(corners, expected, atol=15.0)
+
 
 # ══════════════════════════════════════════════════════════════
 # 圖片批次處理
