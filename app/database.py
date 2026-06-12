@@ -95,11 +95,24 @@ CREATE TABLE IF NOT EXISTS sender_profiles (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 表單模板表
+CREATE TABLE IF NOT EXISTS form_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    fingerprint TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    values_json TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(user_id, name)
+);
+
 -- 索引
 CREATE INDEX IF NOT EXISTS idx_contacts_user ON contacts(user_id, frequency DESC);
 CREATE INDEX IF NOT EXISTS idx_history_user ON send_history(user_id, sent_at DESC);
 CREATE INDEX IF NOT EXISTS idx_groups_user ON contact_groups(user_id);
 CREATE INDEX IF NOT EXISTS idx_templates_user ON email_templates(user_id, doc_type);
+CREATE INDEX IF NOT EXISTS idx_form_templates_user ON form_templates(user_id, fingerprint);
 """
 
 

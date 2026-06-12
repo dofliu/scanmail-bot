@@ -36,6 +36,7 @@
     dTool: 'scanmail',
     dSubTool: null,
     dView: 'dashboard',
+    formSession: null,
 
     // Scan flow
     scanStep: 0,

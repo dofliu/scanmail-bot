@@ -390,6 +390,10 @@ const ScanMailAPI = (() => {
     return formData(`${formBase}/detect`, fd);
   }
 
+  function formDetectFromScan() {
+    return json(`${formBase}/detect_from_scan`, {});
+  }
+
   function formSuggest(fields, userId = 'default', contactId = null) {
     const payload = { fields, user_id: userId };
     if (contactId != null) payload.contact_id = contactId;
@@ -406,6 +410,31 @@ const ScanMailAPI = (() => {
 
   function formTaskProgress(taskId) { return `${formBase}/task/${taskId}/progress`; }
   function formTaskDownload(taskId) { return `${formBase}/task/${taskId}/download`; }
+
+  function formSendEmail(taskId, contactIds, subject = '', body = '', filename = '') {
+    return json(`${formBase}/task/${taskId}/send`, {
+      contact_ids: contactIds,
+      subject,
+      body,
+      filename,
+    });
+  }
+
+  function formListTemplates() {
+    return request(`${formBase}/templates`);
+  }
+
+  function formSaveTemplate(name, fields, values) {
+    return json(`${formBase}/templates`, { name, fields, values });
+  }
+
+  function formApplyTemplate(templateId, fields) {
+    return json(`${formBase}/templates/${templateId}/apply`, { fields });
+  }
+
+  function formDeleteTemplate(templateId) {
+    return request(`${formBase}/templates/${templateId}`, { method: 'DELETE' });
+  }
 
   // ══════════════════════════════════════════════
   //  Task progress helper (SSE)
@@ -508,7 +537,8 @@ const ScanMailAPI = (() => {
     renamePreview, renameApply, renTaskProgress, renTaskDownload,
     aiRenameScan, aiRenameApply,
     // Auto Form Fill
-    formDetect, formSuggest, formFill, formTaskProgress, formTaskDownload,
+    formDetect, formDetectFromScan, formSuggest, formFill, formTaskProgress, formTaskDownload,
+    formSendEmail, formListTemplates, formSaveTemplate, formApplyTemplate, formDeleteTemplate,
     // Helpers
     watchTask, downloadBlob, formatBytes, triggerDownload,
   };

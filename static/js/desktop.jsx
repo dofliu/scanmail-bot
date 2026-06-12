@@ -238,6 +238,33 @@ function DScan(){
     setProcessing(false);
   };
 
+  const handleGoToFormFill = async () => {
+    setProcessing(true);
+    try {
+      const r = await window.API.formDetectFromScan();
+      const s = await window.API.formSuggest(r.result.fields);
+      const enrichedResult = { ...r.result, fields: s.fields || r.result.fields };
+      
+      store.set({
+        dView: 'tools',
+        dSubTool: 'form',
+        formSession: {
+          token: r.session_token,
+          result: enrichedResult,
+          values: s.values || {},
+          filename: r.filename,
+          matchedTemplateId: r.matched_template?.id || ''
+        }
+      });
+      
+      store.toast('✓ 成功載入掃描表單！', 'ok');
+    } catch (e) {
+      store.toast('載入表單失敗: ' + e.message, 'err');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
   const doSend = async () => {
     setSending(true);
     try {
@@ -376,9 +403,18 @@ function DScan(){
             {!state.pages.length && <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'6px', textAlign:'center'}}>需先上傳頁面</div>}
             {state.pages.length > 0 && !state.selectedContactIds.length && <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'6px', textAlign:'center'}}>需先選收件人</div>}
           </div>
-        ) : (
           <div className="card" style={{padding:'14px'}}>
-            <DocTypeBadge type={state.aiResult.docType} confidence={state.aiResult.confidence}/>
+            <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
+              <DocTypeBadge type={state.aiResult.docType} confidence={state.aiResult.confidence}/>
+              {state.aiResult.docType === 'form' && (
+                <button className="chip on" style={{
+                  background:'var(--mint-wash)', border:'1.5px solid var(--mint-3)',
+                  color:'var(--mint-4)', cursor:'pointer', display:'flex', alignItems:'center', gap:'4px', padding:'4px 10px', fontSize:'11px', borderRadius:'999px', fontWeight:600
+                }} onClick={handleGoToFormFill}>
+                  📝 自動填寫此表單 →
+                </button>
+              )}
+            </div>
             <div className="label" style={{marginTop:'10px'}}>主旨</div>
             <input ref={subjectRef} className="input" defaultValue={state.aiResult.subject} style={{fontWeight:600, marginTop:'4px'}}/>
             <div className="label" style={{marginTop:'10px'}}>正文</div>
@@ -602,7 +638,10 @@ function DHistory(){
 // ─── TOOLS (desktop) — all connected ──────────────────────
 function DTools(){
   const [state, store] = window.useStore();
-  const [active, setActive] = dUseState(null);
+  const active = state.dSubTool;
+  const setActive = (toolId) => {
+    store.set({ dSubTool: toolId });
+  };
 
   const tools = [
     {id:'image', ic:'🖼️', t:'圖片工具', desc:'縮放、轉檔、壓縮、浮水印', color:'var(--mint-wash)'},
@@ -1463,6 +1502,7 @@ function FormVisualEditor({ file, fields, activeFieldId, setActiveFieldId, onFie
 
 // ─── AUTO FORM FILL (Beta) ────────────────────────────────
 function DToolForm(){
+  const [state, store] = window.useStore();
   const [file, setFile] = dUseState(null);
   const [hint, setHint] = dUseState('');
   const [busy, setBusy] = dUseState(false);
@@ -1472,20 +1512,127 @@ function DToolForm(){
   const [resultUrl, setResultUrl] = dUseState(null);
   const [activeFieldId, setActiveFieldId] = dUseState(null);
 
+  // M7: Templates & Sending states
+  const [templates, setTemplates] = dUseState([]);
+  const [selectedTemplateId, setSelectedTemplateId] = dUseState('');
+  const [templateName, setTemplateName] = dUseState('');
+  const [showSaveTmpl, setShowSaveTmpl] = dUseState(false);
+  
+  const [filledTaskId, setFilledTaskId] = dUseState(null);
+  const [emailSubject, setEmailSubject] = dUseState('');
+  const [emailBody, setEmailBody] = dUseState('');
+  const [emailFilename, setEmailFilename] = dUseState('');
+  const [selectedContactIds, setSelectedContactIds] = dUseState([]);
+  const [sendingEmail, setSendingEmail] = dUseState(false);
+  const [sendMsg, setSendMsg] = dUseState('');
+  const [qContact, setQContact] = dUseState('');
+  const [contactDropdownOpen, setContactDropdownOpen] = dUseState(false);
+
+  const loadTemplates = async () => {
+    try {
+      const r = await window.API.formListTemplates();
+      setTemplates(r.templates || []);
+    } catch (e) {
+      console.error("載入表單模板失敗:", e);
+    }
+  };
+
+  React.useEffect(() => {
+    loadTemplates();
+  }, []);
+
+  React.useEffect(() => {
+    if (state.formSession) {
+      const fs = state.formSession;
+      setSession({ token: fs.token, result: fs.result });
+      setValues(fs.values || {});
+      setFile({ name: fs.filename || 'scanned_form.pdf' });
+      setSelectedTemplateId(fs.matchedTemplateId || '');
+      if (fs.matchedTemplateId) {
+        setMsg('已自動匹配並套用模板');
+      } else {
+        const autoFilledCount = Object.keys(fs.values || {}).length;
+        if (autoFilledCount > 0) {
+          setMsg(`已從掃描結果載入並填寫 ${autoFilledCount} 個欄位`);
+        } else {
+          setMsg('已成功載入掃描表單');
+        }
+      }
+      store.set({ formSession: null });
+    }
+  }, [state.formSession]);
+
   const doDetect = async () => {
     if (!file) return;
     setBusy(true); setMsg('偵測欄位中…');
     setSession(null); setValues({}); setResultUrl(null); setActiveFieldId(null);
+    setFilledTaskId(null); setSendMsg(''); setSelectedContactIds([]);
     try {
       const r = await window.API.formDetect(file, hint);
       setMsg(`使用 backend: ${r.result.backend_used} · 偵測到 ${r.result.fields.length} 個欄位`);
+      if (r.matched_template) {
+        setMsg(prev => `${prev}（已自動匹配並套用模板「${r.matched_template.name}」）`);
+        setSelectedTemplateId(r.matched_template.id);
+      } else {
+        setSelectedTemplateId('');
+      }
       const s = await window.API.formSuggest(r.result.fields);
       const enrichedResult = {...r.result, fields: s.fields || r.result.fields};
       setSession({token: r.session_token, result: enrichedResult});
       setValues(s.values || {});
-      if (s.matched > 0) setMsg(prev => `${prev}（已自動填 ${s.matched} 個）`);
+      if (s.matched > 0 && !r.matched_template) setMsg(prev => `${prev}（已自動填 ${s.matched} 個）`);
     } catch(e) {
       setMsg(`偵測失敗：${e.message}`);
+    }
+    setBusy(false);
+  };
+
+  const handleTemplateChange = async (id) => {
+    setSelectedTemplateId(id);
+    if (!id || !session) return;
+    setBusy(true); setMsg('正在套用模板...');
+    try {
+      const r = await window.API.formApplyTemplate(id, session.result.fields);
+      setSession(prev => ({
+        ...prev,
+        result: { ...prev.result, fields: r.fields }
+      }));
+      setValues(r.values || {});
+      setMsg(`已套用模板: ${r.template_name}`);
+    } catch (e) {
+      setMsg(`套用失敗：${e.message}`);
+    }
+    setBusy(false);
+  };
+
+  const handleSaveTemplate = async () => {
+    if (!session || !templateName.trim()) return;
+    setBusy(true); setMsg('正在儲存模板...');
+    try {
+      const r = await window.API.formSaveTemplate(templateName.trim(), session.result.fields, values);
+      setMsg(`模板「${templateName.trim()}」儲存成功！`);
+      setShowSaveTmpl(false);
+      setTemplateName('');
+      await loadTemplates();
+      if (r.template_id) {
+        setSelectedTemplateId(r.template_id);
+      }
+    } catch (e) {
+      setMsg(`儲存失敗：${e.message}`);
+    }
+    setBusy(false);
+  };
+
+  const handleDeleteTemplate = async (id) => {
+    if (!confirm("確定要刪除此模板嗎？")) return;
+    setBusy(true); setMsg('正在刪除模板...');
+    try {
+      await window.API.formDeleteTemplate(id);
+      setMsg('模板已刪除');
+      setSelectedTemplateId('');
+      await loadTemplates();
+    } catch (e) {
+      setMsg(`刪除失敗：${e.message}`);
     }
     setBusy(false);
   };
@@ -1493,17 +1640,43 @@ function DToolForm(){
   const doFill = async () => {
     if (!session) return;
     setBusy(true); setMsg('產生填寫後的 PDF…');
+    setFilledTaskId(null); setSendMsg('');
     try {
       const r = await window.API.formFill(session.token, session.result.fields, values);
       await window.API.watchTask(window.API.formTaskProgress(r.task_id), p => {
         if (p.message) setMsg(p.message);
       });
       setResultUrl(window.API.formTaskDownload(r.task_id));
-      setMsg('完成！可下載填寫後的 PDF。');
+      setFilledTaskId(r.task_id);
+      setMsg('完成！可下載填寫後的 PDF 或在下方直接寄送。');
+      
+      // Auto-populate email details
+      const baseName = file.name.replace(/\.[^/.]+$/, "");
+      setEmailSubject(`【表單】${baseName} (已填寫)`);
+      setEmailFilename(`filled_${baseName}.pdf`);
+      setEmailBody("您好，\n\n附件為自動填寫之表單，請查收。\n\n謝謝。");
     } catch(e) {
       setMsg(`填寫失敗：${e.message}`);
     }
     setBusy(false);
+  };
+
+  const handleSendEmail = async () => {
+    if (!filledTaskId || selectedContactIds.length === 0) return;
+    setSendingEmail(true); setSendMsg('正在發送郵件...');
+    try {
+      const r = await window.API.formSendEmail(filledTaskId, selectedContactIds, emailSubject, emailBody, emailFilename);
+      if (r.success) {
+        setSendMsg(`寄送成功！共成功 ${r.success_count} 人，失敗 ${r.fail_count} 人。`);
+        store.loadContacts();
+        store.loadHistory();
+      } else {
+        setSendMsg(`寄送失敗：${r.results?.[0]?.message || '請檢查 SMTP 設定'}`);
+      }
+    } catch (e) {
+      setSendMsg(`寄送失敗：${e.message}`);
+    }
+    setSendingEmail(false);
   };
 
   const fields = session?.result?.fields || [];
@@ -1520,7 +1693,7 @@ function DToolForm(){
           <div className="card" style={{padding:'16px', display:'flex', flexDirection:'column', background:'var(--paper)', minHeight:'520px'}}>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px'}}>
               <div className="hand" style={{fontWeight:700, fontSize:'16px'}}>表單影像與視覺微調</div>
-              <button className="btn text" style={{padding:'2px 8px', color:'#d32f2f'}} onClick={() => { setFile(null); setSession(null); setValues({}); setResultUrl(null); setActiveFieldId(null); }}>
+              <button className="btn text" style={{padding:'2px 8px', color:'#d32f2f', minWidth:'auto'}} onClick={() => { setFile(null); setSession(null); setValues({}); setResultUrl(null); setActiveFieldId(null); setFilledTaskId(null); setSendMsg(''); }}>
                 🗑️ 清除表單
               </button>
             </div>
@@ -1548,7 +1721,26 @@ function DToolForm(){
 
       <div style={{display:'flex', flexDirection:'column', gap:'12px'}}>
         <div className="card" style={{padding:'16px'}}>
-          <div className="label" style={{marginBottom:'10px'}}>動作</div>
+          <div className="label" style={{marginBottom:'10px'}}>動作與模板</div>
+          
+          {/* M7: Template selection UI */}
+          <div style={{marginBottom:'10px'}}>
+            <div className="field-label" style={{marginTop:0}}>套用表單模板</div>
+            <div style={{display:'flex', gap:'8px'}}>
+              <select className="input" value={selectedTemplateId} onChange={e => handleTemplateChange(e.target.value)} style={{flex:1, fontSize:'13px'}} disabled={!session}>
+                <option value="">-- 選擇已儲存之模板 --</option>
+                {templates.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              {selectedTemplateId && (
+                <button className="btn text" style={{color:'#d32f2f', padding:'0 8px', minWidth:'auto'}} onClick={() => handleDeleteTemplate(selectedTemplateId)}>
+                  🗑️
+                </button>
+              )}
+            </div>
+          </div>
+
           <div className="field-label">表單提示（選填，給 AI 用）</div>
           <input className="input" value={hint} onChange={e=>setHint(e.target.value)}
                  placeholder="例：差旅費報銷單" style={{marginBottom:'10px'}}/>
@@ -1562,6 +1754,30 @@ function DToolForm(){
             ✍️ 填寫並產生 PDF
           </button>
 
+          {/* M7: Save template UI */}
+          {session && (
+            <div style={{marginTop:'4px', marginBottom:'8px'}}>
+              {!showSaveTmpl ? (
+                <button className="btn" style={{width:'100%', background:'var(--line-very-soft)', border:'1px solid var(--line-soft)', color:'var(--ink)'}} onClick={() => setShowSaveTmpl(true)}>
+                  💾 儲存此配置為模板
+                </button>
+              ) : (
+                <div style={{padding:'10px', background:'var(--line-very-soft)', borderRadius:'6px', border:'1px solid var(--line-soft)'}}>
+                  <div className="field-label" style={{marginTop:0, fontSize:'11px'}}>模板名稱</div>
+                  <input className="input" value={templateName} onChange={e=>setTemplateName(e.target.value)} placeholder="例：勤益請假表" style={{marginBottom:'8px', fontSize:'12px', padding:'4px 8px'}}/>
+                  <div style={{display:'flex', gap:'6px'}}>
+                    <button className="btn primary" style={{flex:1, fontSize:'11px', padding:'4px'}} onClick={handleSaveTemplate} disabled={!templateName.trim()}>
+                      儲存
+                    </button>
+                    <button className="btn" style={{flex:1, fontSize:'11px', padding:'4px'}} onClick={() => { setShowSaveTmpl(false); setTemplateName(''); }}>
+                      取消
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {resultUrl && (
             <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginBottom:'8px', background:'rgba(46,130,93,0.1)', border:'1.5px solid var(--primary)', color:'var(--primary)'}}>
               ⬇ 下載填寫後的 PDF
@@ -1571,11 +1787,79 @@ function DToolForm(){
           {msg && <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'10px', lineHeight:1.5}}>{msg}</div>}
 
           <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'12px', lineHeight:1.5, padding:'10px', background:'var(--line-very-soft)', borderRadius:'6px'}}>
-            <b>說明：</b>自動依輸入型態選擇最佳解析方式（AcroForm / pdfplumber 文字層 / AI Vision）。在左側點選、拖曳或縮放框線，可精準微調填寫位置。
+            <b>說明：</b>自動依輸入型態選擇最佳解析方式。點選、拖曳或縮放左側框線，可精準微調。
           </div>
         </div>
 
-        {fields.length > 0 && (
+        {/* M7: Email Send Panel */}
+        {filledTaskId && (
+          <div className="card mint" style={{padding:'14px', border:'1px solid var(--mint-soft)'}}>
+            <div style={{fontWeight:700, fontSize:'14px', marginBottom:'8px', color:'var(--mint-4)', display:'flex', alignItems:'center', gap:'4px'}}>
+              📤 寄送表單電子郵件
+            </div>
+            
+            <div className="field-label" style={{marginTop:0}}>收件聯絡人</div>
+            <div style={{position:'relative', marginBottom:'8px'}}>
+              <div style={{display:'flex', flexWrap:'wrap', gap:'4px', padding:'6px', border:'1px solid var(--line-soft)', borderRadius:'6px', background:'var(--paper)', minHeight:'36px', alignItems:'center', cursor:'text'}} onClick={() => setContactDropdownOpen(true)}>
+                {selectedContactIds.map(cid => {
+                  const c = state.contacts.find(x => x.id === cid);
+                  return c ? (
+                    <span key={cid} className="chip on" style={{margin:0, fontSize:'11px', display:'flex', alignItems:'center', gap:'4px', padding:'2px 6px', background:'var(--mint-wash)', border:'1px solid var(--primary)', color:'var(--primary)'}}>
+                      {c.name}
+                      <span style={{cursor:'pointer', fontWeight:'bold', fontSize:'12px'}} onClick={(e) => { e.stopPropagation(); setSelectedContactIds(selectedContactIds.filter(x => x !== cid)); }}>×</span>
+                    </span>
+                  ) : null;
+                })}
+                <input className="input" placeholder={selectedContactIds.length === 0 ? "搜尋並選擇聯絡人..." : ""} value={qContact} onChange={e => { setQContact(e.target.value); setContactDropdownOpen(true); }} style={{border:'none', flex:1, padding:0, background:'transparent', fontSize:'12px', minWidth:'80px', outline:'none'}}/>
+              </div>
+              
+              {contactDropdownOpen && (
+                <div style={{position:'absolute', top:'100%', left:0, right:0, maxHeight:'180px', overflowY:'auto', border:'1px solid var(--line-soft)', borderRadius:'6px', background:'var(--paper)', zIndex:20, boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
+                  {state.contacts.filter(c => !qContact || c.name.includes(qContact) || c.email.toLowerCase().includes(qContact.toLowerCase())).map(c => {
+                    const isSel = selectedContactIds.includes(c.id);
+                    return (
+                      <div key={c.id} style={{padding:'8px 12px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', fontSize:'12px', borderBottom:'1px solid var(--line-very-soft)', background: isSel ? 'var(--mint-wash)' : 'transparent'}} onClick={() => {
+                        if (isSel) {
+                          setSelectedContactIds(selectedContactIds.filter(x => x !== c.id));
+                        } else {
+                          setSelectedContactIds([...selectedContactIds, c.id]);
+                        }
+                        setQContact('');
+                      }}>
+                        <div>
+                          <div style={{fontWeight:600}}>{c.name}</div>
+                          <div style={{fontSize:'10px', color:'var(--ink-3)'}}>{c.email}</div>
+                        </div>
+                        {isSel && <span style={{color:'var(--primary)'}}>✓</span>}
+                      </div>
+                    );
+                  })}
+                  {state.contacts.length === 0 && <div style={{padding:'12px', textAlign:'center', fontSize:'12px', color:'var(--ink-3)'}}>無聯絡人資料</div>}
+                  <div style={{padding:'6px', textAlign:'center', borderTop:'1px solid var(--line-very-soft)', background:'var(--paper-2)'}}>
+                    <button className="chip" style={{fontSize:'10px'}} onClick={() => setContactDropdownOpen(false)}>關閉</button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="field-label">郵件主旨</div>
+            <input className="input" value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="主旨" style={{marginBottom:'8px', fontSize:'12px'}}/>
+
+            <div className="field-label">附件名稱</div>
+            <input className="input" value={emailFilename} onChange={e => setEmailFilename(e.target.value)} placeholder="檔名" style={{marginBottom:'8px', fontSize:'12px'}}/>
+
+            <div className="field-label">說明文字</div>
+            <textarea className="input" value={emailBody} onChange={e => setEmailBody(e.target.value)} rows={3} placeholder="請輸入郵件內文..." style={{fontSize:'12px', lineHeight:1.5, resize:'vertical', marginBottom:'10px'}}/>
+
+            <button className="btn primary" style={{width:'100%'}} disabled={sendingEmail || selectedContactIds.length === 0} onClick={handleSendEmail}>
+              {sendingEmail ? '⏳ 寄送中...' : '📤 寄送表單 PDF'}
+            </button>
+
+            {sendMsg && <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'6px', lineHeight:1.4}}>{sendMsg}</div>}
+          </div>
+        )}
+
+        {fields.length > 0 && !filledTaskId && (
           <div className="card" style={{padding:'14px', flex:1, display:'flex', flexDirection:'column', maxHeight:'450px'}}>
             <div className="label" style={{marginBottom:'10px'}}>
               欄位資料填寫（{fields.length}）

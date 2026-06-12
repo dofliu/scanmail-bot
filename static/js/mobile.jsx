@@ -558,6 +558,34 @@ function MScanPreview(){
 
   const contacts = state.selectedContactIds.map(id => state.contacts.find(c => c.id === id)).filter(Boolean);
 
+  const [busy, setBusy] = mUseState(false);
+
+  const handleGoToFormFill = async () => {
+    setBusy(true);
+    try {
+      const r = await window.API.formDetectFromScan();
+      const s = await window.API.formSuggest(r.result.fields);
+      const enrichedResult = { ...r.result, fields: s.fields || r.result.fields };
+      
+      store.set({
+        formSession: {
+          token: r.session_token,
+          result: enrichedResult,
+          values: s.values || {},
+          filename: r.filename,
+          matchedTemplateId: r.matched_template?.id || ''
+        }
+      });
+      
+      store.mGoto('tool-form');
+      store.toast('✓ 成功載入掃描表單！', 'ok');
+    } catch (e) {
+      store.toast('載入表單失敗: ' + e.message, 'err');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const doSend = async () => {
     setSending(true);
     try {
@@ -573,7 +601,7 @@ function MScanPreview(){
     <>
       <MHeader title="預覽確認" back subt="檢查無誤後寄出"
         actions={
-          <button className="pill primary" style={{fontSize:'12px', padding:'6px 14px'}} disabled={sending} onClick={doSend}>
+          <button className="pill primary" style={{fontSize:'12px', padding:'6px 14px'}} disabled={sending || busy} onClick={doSend}>
             {sending ? '寄送中...' : '寄出 ✓'}
           </button>
         }/>
@@ -581,8 +609,17 @@ function MScanPreview(){
         <div className="card" style={{padding:'14px', marginBottom:'12px'}}>
           <div className="row between" style={{marginBottom:'8px'}}>
             <DocTypeBadge type={r.docType} confidence={r.confidence}/>
-            <button onClick={() => setEditing(!editing)} className="chip">{editing?'完成':'編輯'}</button>
+            <button onClick={() => setEditing(!editing)} className="chip" disabled={busy}>{editing?'完成':'編輯'}</button>
           </div>
+          {r.docType === 'form' && (
+            <button className="btn" style={{
+              width:'100%', marginBottom:'12px', background:'var(--mint-wash)',
+              border:'1.5px solid var(--mint-3)', color:'var(--mint-4)',
+              fontSize:'12.5px', padding:'6px 10px', fontWeight:600
+            }} onClick={handleGoToFormFill} disabled={busy || sending}>
+              {busy ? '⏳ 處理中...' : '📝 自動填寫此表單 →'}
+            </button>
+          )}
           <div style={{fontSize:'10px', color:'var(--ink-3)', marginBottom:'2px'}}>主旨</div>
           {editing ? (
             <input ref={subjectRef} className="input" defaultValue={r.subject} style={{fontSize:'14px', fontWeight:600, marginBottom:'10px'}}/>
@@ -1353,6 +1390,7 @@ function MToolRename(){
 
 // ─── TOOL: AUTO FORM FILL (Beta) ───────────────────────────
 function MToolForm(){
+  const [state, store] = window.useStore();
   const [file, setFile] = mUseState(null);
   const [hint, setHint] = mUseState('');
   const [busy, setBusy] = mUseState(false);
@@ -1362,6 +1400,22 @@ function MToolForm(){
   const [resultUrl, setResultUrl] = mUseState(null);
   const [activeFieldId, setActiveFieldId] = mUseState(null);
   const [showVisual, setShowVisual] = mUseState(false);
+
+  React.useEffect(() => {
+    if (state.formSession) {
+      const fs = state.formSession;
+      setSession({ token: fs.token, result: fs.result });
+      setValues(fs.values || {});
+      setFile({ name: fs.filename || 'scanned_form.pdf' });
+      const autoFilledCount = Object.keys(fs.values || {}).length;
+      if (autoFilledCount > 0) {
+        setMsg(`已從掃描結果載入並填寫 ${autoFilledCount} 個欄位`);
+      } else {
+        setMsg(`已成功載入掃描表單`);
+      }
+      store.set({ formSession: null });
+    }
+  }, [state.formSession]);
 
   const onPick = (e) => {
     const f = e.target.files && e.target.files[0];
