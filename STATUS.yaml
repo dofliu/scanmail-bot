@@ -1,9 +1,9 @@
 name: ScanMail+
 name_zh: 文件掃描郵件平台
 category: personal_tools
-progress: 90
+progress: 95
 status: production
-last_updated: "2026-06-04"
+last_updated: "2026-06-13"
 next_milestone: "Docker deployment + security hardening"
 technologies:
   - Python
@@ -14,4 +14,5 @@ outputs:
   - tool
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "81 API endpoints, 8 tool categories, 163 tests"
+key_metrics: "81 API endpoints, 8 tool categories, 178 tests"
+
