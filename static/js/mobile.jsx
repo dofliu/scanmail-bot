@@ -355,13 +355,27 @@ function MScanCrop(){
       </div>
       <div style={{flex:1, display:'flex', flexDirection:'column', minHeight:0}}>
         <div style={{flex:1, background:'var(--paper-2)', padding:'16px', display:'flex', alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden'}}>
-          {imgSrc ? (
-            <img src={imgSrc} style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain', borderRadius:'4px', boxShadow:'0 2px 12px rgba(0,0,0,0.12)'}}/>
+          {phase === 'crop' ? (
+            state.scanOriginalDataUrl ? (
+              <CropEditor
+                imageSrc={state.scanOriginalDataUrl}
+                corners={state.detectedCorners}
+                imgW={state.imageWidth}
+                imgH={state.imageHeight}
+                onChange={(newCorners) => store.set({detectedCorners: newCorners})}
+              />
+            ) : (
+              <LoadingSpinner text="載入中..."/>
+            )
           ) : (
-            <LoadingSpinner text="載入中..."/>
+            imgSrc ? (
+              <img src={imgSrc} style={{maxWidth:'100%', maxHeight:'100%', objectFit:'contain', borderRadius:'4px', boxShadow:'0 2px 12px rgba(0,0,0,0.12)'}}/>
+            ) : (
+              <LoadingSpinner text="載入中..."/>
+            )
           )}
           {processing && (
-            <div style={{position:'absolute', inset:0, background:'rgba(255,255,255,0.7)', display:'flex', alignItems:'center', justifyContent:'center'}}>
+            <div style={{position:'absolute', inset:0, background:'rgba(255,255,255,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex: 12}}>
               <LoadingSpinner text="掃描處理中..."/>
             </div>
           )}

@@ -48,6 +48,20 @@ async def lifespan(app: FastAPI):
             "ENCRYPTION_KEY 仍為公開預設值 — SMTP 密碼等同未加密。"
             "正式部署請在 .env 設定獨立的 ENCRYPTION_KEY。"
         )
+
+    # 離線 OCR 後端熱機
+    try:
+        from app.services.form_fill.backends import paddle_structure
+        if paddle_structure.is_available():
+            logger.info("檢測到本地 PaddleOCR，進行模型初始化熱機...")
+            import numpy as np
+            dummy_img = np.ones((10, 10, 3), dtype=np.uint8) * 255
+            engine = paddle_structure.get_engine()
+            engine(dummy_img)
+            logger.info("PaddleOCR 模型熱機完成")
+    except Exception as e:
+        logger.warning("PaddleOCR 熱機失敗: %s", e)
+
     yield
     cleanup_temp_files()
     logger.info("ScanMail+ 關閉")

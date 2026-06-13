@@ -112,12 +112,12 @@
 - [ ] **M4 真實 API 測試**：對掃描影像跑 Gemini，量 bbox 平均誤差
 - [x] **M5 Mapping UI**：前端 PDF 渲染 + bbox 標示 + 拖曳調整
 - [ ] **M7 整合**：填好的 PDF 接 `/api/send` 直接寄、表單模板儲存（記住欄位對應）
-- [ ] **M6 PaddleOCR**（optional）：本地離線 OCR backend
+- [x] **M6 PaddleOCR**：本地離線 OCR backend（支援 PP-Structure V2 文字與表格邊界偵測及座標 points 轉換，已於 2026/06/13 完成，含 lifespan 熱機與 mock 測試驗證，見 [PADDLEOCR_INTEGRATION.md](file:///D:/Project_CodingSimulation/PersonalHelper/scanmail_bot/docs/PADDLEOCR_INTEGRATION.md)）
 - [ ] **掃描→表單填寫流程整合**：scan AI 辨識 doc_type=form 時提供「→ 自動填寫」按鈕
 
 ### 掃描體驗
 
-- [ ] 裁切即時預覽 — 拖曳角點時即時顯示校正後效果
+- [x] 裁切即時預覽 — 拖曳角點時即時顯示校正後效果
 - [x] 邊界偵測持續優化 — 更多真實場景測試（2026/06/07 已完成六大失真場景自動化評估測試）
 - [x] 邊界偵測優化：改善角點被手指/物體遮擋的辨識度 (Scene 5)
   - [x] 導入凸包 (Convex Hull) 運算修復被遮擋的邊界缺口

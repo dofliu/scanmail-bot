@@ -41,6 +41,358 @@ function CropCorners({ color = 'var(--mint-3)' }){
   );
 }
 
+// ─── Draggable Crop Canvas with Live Preview ───────────────────
+function CropEditor({ imageSrc, corners: parentCorners, imgW, imgH, onChange }) {
+  const canvasRef = useRef(null);
+  const previewCanvasRef = useRef(null);
+  const imgRef = useRef(null);
+  
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const [draggingIdx, setDraggingIdx] = useState(-1);
+  const [naturalWidth, setNaturalWidth] = useState(imgW || 0);
+  const [naturalHeight, setNaturalHeight] = useState(imgH || 0);
+
+  // Load image on src change
+  useEffect(() => {
+    if (!imageSrc) return;
+    setImgLoaded(false);
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      imgRef.current = img;
+      setNaturalWidth(img.naturalWidth);
+      setNaturalHeight(img.naturalHeight);
+      setImgLoaded(true);
+    };
+    img.src = imageSrc;
+  }, [imageSrc]);
+
+  // Compute effective corners
+  const getEffectiveCorners = () => {
+    if (parentCorners && parentCorners.length === 4) {
+      return parentCorners;
+    }
+    const w = naturalWidth || 800;
+    const h = naturalHeight || 600;
+    const m = 0.05;
+    return [
+      [Math.round(w * m), Math.round(h * m)],
+      [Math.round(w * (1 - m)), Math.round(h * m)],
+      [Math.round(w * (1 - m)), Math.round(h * (1 - m))],
+      [Math.round(w * m), Math.round(h * (1 - m))]
+    ];
+  };
+
+  const corners = getEffectiveCorners();
+
+  const getScale = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !naturalWidth || !naturalHeight) return { x: 1, y: 1, dispW: 0, dispH: 0 };
+    const dispW = parseInt(canvas.style.width) || canvas.width;
+    const dispH = parseInt(canvas.style.height) || canvas.height;
+    return {
+      x: dispW / naturalWidth,
+      y: dispH / naturalHeight,
+      dispW,
+      dispH
+    };
+  };
+
+  const drawCropCanvas = () => {
+    const canvas = canvasRef.current;
+    if (!canvas || !imgLoaded || !imgRef.current) return;
+    const ctx = canvas.getContext('2d');
+
+    const wrapper = canvas.parentElement;
+    const maxW = wrapper.clientWidth - 2;
+    const maxH = window.innerHeight * 0.45;
+    const imgW = naturalWidth;
+    const imgH = naturalHeight;
+
+    let dispW = imgW;
+    let dispH = imgH;
+    if (dispW > maxW) {
+      dispH = dispH * (maxW / dispW);
+      dispW = maxW;
+    }
+    if (dispH > maxH) {
+      dispW = dispW * (maxH / dispH);
+      dispH = maxH;
+    }
+    dispW = Math.round(dispW);
+    dispH = Math.round(dispH);
+
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = dispW * dpr;
+    canvas.height = dispH * dpr;
+    canvas.style.width = dispW + 'px';
+    canvas.style.height = dispH + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    ctx.drawImage(imgRef.current, 0, 0, dispW, dispH);
+
+    const scaleX = dispW / imgW;
+    const scaleY = dispH / imgH;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.beginPath();
+    ctx.rect(0, 0, dispW, dispH);
+    ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
+    for (let i = 1; i < 4; i++) {
+      ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
+    }
+    ctx.closePath();
+    ctx.fill('evenodd');
+    ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = 'var(--mint-3, #4ea07c)';
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.moveTo(corners[0][0] * scaleX, corners[0][1] * scaleY);
+    for (let i = 1; i < 4; i++) {
+      ctx.lineTo(corners[i][0] * scaleX, corners[i][1] * scaleY);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+
+    for (let i = 0; i < 4; i++) {
+      const cx = corners[i][0] * scaleX;
+      const cy = corners[i][1] * scaleY;
+      const isActive = (draggingIdx === i);
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, isActive ? 15 : 12, 0, Math.PI * 2);
+      ctx.fillStyle = isActive ? 'rgba(78, 160, 124, 0.95)' : 'rgba(78, 160, 124, 0.75)';
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+      ctx.fillStyle = 'white';
+      ctx.fill();
+    }
+  };
+
+  const drawLivePreview = () => {
+    const previewCanvas = previewCanvasRef.current;
+    if (!previewCanvas || !imgLoaded || !imgRef.current) return;
+    const ctx = previewCanvas.getContext('2d');
+
+    const [tl, tr, br, bl] = corners;
+    const wTop = Math.hypot(tr[0] - tl[0], tr[1] - tl[1]);
+    const wBot = Math.hypot(br[0] - bl[0], br[1] - bl[1]);
+    const hLeft = Math.hypot(bl[0] - tl[0], bl[1] - tl[1]);
+    const hRight = Math.hypot(br[0] - tr[0], br[1] - tr[1]);
+    let outW = Math.round(Math.max(wTop, wBot));
+    let outH = Math.round(Math.max(hLeft, hRight));
+
+    const maxDim = 180;
+    if (outW > maxDim || outH > maxDim) {
+      const ratio = maxDim / Math.max(outW, outH);
+      outW = Math.round(outW * ratio);
+      outH = Math.round(outH * ratio);
+    }
+    outW = Math.max(outW, 40);
+    outH = Math.max(outH, 40);
+
+    previewCanvas.width = outW;
+    previewCanvas.height = outH;
+
+    const gridN = 10;
+    for (let gy = 0; gy < gridN; gy++) {
+      for (let gx = 0; gx < gridN; gx++) {
+        const u0 = gx / gridN, u1 = (gx + 1) / gridN;
+        const v0 = gy / gridN, v1 = (gy + 1) / gridN;
+
+        const s00 = _bilerp(corners, u0, v0);
+        const s10 = _bilerp(corners, u1, v0);
+        const s01 = _bilerp(corners, u0, v1);
+        const s11 = _bilerp(corners, u1, v1);
+
+        const d00 = [u0 * outW, v0 * outH];
+        const d10 = [u1 * outW, v0 * outH];
+        const d01 = [u0 * outW, v1 * outH];
+        const d11 = [u1 * outW, v1 * outH];
+
+        _drawTriangle(ctx, imgRef.current, s00, s10, s01, d00, d10, d01);
+        _drawTriangle(ctx, imgRef.current, s10, s11, s01, d10, d11, d01);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (imgLoaded) {
+      drawCropCanvas();
+      drawLivePreview();
+    }
+  }, [imgLoaded, corners, draggingIdx, naturalWidth, naturalHeight]);
+
+  const getPointerPos = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  };
+
+  const handlePointerDown = (e) => {
+    const pos = getPointerPos(e);
+    const scale = getScale();
+    let minDist = Infinity;
+    let minIdx = -1;
+    const threshold = 35;
+
+    for (let i = 0; i < 4; i++) {
+      const cx = corners[i][0] * scale.x;
+      const cy = corners[i][1] * scale.y;
+      const dist = Math.hypot(pos.x - cx, pos.y - cy);
+      if (dist < threshold && dist < minDist) {
+        minDist = dist;
+        minIdx = i;
+      }
+    }
+
+    if (minIdx >= 0) {
+      setDraggingIdx(minIdx);
+      e.preventDefault();
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    if (draggingIdx < 0) return;
+    e.preventDefault();
+    const pos = getPointerPos(e);
+    const scale = getScale();
+    
+    let newX = Math.round(pos.x / scale.x);
+    let newY = Math.round(pos.y / scale.y);
+    newX = Math.max(0, Math.min(naturalWidth, newX));
+    newY = Math.max(0, Math.min(naturalHeight, newY));
+
+    const nextCorners = [...corners];
+    nextCorners[draggingIdx] = [newX, newY];
+    onChange(nextCorners);
+  };
+
+  const handlePointerUp = () => {
+    setDraggingIdx(-1);
+  };
+
+  const _bilerp = (corners, u, v) => {
+    const [tl, tr, br, bl] = corners;
+    const x = (1 - v) * ((1 - u) * tl[0] + u * tr[0]) + v * ((1 - u) * bl[0] + u * br[0]);
+    const y = (1 - v) * ((1 - u) * tl[1] + u * tr[1]) + v * ((1 - u) * bl[1] + u * br[1]);
+    return [x, y];
+  };
+
+  const _drawTriangle = (ctx, img, s0, s1, s2, d0, d1, d2) => {
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(d0[0], d0[1]);
+    ctx.lineTo(d1[0], d1[1]);
+    ctx.lineTo(d2[0], d2[1]);
+    ctx.closePath();
+    ctx.clip();
+
+    const sx0 = s0[0], sy0 = s0[1];
+    const sx1 = s1[0], sy1 = s1[1];
+    const sx2 = s2[0], sy2 = s2[1];
+    const dx0 = d0[0], dy0 = d0[1];
+    const dx1 = d1[0], dy1 = d1[1];
+    const dx2 = d2[0], dy2 = d2[1];
+
+    const det = sx0 * (sy1 - sy2) + sx1 * (sy2 - sy0) + sx2 * (sy0 - sy1);
+    if (Math.abs(det) < 0.001) { ctx.restore(); return; }
+    const idet = 1 / det;
+
+    const a = ((sy1 - sy2) * dx0 + (sy2 - sy0) * dx1 + (sy0 - sy1) * dx2) * idet;
+    const b = ((sx2 - sx1) * dx0 + (sx0 - sx2) * dx1 + (sx1 - sx0) * dx2) * idet;
+    const c = ((sx1 * sy2 - sx2 * sy1) * dx0 + (sx2 * sy0 - sx0 * sy2) * dx1 + (sx0 * sy1 - sx1 * sy0) * dx2) * idet;
+    const d = ((sy1 - sy2) * dy0 + (sy2 - sy0) * dy1 + (sy0 - sy1) * dy2) * idet;
+    const e = ((sx2 - sx1) * dy0 + (sx0 - sx2) * dy1 + (sx1 - sx0) * dy2) * idet;
+    const fVal = ((sx1 * sy2 - sx2 * sy1) * dy0 + (sx2 * sy0 - sx0 * sy2) * dy1 + (sx0 * sy1 - sx1 * sy0) * dy2) * idet;
+
+    ctx.setTransform(a, d, b, e, c, fVal);
+    ctx.drawImage(img, 0, 0);
+    ctx.restore();
+  };
+
+  return (
+    <div style={{
+      position: 'relative',
+      width: '100%',
+      height: '100%',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      overflow: 'hidden'
+    }}>
+      {!imgLoaded && <LoadingSpinner text="載入圖片中..." />}
+      
+      <div style={{ position: 'relative', display: imgLoaded ? 'block' : 'none' }}>
+        <canvas
+          ref={canvasRef}
+          onMouseDown={handlePointerDown}
+          onMouseMove={handlePointerMove}
+          onMouseUp={handlePointerUp}
+          onMouseLeave={handlePointerUp}
+          onTouchStart={(e) => handlePointerDown(e)}
+          onTouchMove={(e) => handlePointerMove(e)}
+          onTouchEnd={handlePointerUp}
+          onTouchCancel={handlePointerUp}
+          style={{ display: 'block', borderRadius: '4px', boxShadow: '0 2px 12px rgba(0,0,0,0.15)', cursor: draggingIdx >= 0 ? 'grabbing' : 'crosshair' }}
+        />
+        
+        {/* Floating Live Preview PiP */}
+        <div style={{
+          position: 'absolute',
+          bottom: '12px',
+          right: '12px',
+          width: '110px',
+          background: 'var(--paper)',
+          border: '1.25px solid var(--line-soft)',
+          borderRadius: '8px',
+          padding: '6px',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '4px',
+          pointerEvents: draggingIdx >= 0 ? 'none' : 'auto',
+          opacity: draggingIdx >= 0 ? 0.35 : 0.95,
+          transition: 'opacity 0.25s',
+          zIndex: 10,
+        }}>
+          <div style={{ fontSize: '9px', fontWeight: 'bold', color: 'var(--ink-3)', letterSpacing: '0.04em' }}>即時裁切預覽</div>
+          <div style={{
+            width: '100%',
+            aspectRatio: '0.72',
+            background: 'var(--paper-2)',
+            borderRadius: '4px',
+            overflow: 'hidden',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            border: '1px solid rgba(0,0,0,0.08)'
+          }}>
+            <canvas ref={previewCanvasRef} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Page thumbnail (real or mock) ──────────────────────────────
 function PageThumb({ page, active, onClick, onRemove, idx }){
   const hasThumb = page.thumb && page.thumb !== 'mock';
@@ -422,7 +774,7 @@ function Toasts({ toasts }){
 
 // ─── Expose ───────────────────────────────────────────────────
 Object.assign(window, {
-  PaperDoc, CropCorners, PageThumb, FilterStrip, DocTypeBadge,
+  PaperDoc, CropCorners, CropEditor, PageThumb, FilterStrip, DocTypeBadge,
   ContactTile, CameraView, Toasts,
   UploadDropzone, LoadingSpinner, ProgressBar, FileList, DownloadResult, ToolProcessor,
 });
