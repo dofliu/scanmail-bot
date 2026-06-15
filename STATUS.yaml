@@ -1,10 +1,10 @@
 name: ScanMail+
 name_zh: 文件掃描郵件平台
 category: personal_tools
-progress: 95
+progress: 98
 status: production
-last_updated: "2026-06-13"
-next_milestone: "Docker deployment + security hardening"
+last_updated: "2026-06-15"
+next_milestone: "Production maintenance & deployment verification"
 technologies:
   - Python
   - FastAPI
