@@ -109,7 +109,7 @@
 
 ### Auto Form Fill — next iteration
 
-- [ ] **M4 真實 API 測試**：對掃描影像跑 Gemini，量 bbox 平均誤差
+- [x] **M4 真實 API 測試**：對掃描影像跑 Gemini，量 bbox 平均誤差（已於 2026/06/13 完成，平均 IoU 0.74，中心點誤差 ~5pt，召回率 100%，參見 [test_gemini_vision_accuracy.py](file:///D:/Project_CodingSimulation/PersonalHelper/scanmail_bot/tests/test_gemini_vision_accuracy.py)）
 - [x] **M5 Mapping UI**：前端 PDF 渲染 + bbox 標示 + 拖曳調整
 - [x] **M7 整合**：填好的 PDF 接 `/api/send` 直接寄、表單模板儲存（記住欄位對應）
 - [x] **M6 PaddleOCR**：本地離線 OCR backend（支援 PP-Structure V2 文字與表格邊界偵測及座標 points 轉換，已於 2026/06/13 完成，含 lifespan 熱機與 mock 測試驗證，見 [PADDLEOCR_INTEGRATION.md](file:///D:/Project_CodingSimulation/PersonalHelper/scanmail_bot/docs/PADDLEOCR_INTEGRATION.md)）

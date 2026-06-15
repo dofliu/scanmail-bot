@@ -14,5 +14,5 @@ outputs:
   - tool
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "81 API endpoints, 8 tool categories, 178 tests"
+key_metrics: "81 API endpoints, 8 tool categories, 179 tests"
 
