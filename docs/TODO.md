@@ -172,6 +172,11 @@
 
 ## 變更日誌
 
+### 2026/06/16 (v3.3.1)
+- 修正 `static/js/desktop.jsx` 於 AI 辨識區塊之 React JSX 語法錯誤。
+- 升級 PWA Service Worker 快取名稱至 `scanmail-v3`，更新 `index.html` 載入版號為 `sw.js?v=3.3.1`。
+- 更新 FastAPI 後端 `main.py` 與 `/health` 端點之版本號至 `3.3.1`。
+
 ### 2026/05/27 (專案改進)
 - Form Fill M4.5：Layer 2 新增表格 cell 偵測（`page.find_tables()`），解決表格式表單失效問題
 - Form Fill M4.6：Layer 2 偵測 0 欄位時自動 fallback 到影像 backend（Gemini）
