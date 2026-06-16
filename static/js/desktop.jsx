@@ -403,6 +403,7 @@ function DScan(){
             {!state.pages.length && <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'6px', textAlign:'center'}}>需先上傳頁面</div>}
             {state.pages.length > 0 && !state.selectedContactIds.length && <div style={{fontSize:'10px', color:'var(--ink-3)', marginTop:'6px', textAlign:'center'}}>需先選收件人</div>}
           </div>
+        ) : (
           <div className="card" style={{padding:'14px'}}>
             <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px'}}>
               <DocTypeBadge type={state.aiResult.docType} confidence={state.aiResult.confidence}/>
