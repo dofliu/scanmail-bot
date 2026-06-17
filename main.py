@@ -18,6 +18,7 @@ from app.database import init_db
 from app.core.file_manager import cleanup_temp_files
 from app.utils.crypto import is_default_key
 from app.core.rate_limiter import rate_limit
+from app.core.auth import get_current_user
 from app.routers import scanmail
 from app.routers import image_tools
 from app.routers import pdf_tools
@@ -26,6 +27,7 @@ from app.routers import gif_tools
 from app.routers import video_tools
 from app.routers import batch_rename
 from app.routers import form_tools
+from app.routers import auth
 
 # Logging
 logging.basicConfig(
@@ -98,14 +100,18 @@ async def health_check():
 
 # ── API 路由掛載 ──
 
-app.include_router(scanmail.router, prefix="/api", tags=["scanmail"], dependencies=[Depends(rate_limit)])
-app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"], dependencies=[Depends(rate_limit)])
-app.include_router(pdf_tools.router, prefix="/api/tools/pdf", tags=["pdf-tools"], dependencies=[Depends(rate_limit)])
-app.include_router(doc_convert.router, prefix="/api/tools/convert", tags=["doc-convert"], dependencies=[Depends(rate_limit)])
-app.include_router(gif_tools.router, prefix="/api/tools/gif", tags=["gif-tools"], dependencies=[Depends(rate_limit)])
-app.include_router(video_tools.router, prefix="/api/tools/video", tags=["video-tools"], dependencies=[Depends(rate_limit)])
-app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch-rename"], dependencies=[Depends(rate_limit)])
-app.include_router(form_tools.router, prefix="/api/tools/form", tags=["form-tools"], dependencies=[Depends(rate_limit)])
+# 身分驗證路由為公開存取
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+
+# 功能性路由均需驗證 Token (當 ENABLE_AUTH=True 時)
+app.include_router(scanmail.router, prefix="/api", tags=["scanmail"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
+app.include_router(image_tools.router, prefix="/api/tools/image", tags=["image-tools"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
+app.include_router(pdf_tools.router, prefix="/api/tools/pdf", tags=["pdf-tools"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
+app.include_router(doc_convert.router, prefix="/api/tools/convert", tags=["doc-convert"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
+app.include_router(gif_tools.router, prefix="/api/tools/gif", tags=["gif-tools"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
+app.include_router(video_tools.router, prefix="/api/tools/video", tags=["video-tools"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
+app.include_router(batch_rename.router, prefix="/api/tools/rename", tags=["batch-rename"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
+app.include_router(form_tools.router, prefix="/api/tools/form", tags=["form-tools"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
 
 
 # ── 靜態檔案（必須放最後，否則會攔截其他路由）──

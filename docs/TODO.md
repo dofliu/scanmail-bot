@@ -131,8 +131,8 @@
 
 ### 部署與維運
 
-- [ ] Docker 容器化部署測試
-- [ ] 使用者認證（多使用者支援）
+- [x] Docker 容器化部署測試
+- [x] 使用者認證（多使用者支援）
 - [x] API Rate Limiting
 - [x] 擴充 pytest 測試覆蓋率 (Sprint 1)
 

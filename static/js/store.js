@@ -75,6 +75,10 @@
 
     toasts: [],
     docTypes, filters,
+
+    // Auth states
+    auth: { enabled: false, authenticated: false, username: null, userId: null },
+    authLoading: true,
   };
 
   let nextId = 100;
@@ -582,11 +586,79 @@
     },
 
     // ═══════════════════════════════════════════
-    //  Init — load all data from API
+    //  Auth Actions
     // ═══════════════════════════════════════════
 
-    async init() {
-      // Load all data in parallel
+    async checkAuth() {
+      state.authLoading = true;
+      notify();
+      try {
+        const res = await window.API.getAuthStatus();
+        state.auth = {
+          enabled: res.enabled || false,
+          authenticated: res.authenticated || false,
+          username: res.username || null,
+          userId: res.user_id || null,
+        };
+        if (!state.auth.enabled || state.auth.authenticated) {
+          await this.initData();
+        }
+      } catch (e) {
+        console.error('Failed to get auth status:', e);
+      } finally {
+        state.authLoading = false;
+        notify();
+      }
+    },
+
+    async login(username, password) {
+      try {
+        const res = await window.API.login(username, password);
+        if (res.token) {
+          localStorage.setItem('session_token', res.token);
+          state.auth.authenticated = true;
+          state.auth.username = username;
+          store.toast('✓ 登入成功', 'ok');
+          await this.initData();
+          notify();
+          return true;
+        }
+      } catch (e) {
+        store.toast(e.message || '登入失敗', 'err');
+      }
+      return false;
+    },
+
+    async register(username, password) {
+      try {
+        await window.API.register(username, password);
+        store.toast('✓ 註冊成功，請登入', 'ok');
+        return true;
+      } catch (e) {
+        store.toast(e.message || '註冊失敗', 'err');
+      }
+      return false;
+    },
+
+    async logout() {
+      try {
+        await window.API.logout();
+        localStorage.removeItem('session_token');
+        state.auth.authenticated = false;
+        state.auth.username = null;
+        state.auth.userId = null;
+        // 清理快取資料
+        state.contacts = [];
+        state.groups = [];
+        state.history = [];
+        notify();
+        store.toast('✓ 已登出', 'ok');
+      } catch (e) {
+        store.toast(e.message || '登出失敗', 'err');
+      }
+    },
+
+    async initData() {
       await Promise.allSettled([
         store.loadContacts(),
         store.loadGroups(),
@@ -594,6 +666,14 @@
         store.loadSettings(),
         store.loadStats(),
       ]);
+    },
+
+    // ═══════════════════════════════════════════
+    //  Init — load all data from API
+    // ═══════════════════════════════════════════
+
+    async init() {
+      await store.checkAuth();
     },
   };
 

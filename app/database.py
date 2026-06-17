@@ -80,6 +80,14 @@ CREATE TABLE IF NOT EXISTS user_sessions (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 使用者帳號表
+CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- 寄件人設定表
 CREATE TABLE IF NOT EXISTS sender_profiles (
     user_id TEXT PRIMARY KEY,

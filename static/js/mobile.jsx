@@ -3,6 +3,28 @@ const { useState: mUseState, useRef: mUseRef, useCallback: mUseCallback } = Reac
 
 function MobileShell(){
   const [state, store] = window.useStore();
+  
+  if (state.auth?.enabled && state.authLoading) {
+    return (
+      <div className="phone">
+        <div className="phone-inner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <window.LoadingSpinner text="正在載入驗證狀態..." />
+        </div>
+      </div>
+    );
+  }
+
+  if (state.auth?.enabled && !state.auth?.authenticated) {
+    return (
+      <div className="phone">
+        <div className="phone-inner">
+          <window.AuthScreen />
+          <window.Toasts toasts={state.toasts}/>
+        </div>
+      </div>
+    );
+  }
+
   const screen = state.mStack[state.mStack.length - 1] || state.mTab;
 
   const renderScreen = () => {
@@ -800,6 +822,9 @@ function MMore(){
     {ic:'📊', label:'統計', sub:'使用量與分析'},
     {ic:'❓', label:'說明'},
   ];
+  if (state.auth?.enabled && state.auth?.authenticated) {
+    items.push({ic:'🚪', label:'登出', sub:`目前使用者: ${state.auth.username}`, action: () => store.logout()});
+  }
   return (
     <>
       <MHeader title="更多"/>
@@ -818,7 +843,10 @@ function MMore(){
         </div>
         <div className="col" style={{gap:'6px'}}>
           {items.map((x,i) => (
-            <div key={i} className="card" style={{padding:'12px 14px', cursor: x.go ? 'pointer' : 'default'}} onClick={() => x.go && store.mGoto(x.go)}>
+            <div key={i} className="card" style={{padding:'12px 14px', cursor: (x.go || x.action) ? 'pointer' : 'default'}} onClick={() => {
+              if (x.go) store.mGoto(x.go);
+              if (x.action) x.action();
+            }}>
               <div className="row">
                 <span style={{fontSize:'20px', width:'32px'}}>{x.ic}</span>
                 <div style={{flex:1}}>

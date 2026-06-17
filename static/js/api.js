@@ -7,6 +7,11 @@ const ScanMailAPI = (() => {
 
   async function request(url, opts = {}) {
     try {
+      const token = localStorage.getItem('session_token');
+      if (token) {
+        opts.headers = opts.headers || {};
+        opts.headers['Authorization'] = `Bearer ${token}`;
+      }
       const res = await fetch(url, opts);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -437,6 +442,26 @@ const ScanMailAPI = (() => {
   }
 
   // ══════════════════════════════════════════════
+  //  Authentication API
+  // ══════════════════════════════════════════════
+
+  function getAuthStatus() {
+    return request('/api/auth/status');
+  }
+
+  function login(username, password) {
+    return json('/api/auth/login', { username, password });
+  }
+
+  function register(username, password) {
+    return json('/api/auth/register', { username, password });
+  }
+
+  function logout() {
+    return json('/api/auth/logout', {});
+  }
+
+  // ══════════════════════════════════════════════
   //  Task progress helper (SSE)
   // ══════════════════════════════════════════════
 
@@ -539,6 +564,8 @@ const ScanMailAPI = (() => {
     // Auto Form Fill
     formDetect, formDetectFromScan, formSuggest, formFill, formTaskProgress, formTaskDownload,
     formSendEmail, formListTemplates, formSaveTemplate, formApplyTemplate, formDeleteTemplate,
+    // Auth
+    getAuthStatus, login, register, logout,
     // Helpers
     watchTask, downloadBlob, formatBytes, triggerDownload,
   };

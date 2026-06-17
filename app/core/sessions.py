@@ -20,8 +20,26 @@ _sessions: dict[str, SessionData] = {}
 
 
 def get_user_id(request: Request) -> str:
-    # 注意：X-User-Id 未經驗證，可被任意 client 偽造。本平台目前無身分驗證，
-    # 僅適合內網/單人使用，請勿在未加驗證層的情況下對公網開放。
+    # 優先使用已驗證的使用者 ID
+    if hasattr(request.state, "user_id"):
+        return request.state.user_id
+        
+    # 若尚未執行 dependencies 驗證 (例如未配置 get_current_user 依賴項)
+    from app.config import get_settings
+    if get_settings().ENABLE_AUTH:
+        from app.core.auth import verify_access_token
+        token = None
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+        if not token:
+            token = request.cookies.get("session_token")
+        if token:
+            uid = verify_access_token(token)
+            if uid:
+                request.state.user_id = uid
+                return uid
+                
     return request.headers.get("X-User-Id", "default_user") or "default_user"
 
 

@@ -3,6 +3,24 @@ const { useState: dUseState, useRef: dUseRef, useCallback: dUseCallback } = Reac
 
 function DesktopShell(){
   const [state, store] = window.useStore();
+
+  if (state.auth?.enabled && state.authLoading) {
+    return (
+      <div className="desktop" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <window.LoadingSpinner text="正在載入驗證狀態..." />
+      </div>
+    );
+  }
+
+  if (state.auth?.enabled && !state.auth?.authenticated) {
+    return (
+      <div className="desktop">
+        <window.AuthScreen />
+        <window.Toasts toasts={state.toasts}/>
+      </div>
+    );
+  }
+
   const view = state.dView;
 
   const renderView = () => {
@@ -87,6 +105,12 @@ function DTopbar(){
         <h1 className="hand" style={{fontSize:'22px', fontWeight:700, lineHeight:1, marginTop:'2px'}}>{titles[state.dView]}</h1>
       </div>
       <div className="row" style={{marginLeft:'auto', gap:'8px'}}>
+        {state.auth?.enabled && state.auth?.authenticated && (
+          <div style={{ marginRight: '16px', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+            <span style={{ color: 'var(--ink-3)' }}>👤 {state.auth.username}</span>
+            <button className="pill" style={{ fontSize: '11px', padding: '2px 8px', cursor: 'pointer' }} onClick={() => store.logout()}>登出</button>
+          </div>
+        )}
         <button className="pill primary" style={{fontSize:'12px'}} onClick={() => {store.startScan(); store.dSetView('scan');}}>＋ 新掃描</button>
       </div>
     </div>

@@ -772,9 +772,238 @@ function Toasts({ toasts }){
   );
 }
 
+// ─── Authentication Screen ───────────────────────────────────
+function AuthScreen() {
+  const [state, store] = window.useStore();
+  const [isRegister, setIsRegister] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!username || !password) {
+      store.toast('請輸入帳號和密碼', 'err');
+      return;
+    }
+    if (isRegister && password !== confirmPassword) {
+      store.toast('密碼與確認密碼不符', 'err');
+      return;
+    }
+
+    setLoading(true);
+    if (isRegister) {
+      const ok = await store.register(username, password);
+      if (ok) {
+        setIsRegister(false);
+        setPassword('');
+        setConfirmPassword('');
+      }
+    } else {
+      await store.login(username, password);
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      zIndex: 99999,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'radial-gradient(circle at center, rgba(31, 42, 36, 0.85) 0%, rgba(18, 28, 23, 0.98) 100%)',
+      backdropFilter: 'blur(16px)',
+      WebkitBackdropFilter: 'blur(16px)',
+      padding: '20px',
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: '400px',
+        background: 'var(--paper)',
+        border: '1px solid var(--line-soft)',
+        borderRadius: '16px',
+        boxShadow: '0 20px 40px rgba(0,0,0,0.3), var(--shadow-paper)',
+        overflow: 'hidden',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+      }}>
+        {/* Top Accent bar */}
+        <div style={{
+          height: '4px',
+          background: 'linear-gradient(90deg, var(--mint) 0%, var(--mint-3) 100%)',
+        }} />
+
+        <div style={{ padding: '32px 24px' }}>
+          {/* Logo / Header */}
+          <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+            <span style={{ fontSize: '48px', display: 'inline-block', marginBottom: '8px' }}>📷</span>
+            <h2 style={{
+              margin: '0 0 6px 0',
+              fontFamily: 'var(--font-body)',
+              color: 'var(--ink)',
+              fontSize: '24px',
+              fontWeight: 700,
+              letterSpacing: '1px',
+            }}>
+              ScanMail<span style={{ color: 'var(--mint-3)' }}>+</span>
+            </h2>
+            <p style={{
+              margin: 0,
+              color: 'var(--ink-3)',
+              fontSize: '13px',
+            }}>
+              {isRegister ? '註冊 ScanMail+ 新帳號' : '登入您的 ScanMail+ 帳號'}
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            <div>
+              <label style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: 'var(--ink-2)',
+                marginBottom: '6px',
+              }}>
+                使用者名稱 (Username)
+              </label>
+              <input
+                type="text"
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+                placeholder="請輸入使用者名稱"
+                disabled={loading}
+                required
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--line-soft)',
+                  background: 'var(--paper-2)',
+                  color: 'var(--ink)',
+                  fontSize: '14px',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                }}
+              />
+            </div>
+
+            <div>
+              <label style={{
+                display: 'block',
+                fontSize: '12px',
+                fontWeight: 600,
+                color: 'var(--ink-2)',
+                marginBottom: '6px',
+              }}>
+                密碼 (Password)
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="請輸入密碼"
+                disabled={loading}
+                required
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--line-soft)',
+                  background: 'var(--paper-2)',
+                  color: 'var(--ink)',
+                  fontSize: '14px',
+                  outline: 'none',
+                  transition: 'border-color 0.2s',
+                }}
+              />
+            </div>
+
+            {isRegister && (
+              <div>
+                <label style={{
+                  display: 'block',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: 'var(--ink-2)',
+                  marginBottom: '6px',
+                }}>
+                  確認密碼 (Confirm Password)
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  placeholder="再次輸入密碼"
+                  disabled={loading}
+                  required
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--line-soft)',
+                    background: 'var(--paper-2)',
+                    color: 'var(--ink)',
+                    fontSize: '14px',
+                    outline: 'none',
+                    transition: 'border-color 0.2s',
+                  }}
+                />
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="btn primary"
+              style={{
+                width: '100%',
+                padding: '12px',
+                borderRadius: '8px',
+                fontSize: '14px',
+                fontWeight: 600,
+                marginTop: '10px',
+                justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              {loading ? '處理中...' : (isRegister ? '註冊帳號' : '登入')}
+            </button>
+          </form>
+
+          {/* Toggle Register/Login link */}
+          <div style={{ textAlign: 'center', marginTop: '20px' }}>
+            <button
+              onClick={() => {
+                setIsRegister(prev => !prev);
+                setPassword('');
+                setConfirmPassword('');
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--mint-3)',
+                cursor: 'pointer',
+                fontSize: '13px',
+                textDecoration: 'underline',
+              }}
+            >
+              {isRegister ? '已經有帳號？點此登入' : '沒有帳號？點此註冊新帳號'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Expose ───────────────────────────────────────────────────
 Object.assign(window, {
   PaperDoc, CropCorners, CropEditor, PageThumb, FilterStrip, DocTypeBadge,
-  ContactTile, CameraView, Toasts,
+  ContactTile, CameraView, Toasts, AuthScreen,
   UploadDropzone, LoadingSpinner, ProgressBar, FileList, DownloadResult, ToolProcessor,
 });

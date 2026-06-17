@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     SESSION_TIMEOUT_MINUTES: int = 30
     MAX_IMAGE_SIZE_MB: int = 10
     LOG_LEVEL: str = "INFO"
+    ENABLE_AUTH: bool = False
 
     # CORS — 允許的來源（逗號分隔，預設全開；正式部署請收斂）
     ALLOWED_ORIGINS: str = "*"
