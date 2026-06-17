@@ -1328,13 +1328,11 @@ function FormPagePreview({ pageNum, pdfDoc, imageUrl, imageSize, isPdf, fields, 
   const [renderedSize, setRenderedSize] = dUseState({ w: 0, h: 0 });
   const [pageSize, setPageSize] = dUseState({ w: 0, h: 0 });
 
+  // 1. 取得 PDF 頁面大小與渲染比例
   React.useEffect(() => {
-    if (!isPdf || !pdfDoc || !canvasRef.current) return;
+    if (!isPdf || !pdfDoc) return;
 
     pdfDoc.getPage(pageNum + 1).then((page) => {
-      const canvas = canvasRef.current;
-      const context = canvas.getContext('2d');
-
       const unscaledViewport = page.getViewport({ scale: 1.0 });
       const pw = unscaledViewport.width;
       const ph = unscaledViewport.height;
@@ -1343,18 +1341,34 @@ function FormPagePreview({ pageNum, pdfDoc, imageUrl, imageSize, isPdf, fields, 
 
       const scale = 500 / pw;
       const viewport = page.getViewport({ scale });
+      setRenderedSize({ w: viewport.width, h: viewport.height });
+    }).catch(err => {
+      console.error("getPage size error:", err);
+    });
+  }, [pdfDoc, pageNum, isPdf]);
+
+  // 2. 當 canvas 節點渲染後，執行實際繪製
+  React.useEffect(() => {
+    if (!isPdf || !pdfDoc || !canvasRef.current || pageSize.w === 0) return;
+
+    pdfDoc.getPage(pageNum + 1).then((page) => {
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
+      const scale = 500 / pageSize.w;
+      const viewport = page.getViewport({ scale });
 
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      setRenderedSize({ w: viewport.width, h: viewport.height });
 
       const renderContext = {
         canvasContext: context,
         viewport: viewport
       };
       page.render(renderContext);
+    }).catch(err => {
+      console.error("render page error:", err);
     });
-  }, [pdfDoc, pageNum, isPdf]);
+  }, [pdfDoc, pageNum, isPdf, pageSize, renderedSize]);
 
   React.useEffect(() => {
     if (isPdf || !imageSize) return;
