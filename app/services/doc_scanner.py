@@ -32,6 +32,12 @@ HED_DIR = Path("data/models/hed")
 PROTO_PATH = HED_DIR / "deploy.prototxt"
 MODEL_PATH = HED_DIR / "hed_pretrained_bsds.caffemodel"
 
+# U-Net Model Configuration
+UNET_PTH_URL = "https://huggingface.co/Lingram/DocuSegment-Pytorch/resolve/main/unet_16.pth"
+UNET_DIR = Path("data/models/unet")
+UNET_PTH_PATH = UNET_DIR / "unet_16.pth"
+UNET_ONNX_PATH = UNET_DIR / "unet_16.onnx"
+
 
 class CropLayer(object):
     """自訂 Crop Layer 用於 OpenCV DNN 載入 HED Caffe 模型"""
@@ -562,6 +568,222 @@ def _detect_edges_hed(img_s: np.ndarray) -> Optional[np.ndarray]:
         return None
 
 
+# ── U-Net Model Definition (for ONNX Export) ──
+# This is a lightweight UNet model with start_channels=16, trained on documents.
+# We define it here so that we can load the weights from the .pth file and export it to ONNX.
+
+try:
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    class UNetConvBlock(nn.Module):
+        def __init__(self, in_channels, out_channels, mid_channels=None):
+            super().__init__()
+            if not mid_channels:
+                mid_channels = out_channels
+            self.conv = nn.Sequential(
+                nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(mid_channels),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+                nn.BatchNorm2d(out_channels),
+                nn.ReLU(inplace=True)
+            )
+        def forward(self, x):
+            return self.conv(x)
+
+    class UNetDown(nn.Module):
+        def __init__(self, in_channels, out_channels):
+            super().__init__()
+            self.pool = nn.Sequential(
+                nn.MaxPool2d(kernel_size=2),
+                UNetConvBlock(in_channels, out_channels)
+            )
+        def forward(self, x):
+            return self.pool(x)
+
+    class UNetUp(nn.Module):
+        def __init__(self, in_channels, out_channels):
+            super().__init__()
+            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.conv = UNetConvBlock(in_channels, out_channels)
+        def forward(self, x, skip):
+            upsampled = self.up(x)
+            diffY = skip.size()[2] - upsampled.size()[2]
+            diffX = skip.size()[3] - upsampled.size()[3]
+            upsampled = F.pad(upsampled, [diffY // 2, diffY - diffX // 2, diffY // 2, diffY - diffX // 2])
+            out = torch.cat([skip, upsampled], dim=1)
+            return self.conv(out)
+
+    class UNetOut(nn.Module):
+        def __init__(self, in_channels, out_channels):
+            super().__init__()
+            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        def forward(self, x):
+            return self.conv(x)
+
+    class UNet(nn.Module):
+        def __init__(self, n_channels, n_classes, n_blocks=4, start=32):
+            super(UNet, self).__init__()
+            self.n_blocks = n_blocks
+            self.n_classes = n_classes
+            self.start = start
+            self.layers = nn.Sequential(
+                UNetConvBlock(n_channels, start),
+                *self.get_blocks(start),
+                UNetOut(start, n_classes)
+            )
+        def forward(self, x):
+            num_layers = len(self.layers)
+            outs = [x]
+            for i in range(0, self.n_blocks + 1):
+                outs.append(self.layers[i].forward(outs[-1]))
+            out = outs.pop()
+            for i in range(self.n_blocks + 1, num_layers - 1):
+                out = self.layers[i].forward(out, outs.pop())
+            logits = self.layers[-1].forward(out)
+            return logits
+        def get_blocks(self, start):
+            blocks = []
+            for i in range(self.n_blocks):
+                start_mult = start * 2 ** i
+                blocks.append(UNetDown(start_mult, start_mult * 2))
+            for i in range(self.n_blocks - 1, -1, -1):
+                start_mult = start * 2 ** i
+                blocks.append(UNetUp(start_mult * 2, start_mult))
+            return blocks
+except ImportError:
+    # PyTorch is not required for inference, only for ONNX conversion on development machine
+    pass
+
+
+_unet_net = None
+
+def ensure_unet_model() -> bool:
+    """確保 U-Net ONNX 模型存在。若不存在但本地有 PyTorch，則下載 .pth 並動態轉換。"""
+    if UNET_ONNX_PATH.exists():
+        return True
+
+    logger.info("未檢測到 U-Net ONNX 模型，嘗試下載與轉換...")
+    success_pth = download_file(UNET_PTH_URL, UNET_PTH_PATH)
+    if not success_pth:
+        logger.error("下載 U-Net .pth 模型失敗")
+        return False
+
+    try:
+        import torch
+        logger.info("檢測到本地 PyTorch，正在進行 .pth -> .onnx 轉換...")
+        
+        # 載入權重並讀取超參數
+        ckpt = torch.load(UNET_PTH_PATH, map_location="cpu")
+        n_blocks = ckpt.get("n_blocks", 4)
+        n_classes = ckpt.get("n_classes", 2)
+        start_channels = ckpt.get("start_channels", 16)
+        
+        # 建構模型
+        model = UNet(n_channels=3, n_classes=n_classes, n_blocks=n_blocks, start=start_channels)
+        model.load_state_dict(ckpt["state_dict"])
+        model.eval()
+        
+        # 導出為 ONNX
+        dummy_input = torch.randn(1, 3, 256, 256)
+        UNET_ONNX_PATH.parent.mkdir(parents=True, exist_ok=True)
+        torch.onnx.export(
+            model,
+            dummy_input,
+            str(UNET_ONNX_PATH),
+            input_names=["input"],
+            output_names=["output"],
+            opset_version=11,
+            do_constant_folding=True
+        )
+        logger.info("成功導出 U-Net ONNX 模型: %s", UNET_ONNX_PATH.name)
+        # 轉換成功後可刪除臨時的 .pth 檔案以釋放空間
+        try:
+            UNET_PTH_PATH.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return True
+    except ImportError:
+        logger.warning("環境中未安裝 PyTorch，無法將 .pth 轉換為 .onnx。請確保手動放置 %s 於本地", UNET_ONNX_PATH.name)
+        return False
+    except Exception as e:
+        logger.error("U-Net ONNX 模型轉換失敗: %s", e)
+        return False
+
+
+def _get_unet_net():
+    """取得或初始化 U-Net 網路模型"""
+    global _unet_net
+    if _unet_net is not None:
+        return _unet_net
+
+    if not ensure_unet_model():
+        logger.warning("U-Net 模型檔案未就緒（將優雅降級）")
+        return None
+
+    if not UNET_ONNX_PATH.exists():
+        logger.warning("U-Net ONNX 模型檔案不存在（將優雅降級）")
+        return None
+
+    try:
+        _unet_net = cv2.dnn.readNetFromONNX(str(UNET_ONNX_PATH))
+        logger.info("成功載入 U-Net ONNX 模型")
+        return _unet_net
+    except Exception as e:
+        logger.error("載入 U-Net ONNX 網路失敗: %s", e)
+        return None
+
+
+def _detect_mask_unet(img_s: np.ndarray) -> Optional[np.ndarray]:
+    """使用 U-Net 模型對文件進行語意分割，輸出二值化遮罩 (255 表示文件，0 表示背景)"""
+    net = _get_unet_net()
+    if net is None:
+        return None
+
+    h, w = img_s.shape[:2]
+
+    try:
+        # U-Net 模型的輸入尺寸為 256x256
+        # 1. 轉為 RGB 格式 (OpenCV 預設是 BGR)
+        img_rgb = cv2.cvtColor(img_s, cv2.COLOR_BGR2RGB)
+        # 2. 縮放到 256x256
+        img_resized = cv2.resize(img_rgb, (256, 256), interpolation=cv2.INTER_LINEAR)
+        # 3. 轉為 float32 並除以 255.0
+        img_float = img_resized.astype(np.float32) / 255.0
+        # 4. 進行 Z-score 正規化
+        mean = np.array([0.4611, 0.4359, 0.3905], dtype=np.float32)
+        std = np.array([0.2193, 0.2150, 0.2109], dtype=np.float32)
+        normalized = (img_float - mean) / std
+        # 5. 轉換成 (1, 3, 256, 256) 的 blob
+        blob = np.transpose(normalized, (2, 0, 1))
+        blob = np.expand_dims(blob, axis=0)
+
+        # 6. 推理
+        net.setInput(blob)
+        out = net.forward() # shape: (1, 2, 256, 256)
+
+        # 7. 後處理：比較 Channel 1 (文件) 與 Channel 0 (背景)
+        ch0 = out[0, 0, :, :]
+        ch1 = out[0, 1, :, :]
+        mask_256 = (ch1 > ch0).astype(np.uint8) * 255
+
+        # 8. 縮放回原始大小 (w, h)
+        mask = cv2.resize(mask_256, (w, h), interpolation=cv2.INTER_NEAREST)
+        
+        # 9. 形態學開合與閉合去噪，縫合孔洞並移除噪點
+        k_s = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        k_l = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, k_s, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_l, iterations=1)
+        
+        return mask
+    except Exception as e:
+        logger.error("U-Net 語意分割推理失敗: %s", e)
+        return None
+
+
 def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
     """偵測圖片中的文件邊界（v3 — 全面重新設計）
 
@@ -584,6 +806,14 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
 
     h, w = img_s.shape[:2]
     candidates = []
+
+    # ── 策略 00：U-Net 文件語意分割 ──
+    unet_mask = _detect_mask_unet(img_s)
+    if unet_mask is not None:
+        result = _find_best_quad(unet_mask, w, h, img_s)
+        if result is not None:
+            pts, s = result
+            candidates.append((s, pts, "UNet_Mask"))
 
     # ── 策略 0：HED 顯著邊緣檢測 ──
     hed_mask = _detect_edges_hed(img_s)

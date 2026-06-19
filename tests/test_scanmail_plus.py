@@ -187,6 +187,27 @@ class TestDocScanner:
         # 輸出應為二值化遮罩 (0 或 255)
         assert np.all((thresh == 0) | (thresh == 255))
 
+    def test_unet_segmentation(self):
+        """測試 U-Net 模型的下載、初始化、ONNX 轉換與推理流程"""
+        from app.services.doc_scanner import _detect_mask_unet, ensure_unet_model, _get_unet_net
+        import cv2
+
+        # 1. 確保模型可正常下載與初始化/轉換
+        assert ensure_unet_model()
+
+        # 2. 確保 ONNX 網路能正常讀取與建構
+        net = _get_unet_net()
+        assert net is not None
+
+        # 3. 建立測試 dummy 圖像進行推理
+        dummy_img = np.ones((256, 256, 3), dtype=np.uint8) * 128
+        cv2.rectangle(dummy_img, (50, 50), (200, 200), (255, 255, 255), -1)
+
+        mask = _detect_mask_unet(dummy_img)
+        assert mask is not None
+        assert mask.shape == (256, 256)
+        # 輸出應為二值化遮罩 (0 或 255)
+        assert np.all((mask == 0) | (mask == 255))
 
 
 # ══════════════════════════════════════════════════════════════

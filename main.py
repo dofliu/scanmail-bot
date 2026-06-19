@@ -75,6 +75,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("HED 邊緣檢測模型下載或熱機失敗: %s", e)
 
+    # 離線 U-Net 語意分割模型下載與熱機
+    try:
+        from app.services.doc_scanner import _get_unet_net, ensure_unet_model
+        logger.info("檢查並預載入 U-Net 語意分割模型...")
+        ensure_unet_model()
+        net = _get_unet_net()
+        if net is not None:
+            logger.info("U-Net 語意分割網路載入完成")
+    except Exception as e:
+        logger.warning("U-Net 語意分割模型下載或熱機失敗: %s", e)
+
     yield
     cleanup_temp_files()
     logger.info("ScanMail+ 關閉")
