@@ -717,9 +717,23 @@ function ToolProcessor({ files, single, batch, getFormParams, taskProgressUrl, t
       if (files.length === 1 && single) {
         setProgress(50);
         const res = await single(files[0]);
-        const blob = await res.blob();
-        setResultBlob(blob);
-        setProgress(100); setMessage('完成！');
+        if (res && res.task_id) {
+          const taskId = res.task_id;
+          setProgress(5); setMessage('排程中...');
+          const progressUrl = taskProgressUrl(taskId);
+          await window.API.watchTask(progressUrl, (data) => {
+            setProgress(data.progress || 0);
+            setMessage(data.message || '');
+          });
+          const downloadUrl = taskDownloadUrl(taskId);
+          const blob = await window.API.downloadBlob(downloadUrl);
+          setResultBlob(blob);
+          setProgress(100); setMessage('完成！');
+        } else {
+          const blob = await res.blob();
+          setResultBlob(blob);
+          setProgress(100); setMessage('完成！');
+        }
       } else if (batch) {
         setProgress(5); setMessage('上傳中...');
         const res = await batch(files);

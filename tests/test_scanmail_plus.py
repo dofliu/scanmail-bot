@@ -345,8 +345,9 @@ class TestModels:
     @pytest.fixture(autouse=True)
     def setup_db(self, tmp_path, monkeypatch):
         db_path = str(tmp_path / "test.db")
+        from app.config import Settings
         monkeypatch.setattr("app.config.get_settings",
-                            lambda: type("S", (), {"DATABASE_PATH": db_path})())
+                            lambda: Settings(DATABASE_PATH=db_path))
         from app.database import init_db
         init_db()
 
@@ -448,8 +449,9 @@ class TestAPI:
     @pytest.fixture(autouse=True)
     def setup(self, tmp_path, monkeypatch):
         db_path = str(tmp_path / "test.db")
+        from app.config import Settings
         monkeypatch.setattr("app.config.get_settings",
-                            lambda: type("S", (), {"DATABASE_PATH": db_path})())
+                            lambda: Settings(DATABASE_PATH=db_path))
         from app.database import init_db
         init_db()
 

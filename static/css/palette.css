@@ -591,7 +591,7 @@ input,select,textarea{font-family:inherit; color:inherit;}
 }
 
 /* ── Desktop v2 shell (used by src/desktop.jsx) ───────────── */
-.desktop{display:flex; width:1280px; height:820px; flex-shrink:0;
+.desktop{display:flex; width:1280px; max-width:100%; height:820px; flex-shrink:1;
   border:1.5px solid var(--ink); border-radius:14px; overflow:hidden; background:var(--paper);
   box-shadow:0 12px 32px rgba(31,42,36,0.14);}
 .d-sidebar{width:232px; border-right:1.25px solid var(--line-soft); background:var(--paper); display:flex; flex-direction:column;}
@@ -613,6 +613,73 @@ input,select,textarea{font-family:inherit; color:inherit;}
 .iconbtn{width:32px; height:32px; border:1.25px solid var(--line-soft); border-radius:8px;
   display:inline-flex; align-items:center; justify-content:center; background:var(--paper); font-size:14px; cursor:pointer;}
 .iconbtn:hover{background:var(--mint-wash); border-color:var(--mint-3);}
+
+[data-screen-label="desktop"] {
+  max-width: 100%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+/* Responsive grid layout classes */
+.d-scan-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr 340px;
+  gap: 16px;
+  height: 100%;
+}
+.d-two-col-layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  gap: 16px;
+  height: 100%;
+}
+.d-rev-two-col-layout {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  gap: 16px;
+}
+.d-rev-two-col-layout-380 {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 16px;
+}
+.d-settings-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .d-scan-layout {
+    grid-template-columns: 240px 1fr;
+  }
+  .d-scan-layout > .d-scan-right {
+    grid-column: 1 / span 2;
+    overflow: visible;
+  }
+}
+
+@media (max-width: 900px) {
+  .d-scan-layout {
+    grid-template-columns: 1fr;
+  }
+  .d-scan-layout > .d-scan-right {
+    grid-column: auto;
+  }
+  .d-rev-two-col-layout, .d-rev-two-col-layout-380 {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 800px) {
+  .d-two-col-layout, .d-settings-layout {
+    grid-template-columns: 1fr;
+  }
+  .d-settings-layout > .card:first-child {
+    grid-column: auto !important;
+  }
+}
 
 /* ================================================================
    Live 模式：依裝置填滿視窗，去除原型框

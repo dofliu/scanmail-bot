@@ -303,7 +303,7 @@ function DScan(){
   const imgSrc = state.scanImageBase64 ? 'data:image/jpeg;base64,' + state.scanImageBase64 : state.scanOriginalDataUrl;
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'300px 1fr 340px', gap:'16px', height:'100%'}}>
+    <div className="d-scan-layout">
       {/* LEFT: pages */}
       <div className="card" style={{padding:'14px', overflow:'auto'}}>
         <div className="row between" style={{marginBottom:'10px'}}>
@@ -394,7 +394,7 @@ function DScan(){
       </div>
 
       {/* RIGHT: actions */}
-      <div className="col" style={{gap:'12px', overflow:'auto'}}>
+      <div className="col d-scan-right" style={{gap:'12px', overflow:'auto'}}>
         <div className="card" style={{padding:'14px'}}>
           <div className="label" style={{marginBottom:'8px'}}>收件人 ({state.selectedContactIds.length})</div>
           <DContactSelector/>
@@ -524,7 +524,7 @@ function DContacts(){
   const current = state.contacts.find(c => c.id === sel);
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'320px 1fr', gap:'16px', height:'100%'}}>
+    <div className="d-two-col-layout">
       <div className="card" style={{padding:'12px', overflow:'auto'}}>
         <div className="row" style={{marginBottom:'10px'}}>
           <input className="input" placeholder="🔍 搜尋..." value={q} onChange={e => setQ(e.target.value)}/>
@@ -772,7 +772,7 @@ function DToolImage(){
     : 'image_result';
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
+    <div className="d-rev-two-col-layout">
       <div>
         <div className="row" style={{gap:'6px', marginBottom:'14px', flexWrap:'wrap'}}>
           {actions.map(a => (
@@ -927,7 +927,7 @@ function DToolPdf(){
     action === 'split' || action === 'to-images' ? 'pdf_result.zip' : 'pdf_result.pdf';
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
+    <div className="d-rev-two-col-layout">
       <div>
         <div className="row" style={{gap:'6px', marginBottom:'14px', flexWrap:'wrap'}}>
           {actions.map(a => (
@@ -1022,7 +1022,7 @@ function DToolConvert(){
   const [sel, setSel] = dUseState(0);
   const [files, setFiles] = dUseState([]);
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
+    <div className="d-rev-two-col-layout">
       <div>
         <div className="row" style={{gap:'6px',marginBottom:'14px',flexWrap:'wrap'}}>{convs.map((c,i)=><button key={i} className={`chip ${sel===i?'on':''}`} onClick={()=>{setSel(i);setFiles([]);}}>{c.f}→{c.t}</button>)}</div>
         <UploadDropzone accept={convs[sel].accept} onFiles={f=>setFiles(f.slice(0,1))} icon="🔄" label={`上傳 ${convs[sel].f} 檔案`}/>
@@ -1037,7 +1037,7 @@ function DToolGif(){
   const [files, setFiles] = dUseState([]);
   const [opts, setOpts] = dUseState({duration:500,width:0});
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
+    <div className="d-rev-two-col-layout">
       <div><UploadDropzone accept="image/*" multiple onFiles={f=>setFiles([...files,...f])} icon="🎞️" label="拖放多張圖片"/><FileList files={files} onRemove={i=>setFiles(files.filter((_,j)=>j!==i))}/></div>
       <div className="card" style={{padding:'16px'}}><div className="label" style={{marginBottom:'10px'}}>設定</div><div className="field-label">每幀 ms</div><input className="input" value={opts.duration} onChange={e=>setOpts({...opts,duration:+e.target.value})} style={{marginBottom:'8px'}}/><div className="field-label">寬度 (0=auto)</div><input className="input" value={opts.width} onChange={e=>setOpts({...opts,width:+e.target.value})}/><div style={{marginTop:'16px'}}><ToolProcessor files={files} batch={fs=>window.API.gifCreate(fs,opts.duration,0,opts.width,0)} taskProgressUrl={window.API.gifTaskProgress} taskDownloadUrl={window.API.gifTaskDownload} resultFilename="animation.gif"/></div></div>
     </div>
@@ -1051,7 +1051,7 @@ function DToolVideo(){
   const batchFn = action==='merge'?(fs)=>window.API.vidMerge(fs,'mp4'):null;
   const singleFn = action==='to-gif'?(f)=>window.API.vidToGif(f,opts.fps,0,0,0):action==='compress'?(f)=>window.API.vidCompress(f,'',opts.crf):null;
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
+    <div className="d-rev-two-col-layout">
       <div><div className="row" style={{gap:'6px',marginBottom:'14px'}}>{[{id:'merge',l:'合併'},{id:'to-gif',l:'轉GIF'},{id:'compress',l:'壓縮'}].map(a=><button key={a.id} className={`chip ${action===a.id?'on':''}`} onClick={()=>{setAction(a.id);setFiles([]);}}>{a.l}</button>)}</div><UploadDropzone accept="video/*" multiple={action==='merge'} onFiles={f=>setFiles([...files,...f])} icon="🎬" label="拖放影片"/><FileList files={files} onRemove={i=>setFiles(files.filter((_,j)=>j!==i))}/></div>
       <div className="card" style={{padding:'16px'}}><div className="label" style={{marginBottom:'10px'}}>設定</div>{action==='compress'&&<><div className="field-label">CRF {opts.crf}</div><input type="range" className="slider" min="18" max="40" value={opts.crf} onChange={e=>setOpts({...opts,crf:+e.target.value})}/></>}{action==='to-gif'&&<><div className="field-label">FPS</div><input className="input" value={opts.fps} onChange={e=>setOpts({...opts,fps:+e.target.value})}/></>}<div style={{marginTop:'16px'}}><ToolProcessor files={files} single={singleFn} batch={batchFn} taskProgressUrl={window.API.vidTaskProgress} taskDownloadUrl={window.API.vidTaskDownload} resultFilename={action==='to-gif'?'result.gif':'result.mp4'}/></div></div>
     </div>
@@ -1122,7 +1122,7 @@ function DToolRename(){
   };
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 320px', gap:'16px'}}>
+    <div className="d-rev-two-col-layout">
       <div>
         {!aiMode && (<>
           <UploadDropzone accept="*" multiple onFiles={f=>setFiles([...files,...f])} icon="📁" label="拖放任意檔案"/>
@@ -1721,7 +1721,7 @@ function DToolForm(){
   const fields = session?.result?.fields || [];
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 380px', gap:'16px'}}>
+    <div className="d-rev-two-col-layout-380">
       <div>
         {!file && (
           <UploadDropzone accept=".pdf,image/*" onFiles={f=>setFile(f[0] || null)} icon="📝"
@@ -1776,6 +1776,70 @@ function DToolForm(){
                 <button className="btn text" style={{color:'#d32f2f', padding:'0 8px', minWidth:'auto'}} onClick={() => handleDeleteTemplate(selectedTemplateId)}>
                   🗑️
                 </button>
+              )}
+            </div>
+          </div>
+
+          {/* Contact Selector */}
+          <div style={{marginBottom:'10px'}}>
+            <div className="field-label" style={{marginTop:0}}>收件聯絡人 (用於建議填寫與信件傳送)</div>
+            <div style={{position:'relative'}}>
+              <div style={{display:'flex', flexWrap:'wrap', gap:'4px', padding:'6px', border:'1px solid var(--line-soft)', borderRadius:'6px', background:'var(--paper)', minHeight:'36px', alignItems:'center', cursor:'text'}} onClick={() => setContactDropdownOpen(true)}>
+                {selectedContactIds.map(cid => {
+                  const c = state.contacts.find(x => x.id === cid);
+                  return c ? (
+                    <span key={cid} className="chip on" style={{margin:0, fontSize:'11px', display:'flex', alignItems:'center', gap:'4px', padding:'2px 6px', background:'var(--mint-wash)', border:'1px solid var(--primary)', color:'var(--primary)'}}>
+                      {c.name}
+                      <span style={{cursor:'pointer', fontWeight:'bold', fontSize:'12px'}} onClick={(e) => { e.stopPropagation(); setSelectedContactIds(selectedContactIds.filter(x => x !== cid)); }}>×</span>
+                    </span>
+                  ) : null;
+                })}
+                <input className="input" placeholder={selectedContactIds.length === 0 ? "搜尋並選擇聯絡人..." : ""} value={qContact} onChange={e => { setQContact(e.target.value); setContactDropdownOpen(true); }} style={{border:'none', flex:1, padding:0, background:'transparent', fontSize:'12px', minWidth:'80px', outline:'none'}}/>
+              </div>
+              
+              {contactDropdownOpen && (
+                <div style={{position:'absolute', top:'100%', left:0, right:0, maxHeight:'180px', overflowY:'auto', border:'1px solid var(--line-soft)', borderRadius:'6px', background:'var(--paper)', zIndex:20, boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
+                  {state.contacts.filter(c => !qContact || c.name.includes(qContact) || c.email.toLowerCase().includes(qContact.toLowerCase())).map(c => {
+                    const isSel = selectedContactIds.includes(c.id);
+                    return (
+                      <div key={c.id} style={{padding:'8px 12px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', fontSize:'12px', borderBottom:'1px solid var(--line-very-soft)', background: isSel ? 'var(--mint-wash)' : 'transparent'}} onClick={async () => {
+                        let newIds;
+                        if (isSel) {
+                          newIds = selectedContactIds.filter(x => x !== c.id);
+                        } else {
+                          newIds = [...selectedContactIds, c.id];
+                        }
+                        setSelectedContactIds(newIds);
+                        setQContact('');
+                        
+                        // Automatically suggest/fill contact info if we have a session
+                        if (newIds.length > 0 && session) {
+                          try {
+                            setBusy(true);
+                            setMsg('正在依新選聯絡人產生填充建議...');
+                            const s = await window.API.formSuggest(session.result.fields, 'default', newIds[0]);
+                            setValues(prev => ({ ...prev, ...s.values }));
+                            setMsg(`已套用聯絡人「${c.name}」的填寫建議`);
+                          } catch (e) {
+                            console.error(e);
+                          } finally {
+                            setBusy(false);
+                          }
+                        }
+                      }}>
+                        <div>
+                          <div style={{fontWeight:600}}>{c.name}</div>
+                          <div style={{fontSize:'10px', color:'var(--ink-3)'}}>{c.email}</div>
+                        </div>
+                        {isSel && <span style={{color:'var(--primary)'}}>✓</span>}
+                      </div>
+                    );
+                  })}
+                  {state.contacts.length === 0 && <div style={{padding:'12px', textAlign:'center', fontSize:'12px', color:'var(--ink-3)'}}>無聯絡人资料</div>}
+                  <div style={{padding:'6px', textAlign:'center', borderTop:'1px solid var(--line-very-soft)', background:'var(--paper-2)'}}>
+                    <button className="chip" style={{fontSize:'10px'}} onClick={() => setContactDropdownOpen(false)}>關閉</button>
+                  </div>
+                </div>
               )}
             </div>
           </div>
@@ -1837,49 +1901,7 @@ function DToolForm(){
               📤 寄送表單電子郵件
             </div>
             
-            <div className="field-label" style={{marginTop:0}}>收件聯絡人</div>
-            <div style={{position:'relative', marginBottom:'8px'}}>
-              <div style={{display:'flex', flexWrap:'wrap', gap:'4px', padding:'6px', border:'1px solid var(--line-soft)', borderRadius:'6px', background:'var(--paper)', minHeight:'36px', alignItems:'center', cursor:'text'}} onClick={() => setContactDropdownOpen(true)}>
-                {selectedContactIds.map(cid => {
-                  const c = state.contacts.find(x => x.id === cid);
-                  return c ? (
-                    <span key={cid} className="chip on" style={{margin:0, fontSize:'11px', display:'flex', alignItems:'center', gap:'4px', padding:'2px 6px', background:'var(--mint-wash)', border:'1px solid var(--primary)', color:'var(--primary)'}}>
-                      {c.name}
-                      <span style={{cursor:'pointer', fontWeight:'bold', fontSize:'12px'}} onClick={(e) => { e.stopPropagation(); setSelectedContactIds(selectedContactIds.filter(x => x !== cid)); }}>×</span>
-                    </span>
-                  ) : null;
-                })}
-                <input className="input" placeholder={selectedContactIds.length === 0 ? "搜尋並選擇聯絡人..." : ""} value={qContact} onChange={e => { setQContact(e.target.value); setContactDropdownOpen(true); }} style={{border:'none', flex:1, padding:0, background:'transparent', fontSize:'12px', minWidth:'80px', outline:'none'}}/>
-              </div>
-              
-              {contactDropdownOpen && (
-                <div style={{position:'absolute', top:'100%', left:0, right:0, maxHeight:'180px', overflowY:'auto', border:'1px solid var(--line-soft)', borderRadius:'6px', background:'var(--paper)', zIndex:20, boxShadow:'0 4px 12px rgba(0,0,0,0.15)'}}>
-                  {state.contacts.filter(c => !qContact || c.name.includes(qContact) || c.email.toLowerCase().includes(qContact.toLowerCase())).map(c => {
-                    const isSel = selectedContactIds.includes(c.id);
-                    return (
-                      <div key={c.id} style={{padding:'8px 12px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', fontSize:'12px', borderBottom:'1px solid var(--line-very-soft)', background: isSel ? 'var(--mint-wash)' : 'transparent'}} onClick={() => {
-                        if (isSel) {
-                          setSelectedContactIds(selectedContactIds.filter(x => x !== c.id));
-                        } else {
-                          setSelectedContactIds([...selectedContactIds, c.id]);
-                        }
-                        setQContact('');
-                      }}>
-                        <div>
-                          <div style={{fontWeight:600}}>{c.name}</div>
-                          <div style={{fontSize:'10px', color:'var(--ink-3)'}}>{c.email}</div>
-                        </div>
-                        {isSel && <span style={{color:'var(--primary)'}}>✓</span>}
-                      </div>
-                    );
-                  })}
-                  {state.contacts.length === 0 && <div style={{padding:'12px', textAlign:'center', fontSize:'12px', color:'var(--ink-3)'}}>無聯絡人資料</div>}
-                  <div style={{padding:'6px', textAlign:'center', borderTop:'1px solid var(--line-very-soft)', background:'var(--paper-2)'}}>
-                    <button className="chip" style={{fontSize:'10px'}} onClick={() => setContactDropdownOpen(false)}>關閉</button>
-                  </div>
-                </div>
-              )}
-            </div>
+            {/* The contact selector is now located in the upper actions card */}
 
             <div className="field-label">郵件主旨</div>
             <input className="input" value={emailSubject} onChange={e => setEmailSubject(e.target.value)} placeholder="主旨" style={{marginBottom:'8px', fontSize:'12px'}}/>
@@ -1965,7 +1987,7 @@ function DSettings(){
   if (!form) return <LoadingSpinner text="載入設定..."/>;
 
   return (
-    <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'16px'}}>
+    <div className="d-settings-layout">
       <div className="card" style={{padding:'20px', gridColumn:'1 / span 2'}}>
         <div className="hand" style={{fontSize:'20px', fontWeight:700, marginBottom:'14px'}}>系統設定</div>
         <div style={{display:'flex', alignItems:'center', gap:'16px'}}>

@@ -600,7 +600,8 @@ function MScanPreview(){
     setBusy(true);
     try {
       const r = await window.API.formDetectFromScan();
-      const s = await window.API.formSuggest(r.result.fields);
+      const contactId = state.selectedContactIds?.[0] || null;
+      const s = await window.API.formSuggest(r.result.fields, 'default', contactId);
       const enrichedResult = { ...r.result, fields: s.fields || r.result.fields };
       
       store.set({
@@ -609,7 +610,8 @@ function MScanPreview(){
           result: enrichedResult,
           values: s.values || {},
           filename: r.filename,
-          matchedTemplateId: r.matched_template?.id || ''
+          matchedTemplateId: r.matched_template?.id || '',
+          selectedContactIds: state.selectedContactIds || []
         }
       });
       
@@ -1479,6 +1481,9 @@ function MToolForm(){
       setValues(fs.values || {});
       setFile({ name: fs.filename || 'scanned_form.pdf' });
       setSelectedTemplateId(fs.matchedTemplateId || '');
+      if (fs.selectedContactIds) {
+        setSelectedContactIds(fs.selectedContactIds);
+      }
       if (fs.matchedTemplateId) {
         setMsg('已自動匹配並套用模板');
       } else {
