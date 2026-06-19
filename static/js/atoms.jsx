@@ -52,6 +52,96 @@ function CropEditor({ imageSrc, corners: parentCorners, imgW, imgH, onChange }) 
   const [naturalWidth, setNaturalWidth] = useState(imgW || 0);
   const [naturalHeight, setNaturalHeight] = useState(imgH || 0);
 
+  const scratchCanvasRef = useRef(null);
+
+  const getSnappedPosition = (cx, cy) => {
+    if (!imgLoaded || !imgRef.current || !canvasRef.current) return [cx, cy];
+    
+    if (!scratchCanvasRef.current) {
+      scratchCanvasRef.current = document.createElement('canvas');
+    }
+    
+    const R = 8; // Search radius (17x17 window)
+    const sigma = 4.0;
+    const threshold = 15.0; // Gradient threshold to snap
+    
+    const patchSize = 2 * R + 3; // 19x19 patch (to have 17x17 Sobel output)
+    const canvas = scratchCanvasRef.current;
+    if (canvas.width !== patchSize) {
+      canvas.width = patchSize;
+      canvas.height = patchSize;
+    }
+    
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const pad = R + 1; // 9
+    
+    // Clamp center coordinates so that the R+1 neighborhood is fully within image bounds
+    const startX = Math.max(pad, Math.min(naturalWidth - pad, cx));
+    const startY = Math.max(pad, Math.min(naturalHeight - pad, cy));
+    
+    const sx = startX - pad;
+    const sy = startY - pad;
+    
+    try {
+      ctx.drawImage(imgRef.current, sx, sy, patchSize, patchSize, 0, 0, patchSize, patchSize);
+      const imgData = ctx.getImageData(0, 0, patchSize, patchSize);
+      const pixels = imgData.data;
+      
+      // 1. Precompute grayscale values
+      const grays = new Float32Array(patchSize * patchSize);
+      for (let i = 0; i < patchSize * patchSize; i++) {
+        grays[i] = 0.299 * pixels[i * 4] + 0.587 * pixels[i * 4 + 1] + 0.114 * pixels[i * 4 + 2];
+      }
+      
+      // 2. Find best edge within circular radius
+      let maxScore = -1;
+      let bestX = pad;
+      let bestY = pad;
+      let bestMag = 0;
+      
+      for (let y = 1; y < patchSize - 1; y++) {
+        for (let x = 1; x < patchSize - 1; x++) {
+          const dx = x - pad;
+          const dy = y - pad;
+          const distSq = dx * dx + dy * dy;
+          if (distSq > R * R) continue;
+          
+          // Sobel kernels
+          const gx = 
+            -1 * grays[(y - 1) * patchSize + (x - 1)] + 1 * grays[(y - 1) * patchSize + (x + 1)] +
+            -2 * grays[y * patchSize + (x - 1)]       + 2 * grays[y * patchSize + (x + 1)] +
+            -1 * grays[(y + 1) * patchSize + (x - 1)] + 1 * grays[(y + 1) * patchSize + (x + 1)];
+            
+          const gy = 
+            -1 * grays[(y - 1) * patchSize + (x - 1)] - 2 * grays[(y - 1) * patchSize + x] - 1 * grays[(y - 1) * patchSize + (x + 1)] +
+            1 * grays[(y + 1) * patchSize + (x - 1)] + 2 * grays[(y + 1) * patchSize + x] + 1 * grays[(y + 1) * patchSize + (x + 1)];
+            
+          const mag = Math.sqrt(gx * gx + gy * gy);
+          const weight = Math.exp(-distSq / (2 * sigma * sigma));
+          const score = mag * weight;
+          
+          if (score > maxScore) {
+            maxScore = score;
+            bestX = x;
+            bestY = y;
+            bestMag = mag;
+          }
+        }
+      }
+      
+      if (bestMag >= threshold) {
+        const snapX = sx + bestX;
+        const snapY = sy + bestY;
+        return [snapX, snapY];
+      }
+    } catch (err) {
+      console.warn("Snapping calculation failed: ", err);
+    }
+    
+    return [cx, cy];
+  };
+
+
   // Load image on src change
   useEffect(() => {
     if (!imageSrc) return;
@@ -279,8 +369,11 @@ function CropEditor({ imageSrc, corners: parentCorners, imgW, imgH, onChange }) 
     newX = Math.max(0, Math.min(naturalWidth, newX));
     newY = Math.max(0, Math.min(naturalHeight, newY));
 
+    // 套用前端磁性吸附邊緣演算法
+    const [snapX, snapY] = getSnappedPosition(newX, newY);
+
     const nextCorners = [...corners];
-    nextCorners[draggingIdx] = [newX, newY];
+    nextCorners[draggingIdx] = [snapX, snapY];
     onChange(nextCorners);
   };
 
