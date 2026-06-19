@@ -165,6 +165,29 @@ class TestDocScanner:
         expected = np.array([[200, 100], [600, 100], [600, 500], [200, 500]], dtype=np.float32)
         np.testing.assert_allclose(corners, expected, atol=15.0)
 
+    def test_hed_edge_detection(self):
+        """測試 HED 模型的下載、初始化與推理流程"""
+        from app.services.doc_scanner import _detect_edges_hed, ensure_hed_model, _get_hed_net
+        import cv2
+
+        # 1. 確保模型可正常下載/已下載
+        assert ensure_hed_model()
+
+        # 2. 確保 Caffe 網路能正常讀取與建構
+        net = _get_hed_net()
+        assert net is not None
+
+        # 3. 建立測試 dummy 圖像進行推理
+        dummy_img = np.ones((500, 500, 3), dtype=np.uint8) * 128
+        cv2.rectangle(dummy_img, (100, 100), (400, 400), (255, 255, 255), -1)
+
+        thresh = _detect_edges_hed(dummy_img)
+        assert thresh is not None
+        assert thresh.shape == (500, 500)
+        # 輸出應為二值化遮罩 (0 或 255)
+        assert np.all((thresh == 0) | (thresh == 255))
+
+
 
 # ══════════════════════════════════════════════════════════════
 # 圖片批次處理

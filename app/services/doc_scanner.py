@@ -13,13 +13,59 @@
 import io
 import logging
 import math
+from pathlib import Path
 from typing import Optional
 
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
 
+from app.utils.model_downloader import download_file
+
 logger = logging.getLogger(__name__)
+
+# HED Model Configuration
+HED_PROTO_URL = "https://raw.githubusercontent.com/ashukid/hed-edge-detector/master/deploy.prototxt"
+HED_MODEL_URL = "https://vcl.ucsd.edu/hed/hed_pretrained_bsds.caffemodel"
+
+HED_DIR = Path("data/models/hed")
+PROTO_PATH = HED_DIR / "deploy.prototxt"
+MODEL_PATH = HED_DIR / "hed_pretrained_bsds.caffemodel"
+
+
+class CropLayer(object):
+    """自訂 Crop Layer 用於 OpenCV DNN 載入 HED Caffe 模型"""
+    def __init__(self, params, blobs):
+        self.startX = 0
+        self.startY = 0
+        self.endX = 0
+        self.endY = 0
+
+    def getMemoryShapes(self, inputs):
+        inputShape = inputs[0]
+        targetShape = inputs[1]
+        batchSize = inputShape[0]
+        numChannels = inputShape[1]
+        H = targetShape[2]
+        W = targetShape[3]
+
+        self.startX = int((inputShape[3] - targetShape[3]) / 2)
+        self.startY = int((inputShape[2] - targetShape[2]) / 2)
+        self.endX = self.startX + W
+        self.endY = self.startY + H
+
+        return [[batchSize, numChannels, H, W]]
+
+    def forward(self, inputs):
+        return [inputs[0][:, :, self.startY:self.endY, self.startX:self.endX]]
+
+
+# 註冊 Crop layer 到 OpenCV DNN
+try:
+    cv2.dnn_registerLayer("Crop", CropLayer)
+    logger.info("成功註冊 HED CropLayer")
+except Exception as e:
+    logger.warning("無法註冊 CropLayer 或已被註冊: %s", e)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -445,6 +491,77 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
     return None
 
 
+_hed_net = None
+
+
+def ensure_hed_model() -> bool:
+    """確保 HED 模型檔案已下載"""
+    success_proto = download_file(HED_PROTO_URL, PROTO_PATH)
+    success_model = download_file(HED_MODEL_URL, MODEL_PATH)
+    return success_proto and success_model
+
+
+def _get_hed_net():
+    """取得或初始化 HED 網路模型"""
+    global _hed_net
+    if _hed_net is not None:
+        return _hed_net
+
+    if not ensure_hed_model():
+        logger.error("HED 模型檔案不完整，無法載入網路")
+        return None
+
+    try:
+        _hed_net = cv2.dnn.readNetFromCaffe(str(PROTO_PATH), str(MODEL_PATH))
+        logger.info("成功載入 HED Caffe 模型")
+        return _hed_net
+    except Exception as e:
+        logger.error("載入 HED 網路失敗: %s", e)
+        return None
+
+
+def _detect_edges_hed(img_s: np.ndarray) -> Optional[np.ndarray]:
+    """使用 HED 模型提取文件顯著邊緣，輸出二值化邊緣遮罩"""
+    net = _get_hed_net()
+    if net is None:
+        return None
+
+    h, w = img_s.shape[:2]
+
+    # HED 模型最佳的輸入大小約為 500x500
+    blob = cv2.dnn.blobFromImage(
+        img_s,
+        scalefactor=1.0,
+        size=(500, 500),
+        mean=(104.006, 116.669, 122.679),
+        swapRB=False,
+        crop=False
+    )
+
+    try:
+        net.setInput(blob)
+        hed_output = net.forward()
+        # 取得單通道邊緣機率圖 (shape: 1 x 1 x 500 x 500)
+        hed_edge = hed_output[0, 0]
+        # 還原回縮放影像的大小
+        hed_edge = cv2.resize(hed_edge, (w, h))
+        hed_edge = (hed_edge * 255).astype(np.uint8)
+
+        # 進行二值化，過濾低機率的邊緣點
+        _, thresh = cv2.threshold(hed_edge, 50, 255, cv2.THRESH_BINARY)
+
+        # 形態學閉合與膨脹，確保細小斷線縫合
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        thresh = cv2.dilate(thresh, k, iterations=1)
+        thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE,
+                                  cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
+                                  iterations=1)
+        return thresh
+    except Exception as e:
+        logger.error("HED 邊緣推理失敗: %s", e)
+        return None
+
+
 def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
     """偵測圖片中的文件邊界（v3 — 全面重新設計）
 
@@ -467,6 +584,15 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
 
     h, w = img_s.shape[:2]
     candidates = []
+
+    # ── 策略 0：HED 顯著邊緣檢測 ──
+    hed_mask = _detect_edges_hed(img_s)
+    if hed_mask is not None:
+        result = _find_best_quad(hed_mask, w, h, img_s)
+        if result is not None:
+            pts, s = result
+            # HED 產生的邊界更乾淨，參與公平評分排序
+            candidates.append((s, pts, "HED_Edge"))
 
     # ── 策略 1：強邊緣 Canny（多閾值）──
     gray = cv2.cvtColor(img_s, cv2.COLOR_BGR2GRAY)
