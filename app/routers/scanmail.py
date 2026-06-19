@@ -107,8 +107,9 @@ async def detect_edges(request: Request):
     if not session.image_data:
         raise HTTPException(status_code=400, detail="請先上傳圖片")
 
-    corners = detect_document_edges(session.image_data)
-    info = get_image_info(session.image_data)
+    source = session.image_original or session.image_data
+    corners = detect_document_edges(source)
+    info = get_image_info(source)
 
     return {
         "success": True,
@@ -143,7 +144,7 @@ async def process_scan(request: Request, body: ScanRequest):
 
     try:
         result = scan_document(
-            image_data=session.image_data,
+            image_data=session.image_original or session.image_data,
             corners=corners,
             filter_name=body.filter_name,
             auto_detect=body.auto_detect,
