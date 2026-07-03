@@ -1229,6 +1229,161 @@ def _normalize_illumination(channel: np.ndarray,
     return np.clip(normalized, 0, 255).astype(np.uint8)
 
 
+# ── v2 新增：Multi-Scale Retinex 光照正規化 ──
+
+def _multi_scale_retinex(img: np.ndarray,
+                         sigmas: list = None,
+                         weights: list = None) -> np.ndarray:
+    """Multi-Scale Retinex (MSR) — 分離光照與反射率
+
+    在多個高斯尺度上計算 log(image) - log(blur(image))，
+    取加權平均作為反射率估計。能同時處理：
+    - 大尺度漸層陰影（sigma=250 捕捉）
+    - 中尺度光照不均（sigma=80 捕捉）
+    - 小尺度局部陰影如手指、書脊（sigma=15 捕捉）
+
+    相比形態學背景估計，MSR 對複雜光照場景效果顯著更好。
+
+    Args:
+        img: BGR 影像
+        sigmas: 高斯核的 sigma 列表
+        weights: 各尺度的權重列表（需與 sigmas 等長）
+
+    Returns:
+        光照正規化後的 BGR 影像（紙張→白色，內容→保留）
+    """
+    if sigmas is None:
+        sigmas = [15, 80, 250]
+    if weights is None:
+        weights = [1.0 / len(sigmas)] * len(sigmas)
+
+    # 轉為 float64，加小量避免 log(0)
+    img_f = img.astype(np.float64) + 1.0
+    log_img = np.log(img_f)
+
+    retinex = np.zeros_like(img_f)
+    for sigma, w in zip(sigmas, weights):
+        # 確保 kernel size 是奇數且足夠大
+        ksize = int(sigma * 6) | 1
+        blurred = cv2.GaussianBlur(img_f, (ksize, ksize), sigma)
+        blurred = np.maximum(blurred, 1.0)
+        retinex += w * (log_img - np.log(blurred))
+
+    # 正規化到 [0, 255]
+    # 使用 percentile stretch 避免極端值影響
+    for i in range(retinex.shape[2]):
+        ch = retinex[:, :, i]
+        p_lo = np.percentile(ch, 1)
+        p_hi = np.percentile(ch, 99)
+        if p_hi - p_lo > 1e-5:
+            ch = (ch - p_lo) / (p_hi - p_lo) * 255.0
+        else:
+            ch = ch * 0 + 128
+        retinex[:, :, i] = ch
+
+    return np.clip(retinex, 0, 255).astype(np.uint8)
+
+
+def _multi_scale_retinex_luminance(img: np.ndarray,
+                                    sigmas: list = None,
+                                    target: float = 240.0) -> np.ndarray:
+    """只對亮度通道做 MSR，完整保留色彩資訊
+
+    流程：
+    1. BGR → LAB
+    2. 對 L 通道做 MSR
+    3. 將 MSR 結果映射到目標亮度範圍
+    4. LAB → BGR
+
+    比全通道 MSR 更適合彩色文件（避免色偏）。
+    """
+    if sigmas is None:
+        sigmas = [15, 80, 250]
+
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_ch = lab[:, :, 0].astype(np.float64) + 1.0
+    log_l = np.log(l_ch)
+
+    retinex_l = np.zeros_like(l_ch)
+    for sigma in sigmas:
+        ksize = int(sigma * 6) | 1
+        blurred = cv2.GaussianBlur(l_ch, (ksize, ksize), sigma)
+        blurred = np.maximum(blurred, 1.0)
+        retinex_l += (log_l - np.log(blurred))
+    retinex_l /= len(sigmas)
+
+    # 將 retinex 反射率映射到目標亮度
+    # retinex 值高 = 高反射率（紙張）→ 高亮度
+    # retinex 值低 = 低反射率（文字/印章）→ 低亮度
+    p_lo = np.percentile(retinex_l, 2)
+    p_hi = np.percentile(retinex_l, 98)
+    if p_hi - p_lo > 1e-5:
+        # 映射：最亮的反射率 → target (240)，最暗的 → 保持暗
+        normalized = (retinex_l - p_lo) / (p_hi - p_lo)
+        # 使用 gamma 校正讓紙張區域更白，同時保持文字深度
+        normalized = np.power(np.clip(normalized, 0, 1), 0.7)
+        l_new = normalized * target
+    else:
+        l_new = retinex_l * 0 + target * 0.5
+
+    lab[:, :, 0] = np.clip(l_new, 0, 255).astype(np.uint8)
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+
+
+# ── v2 新增：紙張白點白平衡 ──
+
+def _white_balance_paper(img: np.ndarray) -> np.ndarray:
+    """紙張白點白平衡 — 專為文件場景設計
+
+    找出圖片中最亮且低飽和度的像素（= 紙張區域），
+    用它們的 RGB 平均值作為白點基準校正全圖。
+
+    比灰色世界假設更適合「以白色紙張為主」的文件場景。
+    灰色世界假設紙張佔大面積時會系統性偏暖/偏冷。
+
+    如果找不到足夠的紙張像素（如黑色背景），會 fallback 到灰色世界。
+    """
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+
+    # 找出「亮且低飽和度」的像素 = 紙張候選
+    # 亮度 > 中位數 + 30，飽和度 < 40
+    v_median = np.median(v)
+    bright_thresh = max(v_median + 30, 160)
+    paper_mask = (v > bright_thresh) & (s < 40)
+
+    paper_ratio = np.sum(paper_mask) / paper_mask.size
+
+    # 至少 3% 的像素是紙張才有意義
+    if paper_ratio < 0.03:
+        logger.debug("紙張白點白平衡：紙張像素不足 (%.1f%%)，fallback 到灰色世界",
+                     paper_ratio * 100)
+        return _white_balance_grayworld(img)
+
+    # 取紙張區域的 RGB 平均值作為白點
+    result = img.astype(np.float64)
+    paper_pixels = result[paper_mask]
+    wp_b = np.mean(paper_pixels[:, 0])
+    wp_g = np.mean(paper_pixels[:, 1])
+    wp_r = np.mean(paper_pixels[:, 2])
+
+    # 白點的最大通道值作為目標亮度
+    wp_max = max(wp_b, wp_g, wp_r, 1.0)
+
+    # 校正各通道，使白點 → 純白
+    if wp_b > 10:
+        result[:, :, 0] *= wp_max / wp_b
+    if wp_g > 10:
+        result[:, :, 1] *= wp_max / wp_g
+    if wp_r > 10:
+        result[:, :, 2] *= wp_max / wp_r
+
+    logger.debug("紙張白點白平衡：紙張佔比 %.1f%%, 白點 BGR=(%.0f,%.0f,%.0f)",
+                 paper_ratio * 100, wp_b, wp_g, wp_r)
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
 def _white_balance_grayworld(img: np.ndarray) -> np.ndarray:
     """灰色世界白平衡 — 修正色偏（日光燈偏黃/偏藍）
 
@@ -1250,15 +1405,136 @@ def _white_balance_grayworld(img: np.ndarray) -> np.ndarray:
     return np.clip(result, 0, 255).astype(np.uint8)
 
 
-def _adaptive_sharpening(img: np.ndarray, strength: float = 0.5) -> np.ndarray:
-    """自適應銳化 — 只在邊緣區域銳化，平滑區域不動
+# ── v2 新增：兩階段去噪 ──
 
-    避免傳統銳化在背景區域放大雜訊的問題。
+def _estimate_noise_level(img: np.ndarray) -> float:
+    """估計影像噪聲水平（使用 Laplacian 方差法）
+
+    Returns:
+        估計的噪聲標準差 sigma（越高 = 噪聲越嚴重）
+        - < 5: 低噪聲（乾淨的平台掃描）
+        - 5~15: 中等噪聲（手機一般拍攝）
+        - > 15: 高噪聲（低光環境拍攝）
     """
-    # Unsharp masking
-    blurred = cv2.GaussianBlur(img, (0, 0), 3)
-    sharpened = cv2.addWeighted(img, 1.0 + strength, blurred, -strength, 0)
-    return sharpened
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    # 用 3x3 Laplacian 估計高頻能量
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    # 噪聲 sigma ≈ sqrt(pi/2) * MAD(Laplacian) / 6
+    # MAD = median absolute deviation
+    sigma = np.median(np.abs(lap)) * 1.4826 / 6.0
+    return float(sigma)
+
+
+def _denoise_two_stage(img: np.ndarray, strength: str = "auto") -> np.ndarray:
+    """兩階段去噪管線 — 比單次雙邊濾波效果顯著更好
+
+    Stage 1: Non-Local Means (NLM) — 全局去噪，去除高頻隨機雜訊
+      NLM 會在整張圖中搜尋相似的 patch 進行加權平均，
+      是傳統方法中效果最好的去噪算法。
+
+    Stage 2: Bilateral Filter — 保邊平滑，去除殘留低頻雜訊
+      雙邊濾波同時考慮空間距離和亮度距離，
+      在平滑背景的同時保留文字邊緣不被模糊。
+
+    強度根據估計的噪聲水平自適應調整。
+
+    Args:
+        img: BGR 影像
+        strength: "low", "medium", "high", 或 "auto"（自動估計）
+    """
+    if strength == "auto":
+        noise_sigma = _estimate_noise_level(img)
+        if noise_sigma < 5:
+            strength = "low"
+        elif noise_sigma < 12:
+            strength = "medium"
+        else:
+            strength = "high"
+        logger.debug("自動去噪強度：noise_sigma=%.1f → %s", noise_sigma, strength)
+
+    # 根據強度設定參數
+    params = {
+        "low": {"nlm_h": 5, "bilateral_d": 5, "bilateral_sc": 30, "bilateral_ss": 30},
+        "medium": {"nlm_h": 8, "bilateral_d": 7, "bilateral_sc": 50, "bilateral_ss": 50},
+        "high": {"nlm_h": 12, "bilateral_d": 9, "bilateral_sc": 60, "bilateral_ss": 60},
+    }
+    p = params.get(strength, params["medium"])
+
+    # Stage 1: Non-Local Means 去噪
+    denoised = cv2.fastNlMeansDenoisingColored(
+        img, None, p["nlm_h"], p["nlm_h"],
+        templateWindowSize=7, searchWindowSize=21
+    )
+
+    # Stage 2: 雙邊濾波保邊平滑
+    result = cv2.bilateralFilter(
+        denoised, p["bilateral_d"],
+        p["bilateral_sc"], p["bilateral_ss"]
+    )
+
+    return result
+
+
+# ── v2 改進：邊緣感知自適應銳化 ──
+
+def _adaptive_sharpening(img: np.ndarray, strength: float = -1.0) -> np.ndarray:
+    """邊緣感知自適應銳化 v2
+
+    改進點（相比 v1 的全局固定 unsharp masking）：
+    1. 用 Laplacian 計算邊緣遮罩，只在邊緣區域銳化
+    2. 銳化強度依模糊程度自動調整
+    3. 雙尺度 unsharp masking：大尺度恢復結構 + 小尺度恢復細節
+
+    Args:
+        img: BGR 影像
+        strength: 銳化強度 (0~1)，-1 表示自動
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+
+    # 自動估計銳化強度：Laplacian 方差低 = 模糊 = 需要更強銳化
+    if strength < 0:
+        lap_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+        if lap_var > 1000:
+            strength = 0.25  # 已經很銳利，輕度銳化
+        elif lap_var > 300:
+            strength = 0.40  # 中等模糊
+        elif lap_var > 100:
+            strength = 0.55  # 明顯模糊
+        else:
+            strength = 0.70  # 嚴重模糊
+        logger.debug("自動銳化強度：lap_var=%.0f → strength=%.2f", lap_var, strength)
+
+    # 計算邊緣遮罩（只在邊緣區域銳化）
+    edge_map = cv2.Laplacian(gray, cv2.CV_64F)
+    edge_mask = np.abs(edge_map)
+    # 正規化到 [0, 1]，使用 percentile 避免極端值
+    p95 = np.percentile(edge_mask, 95)
+    if p95 > 1e-3:
+        edge_mask = np.clip(edge_mask / p95, 0, 1)
+    else:
+        edge_mask = np.zeros_like(edge_mask)
+    # 平滑遮罩邊緣
+    edge_mask = cv2.GaussianBlur(edge_mask.astype(np.float32), (5, 5), 0)
+    edge_mask_3ch = np.stack([edge_mask] * 3, axis=-1) if len(img.shape) == 3 else edge_mask
+
+    # 大尺度 unsharp masking（恢復結構）
+    blur_large = cv2.GaussianBlur(img, (0, 0), 3.0)
+    sharp_large = cv2.addWeighted(
+        img, 1.0 + strength * 0.6, blur_large, -strength * 0.6, 0
+    )
+
+    # 小尺度 unsharp masking（恢復細節）
+    blur_small = cv2.GaussianBlur(sharp_large, (0, 0), 1.0)
+    sharp_detail = cv2.addWeighted(
+        sharp_large, 1.0 + strength * 0.4, blur_small, -strength * 0.4, 0
+    )
+
+    # 只在邊緣區域套用銳化結果，平滑區域保持原狀
+    img_f = img.astype(np.float64)
+    sharp_f = sharp_detail.astype(np.float64)
+    result = img_f * (1.0 - edge_mask_3ch) + sharp_f * edge_mask_3ch
+
+    return np.clip(result, 0, 255).astype(np.uint8)
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1312,57 +1588,104 @@ def apply_filter(image_data: bytes, filter_name: str = "auto") -> bytes:
     return processed
 
 
-# ── 新：專業掃描模式（核心新功能）──
+# ── v2 改進：智慧白色推送（Otsu 自適應 + sigmoid 過渡）──
+
+def _push_whites(img: np.ndarray, threshold: int = -1) -> np.ndarray:
+    """智慧白色推送 v2 — 把紙張區域推向乾淨的白色
+
+    改進點（相比 v1）：
+    1. 使用 Otsu 自動計算前景/背景分離閾值（不再固定 220）
+    2. 使用 sigmoid 過渡函數（比線性遮罩更自然，沒有 halo 效果）
+    3. 色彩感知：高飽和度區域（印章、彩色標記）不推白
+
+    Args:
+        threshold: 手動設定閾值，-1 表示使用 Otsu 自動計算
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # 自動計算閾值
+    if threshold < 0:
+        otsu_thresh, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        # 紙張閾值 = Otsu 閾值 + 偏移（確保只推真正的淺色背景）
+        threshold = int(max(otsu_thresh + 20, 200))
+        logger.debug("白色推送：Otsu=%.0f → threshold=%d", otsu_thresh, threshold)
+
+    # 用 sigmoid 函數建立平滑過渡遮罩
+    # sigmoid 讓閾值附近的過渡非常自然，不會有明顯邊界
+    gray_f = gray.astype(np.float32)
+    steepness = 0.15  # 控制過渡帶寬度（越大越銳利）
+    white_mask = 1.0 / (1.0 + np.exp(-steepness * (gray_f - threshold)))
+
+    # 色彩感知：高飽和度區域不推白（保護印章、彩色標記）
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    saturation = hsv[:, :, 1].astype(np.float32)
+    # 飽和度 > 35 的區域逐漸降低推白力度
+    color_protection = np.clip(1.0 - (saturation - 35) / 40.0, 0, 1)
+    white_mask = white_mask * color_protection
+
+    # 把白色區域推向 [252, 252, 252]（比 v1 的 250 稍白，更接近掃描器）
+    result = img.astype(np.float32)
+    white_target = np.full_like(result, 252.0)
+    result = result * (1.0 - white_mask[:, :, np.newaxis]) + \
+             white_target * white_mask[:, :, np.newaxis]
+
+    return np.clip(result, 0, 255).astype(np.uint8)
+
+
+# ── v2 新：專業掃描模式（核心重寫）──
 
 def _filter_scan(img: np.ndarray) -> np.ndarray:
-    """專業掃描模式 — 還原出接近平台掃描器的效果（保色）
+    """專業掃描模式 v2 — 追近 Google/Adobe Scan 的效果
 
-    流水線：
-    1. 白平衡修正（消除色偏）
+    v2 改進流水線：
+    1. 紙張白點白平衡（取代灰色世界）
     2. 歪斜校正
-    3. 逐通道形態學背景估計
-    4. 光照正規化（紙張→白色，文字/圖案→保留原色）
-    5. 輕度去噪（保邊雙邊濾波）
-    6. 自適應銳化
-    7. 紙張白度微調
+    3. Multi-Scale Retinex 光照正規化（取代形態學閉運算）
+    4. CLAHE 對比度增強（新增）
+    5. 兩階段去噪 NLM + 雙邊（取代單次雙邊濾波）
+    6. 邊緣感知自適應銳化（取代固定強度 unsharp masking）
+    7. 智慧白色推送（Otsu 自適應 + sigmoid 過渡 + 色彩保護）
 
-    這個濾鏡的目標是讓拍攝的文件照片看起來就像用平台掃描器掃出來的：
-    - 紙張變成乾淨的白色
-    - 文字保持清晰銳利
-    - 彩色印章、簽名、標記全部保留原色
-    - 陰影和光照不均完全消除
+    目標：讓手持拍攝的文件照片看起來像平台掃描器掃出來的結果。
     """
-    # Step 1: 白平衡
-    img = _white_balance_grayworld(img)
+    # Step 1: 紙張白點白平衡（比灰色世界更適合文件場景）
+    img = _white_balance_paper(img)
 
     # Step 2: 歪斜校正
     img = _deskew(img)
 
-    # Step 3 & 4: 逐通道形態學背景估計 + 光照正規化
-    # 在 BGR 色彩空間逐通道處理，能完整保留所有色彩資訊
-    channels = cv2.split(img)
-    normalized_channels = []
-    for ch in channels:
-        bg = _estimate_background_morphological(ch)
-        norm = _normalize_illumination(ch, bg, target=240.0)
-        normalized_channels.append(norm)
-    result = cv2.merge(normalized_channels)
+    # Step 3: Multi-Scale Retinex 光照正規化
+    # 對亮度通道做 MSR，保留完整色彩
+    result = _multi_scale_retinex_luminance(img, sigmas=[15, 80, 250], target=240.0)
 
-    # Step 5: 輕度去噪（雙邊濾波 — 去噪同時保留文字邊緣）
-    result = cv2.bilateralFilter(result, 7, 50, 50)
+    # Step 4: CLAHE 對比度增強（只對 L 通道，避免色偏）
+    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_enhanced = clahe.apply(l_ch)
+    lab = cv2.merge([l_enhanced, a_ch, b_ch])
+    result = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
-    # Step 6: 自適應銳化（讓文字更清晰）
-    result = _adaptive_sharpening(result, strength=0.4)
+    # Step 5: 兩階段去噪（NLM + 雙邊，強度自適應）
+    result = _denoise_two_stage(result, strength="auto")
 
-    # Step 7: 紙張白度微調 — 把接近白色的像素推向純白
-    # 這讓背景更乾淨，同時不影響有色內容
-    result = _push_whites(result, threshold=220)
+    # Step 6: 邊緣感知自適應銳化（自動估計強度）
+    result = _adaptive_sharpening(result)  # strength 自動
+
+    # Step 7: 智慧白色推送（Otsu 自適應閾值 + sigmoid 過渡）
+    result = _push_whites(result)  # threshold 自動
 
     return result
 
 
 def _filter_color_doc(img: np.ndarray) -> np.ndarray:
-    """彩色文件模式 — 專為有印章、彩色表格、簽名的公文設計
+    """彩色文件模式 v2 — 專為有印章、彩色表格、簽名的公文設計
+
+    v2 改進：
+    - 使用 MSR 取代形態學背景估計（更好的光照處理）
+    - 紙張白點白平衡
+    - 兩階段去噪
+    - 加強彩色元素保護（印章、簽名）
 
     特點：
     - 背景白化但完整保留所有彩色元素
@@ -1371,100 +1694,102 @@ def _filter_color_doc(img: np.ndarray) -> np.ndarray:
     - 表格線條保持清晰
     - 適合公文、合約、表單等正式文件
     """
-    # 白平衡
-    img = _white_balance_grayworld(img)
+    # Step 1: 紙張白點白平衡
+    img = _white_balance_paper(img)
 
-    # 歪斜校正
+    # Step 2: 歪斜校正
     img = _deskew(img)
 
-    # 轉到 LAB 色彩空間分離亮度與色彩
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    # Step 3: MSR 光照正規化（只處理亮度，完整保留色彩）
+    result = _multi_scale_retinex_luminance(img, sigmas=[15, 80, 250], target=240.0)
+
+    # Step 4: CLAHE 對比度增強 + 色彩飽和度加強
+    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
     l_ch, a_ch, b_ch = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+    l_enhanced = clahe.apply(l_ch)
 
-    # 只對亮度通道做形態學背景估計（保持色彩通道不變）
-    l_bg = _estimate_background_morphological(l_ch)
-    l_norm = _normalize_illumination(l_ch, l_bg, target=240.0)
-
-    # 偵測高飽和度區域（印章、彩色標記）
+    # 偵測高飽和度區域（印章、彩色標記）並加強色彩
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     saturation = hsv[:, :, 1]
-    # 高飽和度區域遮罩（印章通常飽和度 > 80）
-    color_mask = (saturation > 60).astype(np.float32)
-    # 平滑遮罩邊緣
+    color_mask = (saturation > 50).astype(np.float32)
     color_mask = cv2.GaussianBlur(color_mask, (5, 5), 0)
 
     # 加強彩色區域的飽和度（讓印章顏色更鮮明）
     a_boosted = np.clip(
-        a_ch.astype(np.float32) + (a_ch.astype(np.float32) - 128) * color_mask * 0.3,
+        a_ch.astype(np.float32) + (a_ch.astype(np.float32) - 128) * color_mask * 0.35,
         0, 255
     ).astype(np.uint8)
     b_boosted = np.clip(
-        b_ch.astype(np.float32) + (b_ch.astype(np.float32) - 128) * color_mask * 0.3,
+        b_ch.astype(np.float32) + (b_ch.astype(np.float32) - 128) * color_mask * 0.35,
         0, 255
     ).astype(np.uint8)
 
-    # 重組 LAB
-    lab_result = cv2.merge([l_norm, a_boosted, b_boosted])
+    lab_result = cv2.merge([l_enhanced, a_boosted, b_boosted])
     result = cv2.cvtColor(lab_result, cv2.COLOR_LAB2BGR)
 
-    # 去噪（輕度，保留細節）
-    result = cv2.bilateralFilter(result, 5, 40, 40)
+    # Step 5: 兩階段去噪（稍輕，保留更多細節）
+    result = _denoise_two_stage(result, strength="low")
 
-    # 銳化
-    result = _adaptive_sharpening(result, strength=0.35)
+    # Step 6: 邊緣感知自適應銳化
+    result = _adaptive_sharpening(result)
 
-    # 白度微調
-    result = _push_whites(result, threshold=215)
+    # Step 7: 智慧白色推送（帶色彩保護）
+    result = _push_whites(result)
 
     return result
 
 
-def _push_whites(img: np.ndarray, threshold: int = 220) -> np.ndarray:
-    """把接近白色的像素推向純白（清潔背景用）
-
-    只影響 RGB 三通道都接近白色的像素（真正的紙張區域），
-    不會影響有色內容（文字、印章、圖片）。
-    """
-    # 計算每個像素到白色的距離
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-    # 建立「接近白色」的遮罩
-    white_mask = (gray >= threshold).astype(np.float32)
-    # 平滑過渡（避免明顯邊界）
-    white_mask = cv2.GaussianBlur(white_mask, (3, 3), 0)
-
-    # 把白色區域推向 [250, 250, 250]
-    result = img.astype(np.float32)
-    white_target = np.full_like(result, 250.0)
-    # 混合：mask=1 的區域用白色目標，mask=0 的區域保持原色
-    result = result * (1.0 - white_mask[:, :, np.newaxis]) + \
-             white_target * white_mask[:, :, np.newaxis]
-
-    return np.clip(result, 0, 255).astype(np.uint8)
-
-
-# ── 改良後的原有濾鏡 ──
+# ── v2 改良：智慧自動模式（多維度分析）──
 
 def _filter_auto(img: np.ndarray) -> np.ndarray:
-    """智慧自動模式 — 使用專業掃描演算法
+    """智慧自動模式 v2 — 多維度分析決定最佳處理策略
 
-    自動判斷文件類型，選擇最佳處理策略：
-    - 如果偵測到較多彩色內容 → 使用彩色文件模式
-    - 一般文件 → 使用專業掃描模式
+    分析維度：
+    1. 色彩飽和度比例（偵測彩色內容）
+    2. 亮度直方圖分析（判斷光照條件）
+    3. 邊緣密度分析（判斷文字密度）
+    4. 暗區比例（偵測嚴重陰影）
+
+    根據分析結果選擇最佳濾鏡和參數組合。
     """
-    # 簡單判斷文件是否有較多彩色內容
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    saturation = hsv[:, :, 1]
-    # 高飽和度像素佔比
-    color_ratio = np.mean(saturation > 80)
+    h, s, v = cv2.split(hsv)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    if color_ratio > 0.05:
-        # 5% 以上像素有明顯色彩 → 彩色文件模式
-        logger.info("自動模式：偵測到彩色內容 (%.1f%%)，使用彩色文件模式",
-                     color_ratio * 100)
+    # 1. 色彩飽和度分析
+    color_ratio = float(np.mean(s > 80))  # 高飽和度像素佔比
+
+    # 2. 亮度分佈分析
+    v_mean = float(np.mean(v))
+    v_std = float(np.std(v))
+    dark_ratio = float(np.mean(v < 80))  # 暗區佔比
+
+    # 3. 邊緣密度分析（文字越多邊緣越密集）
+    edges = cv2.Canny(gray, 50, 150)
+    edge_density = float(np.mean(edges > 0))
+
+    logger.info(
+        "自動模式分析：color=%.1f%% v_mean=%.0f v_std=%.0f dark=%.1f%% edge=%.1f%%",
+        color_ratio * 100, v_mean, v_std, dark_ratio * 100, edge_density * 100
+    )
+
+    # 決策邏輯
+    if color_ratio > 0.04:
+        # 4% 以上像素有明顯色彩 → 彩色文件模式
+        logger.info("自動模式 → 彩色文件模式（偵測到彩色內容 %.1f%%）", color_ratio * 100)
         return _filter_color_doc(img)
+    elif dark_ratio > 0.25:
+        # 暗區超過 25% → 嚴重陰影，需要強力光照校正
+        logger.info("自動模式 → 專業掃描模式（偵測到大面積陰影 %.1f%%）", dark_ratio * 100)
+        return _filter_scan(img)
+    elif v_std > 60:
+        # 亮度標準差大 → 光照不均勻
+        logger.info("自動模式 → 專業掃描模式（偵測到光照不均 std=%.0f）", v_std)
+        return _filter_scan(img)
     else:
-        logger.info("自動模式：使用專業掃描模式")
+        # 一般情況
+        logger.info("自動模式 → 專業掃描模式（一般文件）")
         return _filter_scan(img)
 
 
