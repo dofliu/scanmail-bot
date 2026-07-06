@@ -13,6 +13,7 @@
 import io
 import logging
 import math
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -146,16 +147,83 @@ def _is_valid_doc_quad(corners: np.ndarray, img_w: int, img_h: int) -> bool:
     return True
 
 
+class _ScoreContext:
+    """每張影像只計算一次的共用特徵（灰階、梯度圖）
+
+    v4 的評分對每個候選四邊形都重算整張 Sobel 梯度圖，
+    數十個候選 × 多個策略會造成秒級的重複運算。
+    v5 把昂貴特徵預先算好，所有候選共用。
+    """
+
+    def __init__(self, img_s: np.ndarray):
+        self.img = img_s
+        self.h, self.w = img_s.shape[:2]
+        self.gray = cv2.cvtColor(img_s, cv2.COLOR_BGR2GRAY)
+        gx = cv2.Sobel(self.gray, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(self.gray, cv2.CV_32F, 0, 1, ksize=3)
+        grad = cv2.magnitude(gx, gy)
+        # 3x3 最大值濾波：邊緣取樣時容忍 1px 的量化誤差
+        self.grad_max3 = cv2.dilate(grad, cv2.getStructuringElement(
+            cv2.MORPH_RECT, (3, 3)))
+
+
+def _edge_support_scores(ctx: _ScoreContext, corners: np.ndarray) -> list[float]:
+    """逐邊評估「這條邊下方真的存在文件邊緣嗎」
+
+    對每條邊取樣 20 點，每點比較：
+    - 邊緣上的梯度 g_edge
+    - 往四邊形內側偏移 8px 處的梯度 g_in（紙張留白應該平滑）
+
+    真文件邊緣：g_edge 強且顯著大於 g_in（紙張到背景的跳變）。
+    紋理背景上的假邊（如木紋）：g_edge ≈ g_in → 不算支持。
+
+    Returns:
+        四條邊各自的分數 [0~1] × 4
+    """
+    pts = _order_points(corners.astype(np.float32))  # 順時針 TL,TR,BR,BL
+    inner_off = max(5.0, 0.01 * max(ctx.w, ctx.h))
+    scores = []
+    for i in range(4):
+        p1, p2 = pts[i], pts[(i + 1) % 4]
+        d = p2 - p1
+        length = float(np.hypot(d[0], d[1]))
+        if length < 4:
+            scores.append(0.0)
+            continue
+        # 順時針排序下，(-dy, dx) 指向四邊形內側
+        nvec = np.array([-d[1], d[0]], np.float32) / length
+
+        ts = np.linspace(0.08, 0.92, 20)
+        ex = p1[0] + ts * d[0]
+        ey = p1[1] + ts * d[1]
+        xs = np.clip(ex.astype(np.int32), 0, ctx.w - 1)
+        ys = np.clip(ey.astype(np.int32), 0, ctx.h - 1)
+        xi = np.clip((ex + nvec[0] * inner_off).astype(np.int32), 0, ctx.w - 1)
+        yi = np.clip((ey + nvec[1] * inner_off).astype(np.int32), 0, ctx.h - 1)
+
+        g_edge = ctx.grad_max3[ys, xs]
+        g_in = ctx.grad_max3[yi, xi]
+
+        supported = g_edge > np.maximum(1.6 * g_in, 25.0)
+        support = float(np.mean(supported))
+        strength = float(np.mean(np.minimum(g_edge / 60.0, 1.0)))
+        scores.append(support * (0.5 + 0.5 * strength))
+    return scores
+
+
 def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int,
-                    img: np.ndarray = None) -> float:
-    """評分四邊形的「文件可信度」(v4 — 內容感知)
+                    ctx: Optional[_ScoreContext] = None) -> float:
+    """評分四邊形的「文件可信度」(v5 — 逐邊證據 + 透視友善幾何)
 
-    幾何分數（40%）：
-    - 面積適中 + 矩形度 + 離邊距離 + 紙張寬高比
+    v4 問題：
+    1. 「矩形度」（面積/最小外接矩形）懲罰透視變形的梯形，
+       導致大角度拍攝時 minAreaRect 包圍盒反而贏過真正的文件邊界。
+    2. 邊緣梯度只取「四邊平均」，一條完全沒有影像證據的邊
+       （例如貼著圖片邊框的假邊）不會被淘汰。
 
-    內容分數（60%）：
-    - 內外亮度差：文件內部比外部亮多少
-    - 邊緣梯度：文件邊界的梯度強度
+    v5 改進：
+    - 矩形度 → 凸性（凸四邊形不懲罰透視梯形）
+    - 逐邊梯度支持度：最弱的一條邊主導懲罰（乘法門控）
     """
     area = cv2.contourArea(corners)
     img_area = img_w * img_h
@@ -175,10 +243,10 @@ def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int,
     else:
         area_s = 0
 
-    # 矩形度
-    rect = cv2.minAreaRect(corners.reshape(-1, 1, 2).astype(np.int32))
-    rect_area = rect[1][0] * rect[1][1] if rect[1][0] > 0 and rect[1][1] > 0 else 1
-    rectangularity = min(area / rect_area, 1.0)
+    # 凸性（取代 v4 的矩形度 — 透視下的文件是梯形，不該被懲罰）
+    hull = cv2.convexHull(corners.reshape(-1, 1, 2).astype(np.int32))
+    hull_area = cv2.contourArea(hull)
+    convexity = min(area / hull_area, 1.0) if hull_area > 0 else 0.0
 
     # 離邊距離
     ordered = _order_points(corners.astype("float32"))
@@ -198,34 +266,40 @@ def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int,
         aspect = min(w_avg, h_avg) / max(w_avg, h_avg)
     else:
         aspect = 0
-    
+
     # 偏好常見文件/卡片寬高比 (0.4 到 1.0 之間都不扣分)
     if 0.4 <= aspect <= 1.0:
         aspect_s = 1.0
     else:
         aspect_s = max(0, 1.0 - min(abs(aspect - 0.4), abs(aspect - 1.0)) * 2.5)
 
-    geo_score = area_s * 0.30 + rectangularity * 0.30 + border_s * 0.25 + aspect_s * 0.15
+    geo_score = area_s * 0.35 + convexity * 0.25 + border_s * 0.20 + aspect_s * 0.20
 
-    # ── 內容分數（需要原圖）──
-    if img is None:
+    # ── 內容分數（需要預計算特徵）──
+    if ctx is None:
         return geo_score
 
-    content_score = _score_content(corners, img, img_w, img_h)
+    content_score, edge_min = _score_content(corners, ctx)
 
-    # 最終分數：幾何 40% + 內容 60%
-    return geo_score * 0.40 + content_score * 0.60
+    # 最終分數：幾何 40% + 內容 60%，再以「最弱邊證據」門控
+    # （任何一條邊完全沒有影像證據 → 不管其他分數多高都重罰，
+    #   例如貼著圖框的假邊、明暗漸層被 Otsu 切一半的假區域）
+    score = geo_score * 0.40 + content_score * 0.60
+    return score * (0.55 + 0.45 * edge_min)
 
 
-def _score_content(corners: np.ndarray, img: np.ndarray,
-                   img_w: int, img_h: int) -> float:
-    """評估候選四邊形內部的「文件特徵」
+def _score_content(corners: np.ndarray, ctx: _ScoreContext) -> tuple[float, float]:
+    """評估候選四邊形內部的「文件特徵」（v5 — 共用預計算特徵）
 
     1. 內外亮度差：文件內部應比外部亮（紙張 vs 背景）
     2. 內部亮度均勻度：紙張亮度應該比較均勻
-    3. 邊緣梯度強度：文件邊界應有明顯的亮度跳變
+    3. 逐邊梯度支持度：四條邊都必須有影像證據，最弱邊主導懲罰
+
+    Returns:
+        (content_score, edge_min)：內容分數與最弱邊支持度（供上層門控）
     """
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    gray = ctx.gray
+    img_h, img_w = ctx.h, ctx.w
 
     # 建立內部遮罩
     mask_in = np.zeros((img_h, img_w), dtype=np.uint8)
@@ -242,10 +316,12 @@ def _score_content(corners: np.ndarray, img: np.ndarray,
     in_count = cv2.countNonZero(mask_in)
     out_count = cv2.countNonZero(mask_out)
     if in_count < 100 or out_count < 100:
-        return 0.5
+        return 0.5, 0.5
 
-    # 1. 內外亮度差（0~1）
-    mean_in = cv2.mean(gray, mask=mask_in)[0]
+    # 1. 內外亮度差（0~1）— mean/std 一次算完
+    mean_in_arr, std_in_arr = cv2.meanStdDev(gray, mask=mask_in)
+    mean_in = float(mean_in_arr[0][0])
+    std_in = float(std_in_arr[0][0])
     mean_out = cv2.mean(gray, mask=mask_out)[0]
     # 文件內部應該比外部亮 20~100
     brightness_diff = mean_in - mean_out
@@ -259,7 +335,6 @@ def _score_content(corners: np.ndarray, img: np.ndarray,
         bright_s = 0  # 內部比外部暗 → 不像文件
 
     # 2. 內部亮度均勻度（低標準差 = 均勻 = 紙張）
-    std_in = np.std(gray[mask_in > 0])
     # 紙張 std 通常 20~50，複雜場景 std > 60
     if std_in < 30:
         uniform_s = 1.0
@@ -270,53 +345,15 @@ def _score_content(corners: np.ndarray, img: np.ndarray,
     else:
         uniform_s = 0.2
 
-    # 3. 邊緣梯度強度
-    edge_s = _score_edge_gradient(gray, pts, img_w, img_h)
+    # 3. 逐邊梯度支持度：平均 × 最弱邊門控
+    # 一條邊完全沒有梯度證據（如貼著圖框的假邊）→ 重罰
+    edge_scores = _edge_support_scores(ctx, pts)
+    edge_mean = float(np.mean(edge_scores))
+    edge_min = float(np.min(edge_scores))
+    edge_s = edge_mean * (0.35 + 0.65 * edge_min)
 
-    return bright_s * 0.45 + uniform_s * 0.25 + edge_s * 0.30
-
-
-def _score_edge_gradient(gray: np.ndarray, corners: np.ndarray,
-                         img_w: int, img_h: int) -> float:
-    """沿著四邊形的四條邊，計算垂直方向的平均梯度強度
-
-    強梯度 = 文件邊緣清晰（紙張到背景的銳利跳變）
-    """
-    # Sobel 梯度
-    grad_x = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
-    grad_y = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
-    grad_mag = np.sqrt(grad_x**2 + grad_y**2)
-
-    # 沿四條邊取樣梯度值
-    edges = [(corners[0], corners[1]), (corners[1], corners[2]),
-             (corners[2], corners[3]), (corners[3], corners[0])]
-
-    total_grad = 0
-    sample_count = 0
-
-    for p1, p2 in edges:
-        # 沿邊取 20 個取樣點
-        for t in np.linspace(0.1, 0.9, 20):
-            x = int(p1[0] + t * (p2[0] - p1[0]))
-            y = int(p1[1] + t * (p2[1] - p1[1]))
-            if 0 <= x < img_w and 0 <= y < img_h:
-                # 取 3x3 鄰域的最大梯度
-                y1, y2 = max(0, y-1), min(img_h, y+2)
-                x1, x2 = max(0, x-1), min(img_w, x+2)
-                total_grad += grad_mag[y1:y2, x1:x2].max()
-                sample_count += 1
-
-    if sample_count == 0:
-        return 0
-
-    avg_grad = total_grad / sample_count
-    # 正規化：梯度 20~80 是典型文件邊緣範圍
-    if avg_grad > 60:
-        return 1.0
-    elif avg_grad > 20:
-        return (avg_grad - 20) / 40.0
-    else:
-        return avg_grad / 20.0 * 0.3
+    content = bright_s * 0.35 + uniform_s * 0.20 + edge_s * 0.45
+    return content, edge_min
 
 
 def _intersect_lines(l1: dict, l2: dict) -> Optional[tuple[float, float]]:
@@ -420,7 +457,7 @@ def _reconstruct_quad_from_poly(poly: np.ndarray, img_w: int, img_h: int) -> Opt
 
 
 def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
-                    img: np.ndarray = None) -> Optional[tuple]:
+                    ctx: Optional[_ScoreContext] = None) -> Optional[tuple]:
     """從二值遮罩中找出最佳的文件四邊形
 
     Returns:
@@ -443,7 +480,7 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
             if len(approx) == 4:
                 pts = approx.reshape(4, 2)
                 if _is_valid_doc_quad(pts, img_w, img_h):
-                    score = _score_doc_quad(pts, img_w, img_h, img)
+                    score = _score_doc_quad(pts, img_w, img_h, ctx)
                     if score > best_score:
                         best_score = score
                         best_pts = pts
@@ -452,7 +489,7 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
                 # Try 5/6-side reconstruction on raw contour
                 reconstructed = _reconstruct_quad_from_poly(approx, img_w, img_h)
                 if reconstructed is not None and _is_valid_doc_quad(reconstructed, img_w, img_h):
-                    score = _score_doc_quad(reconstructed, img_w, img_h, img)
+                    score = _score_doc_quad(reconstructed, img_w, img_h, ctx)
                     if score > best_score:
                         best_score = score
                         best_pts = reconstructed
@@ -466,7 +503,7 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
             if len(approx_hull) == 4:
                 pts = approx_hull.reshape(4, 2)
                 if _is_valid_doc_quad(pts, img_w, img_h):
-                    score = _score_doc_quad(pts, img_w, img_h, img)
+                    score = _score_doc_quad(pts, img_w, img_h, ctx)
                     if score > best_score:
                         best_score = score
                         best_pts = pts
@@ -475,7 +512,7 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
                 # Try 5/6-side reconstruction on convex hull
                 reconstructed = _reconstruct_quad_from_poly(approx_hull, img_w, img_h)
                 if reconstructed is not None and _is_valid_doc_quad(reconstructed, img_w, img_h):
-                    score = _score_doc_quad(reconstructed, img_w, img_h, img)
+                    score = _score_doc_quad(reconstructed, img_w, img_h, ctx)
                     if score > best_score:
                         best_score = score
                         best_pts = reconstructed
@@ -487,7 +524,7 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
             rect = cv2.minAreaRect(c)
             box = cv2.boxPoints(rect).astype(int)
             if _is_valid_doc_quad(box, img_w, img_h):
-                score = _score_doc_quad(box, img_w, img_h, img)
+                score = _score_doc_quad(box, img_w, img_h, ctx)
                 if score > best_score:
                     best_score = score
                     best_pts = box
@@ -498,6 +535,11 @@ def _find_best_quad(mask: np.ndarray, img_w: int, img_h: int,
 
 
 _hed_net = None
+# 模型載入失敗後的冷卻時間（秒）— 避免每次掃描請求都重新嘗試下載模型
+# （下載失敗時每次重試 3 次 + 等待，會讓單次掃描多花數十秒）
+_MODEL_RETRY_COOLDOWN = 3600.0
+_hed_failed_at: Optional[float] = None
+_unet_failed_at: Optional[float] = None
 
 
 def ensure_hed_model() -> bool:
@@ -508,13 +550,18 @@ def ensure_hed_model() -> bool:
 
 
 def _get_hed_net():
-    """取得或初始化 HED 網路模型"""
-    global _hed_net
+    """取得或初始化 HED 網路模型（失敗後進入冷卻期，不阻塞掃描請求）"""
+    global _hed_net, _hed_failed_at
     if _hed_net is not None:
         return _hed_net
 
+    if _hed_failed_at is not None and time.monotonic() - _hed_failed_at < _MODEL_RETRY_COOLDOWN:
+        return None
+
     if not ensure_hed_model():
-        logger.error("HED 模型檔案不完整，無法載入網路")
+        logger.error("HED 模型檔案不完整，無法載入網路（%d 秒後才會重試）",
+                     int(_MODEL_RETRY_COOLDOWN))
+        _hed_failed_at = time.monotonic()
         return None
 
     try:
@@ -523,6 +570,7 @@ def _get_hed_net():
         return _hed_net
     except Exception as e:
         logger.error("載入 HED 網路失敗: %s", e)
+        _hed_failed_at = time.monotonic()
         return None
 
 
@@ -714,17 +762,18 @@ def ensure_unet_model() -> bool:
 
 
 def _get_unet_net():
-    """取得或初始化 U-Net 網路模型"""
-    global _unet_net
+    """取得或初始化 U-Net 網路模型（失敗後進入冷卻期，不阻塞掃描請求）"""
+    global _unet_net, _unet_failed_at
     if _unet_net is not None:
         return _unet_net
 
-    if not ensure_unet_model():
-        logger.warning("U-Net 模型檔案未就緒（將優雅降級）")
+    if _unet_failed_at is not None and time.monotonic() - _unet_failed_at < _MODEL_RETRY_COOLDOWN:
         return None
 
-    if not UNET_ONNX_PATH.exists():
-        logger.warning("U-Net ONNX 模型檔案不存在（將優雅降級）")
+    if not ensure_unet_model() or not UNET_ONNX_PATH.exists():
+        logger.warning("U-Net 模型檔案未就緒（將優雅降級，%d 秒後才會重試）",
+                       int(_MODEL_RETRY_COOLDOWN))
+        _unet_failed_at = time.monotonic()
         return None
 
     try:
@@ -733,6 +782,7 @@ def _get_unet_net():
         return _unet_net
     except Exception as e:
         logger.error("載入 U-Net ONNX 網路失敗: %s", e)
+        _unet_failed_at = time.monotonic()
         return None
 
 
@@ -784,15 +834,118 @@ def _detect_mask_unet(img_s: np.ndarray) -> Optional[np.ndarray]:
         return None
 
 
-def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
-    """偵測圖片中的文件邊界（v3 — 全面重新設計）
+def _refine_corners_fullres(img: np.ndarray,
+                            corners: np.ndarray) -> np.ndarray:
+    """在原始解析度上做次像素邊緣吸附，精修粗偵測的角點
 
-    所有策略並行執行 → 評分選最佳 → 嚴格拒絕「貼邊」結果
+    粗偵測在 ~800px 縮圖上進行，縮放回原圖後會有數像素的量化誤差，
+    且遮罩形態學運算可能讓邊界偏移。本函式：
+
+    1. 對每條邊取樣 28 點，沿法線方向搜尋亮度變化最大的位置
+       （次像素：對梯度峰值做拋物線內插）
+    2. 用 Huber 穩健直線擬合吸附點（自動忽略手指遮擋等離群點）
+    3. 相鄰邊直線求交點 = 精修後的角點
+
+    任一步驟證據不足（吸附點太少、交點偏移過大）就保留原值，
+    確保精修只會變好不會變壞。
     """
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    ordered = _order_points(corners.astype(np.float32))
+
+    # 搜尋半徑：約影像長邊的 1.2%（涵蓋粗偵測的縮放誤差）
+    search = max(6.0, 0.012 * max(w, h))
+    offs = np.arange(-search, search + 1.0, 1.0, dtype=np.float32)
+
+    lines = []
+    for i in range(4):
+        p1, p2 = ordered[i], ordered[(i + 1) % 4]
+        edge_vec = p2 - p1
+        length = float(np.linalg.norm(edge_vec))
+        if length < 10:
+            return corners  # 退化四邊形，不精修
+
+        # 原始邊直線（fallback 用）
+        A0, B0 = edge_vec[1], -edge_vec[0]
+        C0 = edge_vec[0] * p1[1] - edge_vec[1] * p1[0]
+        fallback = {"A": float(A0), "B": float(B0), "C": float(C0)}
+
+        nvec = np.array([-edge_vec[1], edge_vec[0]], np.float32) / length
+        ts = np.linspace(0.06, 0.94, 28, dtype=np.float32)
+        base = p1[None, :] + ts[:, None] * edge_vec[None, :]
+
+        # 沿法線取樣亮度剖面 (28, len(offs))
+        map_x = base[:, 0:1] + offs[None, :] * nvec[0]
+        map_y = base[:, 1:2] + offs[None, :] * nvec[1]
+        prof = cv2.remap(gray, map_x, map_y, cv2.INTER_LINEAR,
+                         borderMode=cv2.BORDER_REPLICATE).astype(np.float32)
+        # 沿法線方向平滑後取中央差分（近似一階導數）
+        prof = cv2.GaussianBlur(prof, (5, 1), 0)
+        dprof = np.abs(prof[:, 2:] - prof[:, :-2])
+
+        idx = np.argmax(dprof, axis=1)
+        strength = dprof[np.arange(len(ts)), idx]
+
+        # 拋物線次像素內插
+        idx_c = np.clip(idx, 1, dprof.shape[1] - 2)
+        y0 = dprof[np.arange(len(ts)), idx_c - 1]
+        y1 = dprof[np.arange(len(ts)), idx_c]
+        y2 = dprof[np.arange(len(ts)), idx_c + 1]
+        denom = y0 - 2 * y1 + y2
+        safe_denom = np.where(np.abs(denom) > 1e-6, denom, 1.0)
+        delta = np.where(np.abs(denom) > 1e-6, 0.5 * (y0 - y2) / safe_denom, 0.0)
+        delta = np.clip(delta, -1.0, 1.0)
+        # dprof 索引 j 對應 offs[j+1]
+        off_star = offs[np.clip(idx + 1, 0, len(offs) - 1)] + delta
+
+        # 只保留梯度證據夠強的取樣點
+        thr = max(8.0, float(np.median(strength)) * 0.35)
+        good = strength > thr
+        if int(np.sum(good)) < 8:
+            lines.append(fallback)
+            continue
+
+        snapped = base[good] + off_star[good, None] * nvec[None, :]
+        vx, vy, x0, ly0 = cv2.fitLine(snapped.astype(np.float32),
+                                      cv2.DIST_HUBER, 0, 0.01, 0.01).flatten()
+        lines.append({"A": float(vy), "B": float(-vx),
+                      "C": float(vx * ly0 - vy * x0)})
+
+    refined = []
+    max_shift = 2.5 * search
+    for i in range(4):
+        pt = _intersect_lines(lines[i - 1], lines[i])
+        orig = ordered[i]
+        if pt is None or math.hypot(pt[0] - orig[0], pt[1] - orig[1]) > max_shift:
+            pt = (float(orig[0]), float(orig[1]))
+        refined.append([min(max(pt[0], 0.0), w - 1.0),
+                        min(max(pt[1], 0.0), h - 1.0)])
+    return np.array(refined, np.float32)
+
+
+def detect_document(image_data: bytes) -> dict:
+    """偵測圖片中的文件邊界（v5 — 逐邊證據評分 + 次像素精修）
+
+    流程：
+    1. 縮圖上以多策略（U-Net / Canny / 白色區域 / Otsu / Laplacian /
+       HED / GrabCut）產生候選四邊形
+    2. 內容感知評分選最佳（逐邊梯度支持度 + 內外亮度差 + 幾何）
+    3. 便宜策略先跑，昂貴策略（HED / GrabCut）只在信心不足時啟動
+    4. 原始解析度次像素角點精修
+
+    Returns:
+        {
+            "corners": [[x,y]×4] 或 None,
+            "confidence": float 0~1,
+            "method": 勝出的策略名稱或 None,
+        }
+    """
+    no_result = {"corners": None, "confidence": 0.0, "method": None}
+
     nparr = np.frombuffer(image_data, np.uint8)
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     if img is None:
-        return None
+        return no_result
 
     orig_h, orig_w = img.shape[:2]
 
@@ -805,27 +958,27 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
         img_s = img.copy()
 
     h, w = img_s.shape[:2]
+    ctx = _ScoreContext(img_s)
     candidates = []
 
-    # ── 策略 00：U-Net 文件語意分割 ──
-    unet_mask = _detect_mask_unet(img_s)
-    if unet_mask is not None:
-        result = _find_best_quad(unet_mask, w, h, img_s)
+    def _try_mask(mask, name):
+        if mask is None:
+            return
+        result = _find_best_quad(mask, w, h, ctx)
         if result is not None:
             pts, s = result
-            candidates.append((s, pts, "UNet_Mask"))
+            candidates.append((s, pts, name))
 
-    # ── 策略 0：HED 顯著邊緣檢測 ──
-    hed_mask = _detect_edges_hed(img_s)
-    if hed_mask is not None:
-        result = _find_best_quad(hed_mask, w, h, img_s)
-        if result is not None:
-            pts, s = result
-            # HED 產生的邊界更乾淨，參與公平評分排序
-            candidates.append((s, pts, "HED_Edge"))
+    def _best_score():
+        return max((c[0] for c in candidates), default=0.0)
 
-    # ── 策略 1：強邊緣 Canny（多閾值）──
-    gray = cv2.cvtColor(img_s, cv2.COLOR_BGR2GRAY)
+    # ── 便宜策略先跑 ──
+
+    # 策略 00：U-Net 文件語意分割（模型已載入時很快；未就緒立即跳過）
+    _try_mask(_detect_mask_unet(img_s), "UNet_Mask")
+
+    # 策略 1：強邊緣 Canny（多閾值）
+    gray = ctx.gray
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     for lo, hi in [(30, 80), (50, 150), (20, 60)]:
         edged = cv2.Canny(blurred, lo, hi)
@@ -834,12 +987,9 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
         edged = cv2.morphologyEx(edged, cv2.MORPH_CLOSE,
                                   cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
                                   iterations=2)
-        result = _find_best_quad(edged, w, h, img_s)
-        if result is not None:
-            pts, s = result
-            candidates.append((s, pts, f"Canny({lo},{hi})"))
+        _try_mask(edged, f"Canny({lo},{hi})")
 
-    # ── 策略 2：白色區域（排除膚色+排除貼邊）──
+    # 策略 2：白色區域（排除膚色+排除貼邊）
     hsv = cv2.cvtColor(img_s, cv2.COLOR_BGR2HSV)
     lab = cv2.cvtColor(img_s, cv2.COLOR_BGR2LAB)
 
@@ -860,23 +1010,16 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
     k_l = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
     white = cv2.morphologyEx(white, cv2.MORPH_OPEN, k_s, iterations=2)
     white = cv2.morphologyEx(white, cv2.MORPH_CLOSE, k_l, iterations=4)
+    _try_mask(white, "WhiteRegion")
 
-    result = _find_best_quad(white, w, h, img_s)
-    if result is not None:
-        pts, s = result
-        candidates.append((s, pts, "WhiteRegion"))
-
-    # ── 策略 3：自適應閾值（Otsu）──
+    # 策略 3：自適應閾值（Otsu）
     _, otsu = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     k_m = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
     otsu = cv2.morphologyEx(otsu, cv2.MORPH_CLOSE, k_m, iterations=3)
     otsu = cv2.morphologyEx(otsu, cv2.MORPH_OPEN, k_m, iterations=2)
-    result = _find_best_quad(otsu, w, h, img_s)
-    if result is not None:
-        pts, s = result
-        candidates.append((s, pts, "Otsu"))
+    _try_mask(otsu, "Otsu")
 
-    # ── 策略 4：Laplacian 銳利邊緣（文件邊緣比背景更銳利）──
+    # 策略 4：Laplacian 銳利邊緣（文件邊緣比背景更銳利）
     lap = cv2.Laplacian(blurred, cv2.CV_64F)
     lap = np.uint8(np.absolute(lap))
     _, sharp = cv2.threshold(lap, 15, 255, cv2.THRESH_BINARY)
@@ -884,34 +1027,35 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
     sharp = cv2.morphologyEx(sharp, cv2.MORPH_CLOSE,
                               cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7)),
                               iterations=3)
-    result = _find_best_quad(sharp, w, h, img_s)
-    if result is not None:
-        pts, s = result
-        candidates.append((s, pts, "Laplacian"))
+    _try_mask(sharp, "Laplacian")
 
-    # ── 策略 5：GrabCut 前景分離 ──
-    try:
-        gc_mask = np.zeros((h, w), np.uint8)
-        bg_m = np.zeros((1, 65), np.float64)
-        fg_m = np.zeros((1, 65), np.float64)
-        mx, my = int(w * 0.12), int(h * 0.10)
-        rect = (mx, my, w - 2 * mx, h - 2 * my)
-        cv2.grabCut(img_s, gc_mask, rect, bg_m, fg_m, 3, cv2.GC_INIT_WITH_RECT)
-        fg = np.where((gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
-        fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE,
-                               cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
-                               iterations=3)
-        result = _find_best_quad(fg, w, h, img_s)
-        if result is not None:
-            pts, s = result
-            candidates.append((s, pts, "GrabCut"))
-    except Exception as e:
-        logger.debug("GrabCut 失敗: %s", e)
+    # ── 昂貴策略：便宜策略信心不足時才啟動 ──
+
+    # 策略 0：HED 顯著邊緣檢測（DNN 前向傳播較耗時）
+    if _best_score() < 0.85:
+        _try_mask(_detect_edges_hed(img_s), "HED_Edge")
+
+    # 策略 5：GrabCut 前景分離（迭代式分割，最耗時）
+    if _best_score() < 0.80:
+        try:
+            gc_mask = np.zeros((h, w), np.uint8)
+            bg_m = np.zeros((1, 65), np.float64)
+            fg_m = np.zeros((1, 65), np.float64)
+            mx, my = int(w * 0.12), int(h * 0.10)
+            rect = (mx, my, w - 2 * mx, h - 2 * my)
+            cv2.grabCut(img_s, gc_mask, rect, bg_m, fg_m, 3, cv2.GC_INIT_WITH_RECT)
+            fg = np.where((gc_mask == cv2.GC_FGD) | (gc_mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
+            fg = cv2.morphologyEx(fg, cv2.MORPH_CLOSE,
+                                   cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)),
+                                   iterations=3)
+            _try_mask(fg, "GrabCut")
+        except Exception as e:
+            logger.debug("GrabCut 失敗: %s", e)
 
     # ── 選出最佳候選 ──
     if not candidates:
         logger.info("所有策略無法偵測到文件邊界")
-        return None
+        return no_result
 
     candidates.sort(key=lambda x: x[0], reverse=True)
     for s, c, name in candidates[:5]:
@@ -923,11 +1067,26 @@ def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
     # 分數太低就不要（寧可讓使用者手動選）
     if best_score < 0.15:
         logger.info("最佳分數 %.3f 太低，放棄自動偵測", best_score)
-        return None
+        return no_result
 
-    best_corners = (best_corners / scale).astype(int)
-    ordered = _order_points(best_corners.astype("float32"))
-    return ordered.astype(int).tolist()
+    # 縮放回原圖座標（保留浮點精度），再做全解析度次像素精修
+    corners_full = best_corners.astype(np.float32) / scale
+    try:
+        corners_full = _refine_corners_fullres(img, corners_full)
+    except Exception as e:
+        logger.warning("角點精修失敗（使用粗偵測結果）: %s", e)
+
+    ordered = _order_points(corners_full.astype("float32"))
+    return {
+        "corners": np.rint(ordered).astype(int).tolist(),
+        "confidence": round(float(min(max(best_score, 0.0), 1.0)), 3),
+        "method": best_name,
+    }
+
+
+def detect_document_edges(image_data: bytes) -> Optional[list[list[int]]]:
+    """偵測文件邊界（相容介面 — 只回傳角點）"""
+    return detect_document(image_data)["corners"]
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1023,6 +1182,66 @@ def _compensate_distortion(img: np.ndarray, distortion: dict) -> np.ndarray:
     return result
 
 
+def _recover_true_aspect(rect: np.ndarray, img_w: int, img_h: int) -> Optional[float]:
+    """從透視四邊形推算文件的真實（物理）寬高比
+
+    Zhang & He「Whiteboard Scanning and Image Enhancement」方法：
+    假設針孔相機、主點在影像中心，從矩形的透視投影
+    反推焦距與矩形的真實寬高比。
+
+    這解決了「用影像上的邊長決定輸出尺寸」的系統性拉伸問題 —
+    斜拍的 A4 紙在影像上的寬高比與實際的 1:√2 相差甚遠。
+
+    Returns:
+        width/height 比值，或 None（退化情況，呼叫端應 fallback）
+    """
+    (tl, tr, br, bl) = rect
+    u0, v0 = img_w / 2.0, img_h / 2.0
+    diag = math.hypot(img_w, img_h)
+
+    # 以主點為原點的正規化座標（float64，改善數值條件）
+    m1 = np.array([tl[0] - u0, tl[1] - v0, 1.0], dtype=np.float64)
+    m2 = np.array([tr[0] - u0, tr[1] - v0, 1.0], dtype=np.float64)
+    m3 = np.array([bl[0] - u0, bl[1] - v0, 1.0], dtype=np.float64)
+    m4 = np.array([br[0] - u0, br[1] - v0, 1.0], dtype=np.float64)
+
+    try:
+        d2 = float(np.dot(np.cross(m2, m4), m3))
+        d3 = float(np.dot(np.cross(m3, m4), m2))
+        if abs(d2) < 1e-8 or abs(d3) < 1e-8:
+            return None
+        k2 = float(np.dot(np.cross(m1, m4), m3)) / d2
+        k3 = float(np.dot(np.cross(m1, m4), m2)) / d3
+
+        n2 = k2 * m2 - m1  # 寬方向的消失方向
+        n3 = k3 * m3 - m1  # 高方向的消失方向
+
+        # 焦距估計的條件數取決於 |n2[2]|、|n3[2]|（= k-1，透視收斂程度）。
+        # 一點透視（某方向對邊近乎平行）時焦距在數學上不可觀測，
+        # 此時改用「典型手機相機」的假設焦距（約 0.75 × 對角線 ≈ 26mm 等效）。
+        f = None
+        if min(abs(n2[2]), abs(n3[2])) > 0.015:
+            f2 = -(n2[0] * n3[0] + n2[1] * n3[1]) / (n2[2] * n3[2])
+            if f2 > 0:
+                f_est = math.sqrt(f2)
+                if 0.3 * diag <= f_est <= 3.0 * diag:
+                    f = f_est
+        if f is None:
+            f = 0.75 * diag
+
+        # ratio² = (n2ᵀ A⁻ᵀ A⁻¹ n2) / (n3ᵀ A⁻ᵀ A⁻¹ n3)
+        # 座標已移到主點，A⁻¹ 只剩 1/f 縮放前兩列
+        v2 = np.array([n2[0] / f, n2[1] / f, n2[2]])
+        v3 = np.array([n3[0] / f, n3[1] / f, n3[2]])
+        denom = float(np.dot(v3, v3))
+        if denom < 1e-12:
+            return None
+        ratio = math.sqrt(float(np.dot(v2, v2)) / denom)
+        return ratio if math.isfinite(ratio) else None
+    except Exception:
+        return None
+
+
 def perspective_transform(image_data: bytes,
                           corners: list[list[int]]) -> bytes:
     """透視校正 — 將歪斜文件拉正成矩形（高品質版）
@@ -1030,7 +1249,7 @@ def perspective_transform(image_data: bytes,
     品質改進：
     1. INTER_LANCZOS4 插值（8x8 像素鄰域，最佳重採樣品質）
     2. 解析度上限提高到 4500px（大角度時有更多像素可用）
-    3. 基於 A4 比例智慧推算輸出尺寸（避免極端拉伸）
+    3. 從透視幾何反推文件真實寬高比（Zhang-He 法），輸出不再拉伸變形
     4. 自動偵測變形程度，高變形時做失真補償
     5. BORDER_REFLECT 避免邊緣黑邊
     """
@@ -1069,6 +1288,19 @@ def perspective_transform(image_data: bytes,
 
     max_width = max(max_width, 100)
     max_height = max(max_height, 100)
+
+    # 從透視幾何反推文件的真實寬高比（僅在合理範圍內採用；
+    # 精修過的角點通常很準，但退化/極端情況 fallback 到影像邊長比例）
+    img_h_full, img_w_full = img.shape[:2]
+    true_ratio = _recover_true_aspect(rect, img_w_full, img_h_full)
+    naive_ratio = max_width / max_height
+    if (true_ratio is not None and 0.2 <= true_ratio <= 5.0
+            and 0.5 <= true_ratio / naive_ratio <= 2.0):
+        # 兩個方向都不縮小（不丟解析度），只放大較短的一邊來符合真實比例
+        out_w = max(float(max_width), max_height * true_ratio)
+        max_width = int(round(out_w))
+        max_height = int(round(out_w / true_ratio))
+        logger.info("真實寬高比恢復: naive=%.3f → true=%.3f", naive_ratio, true_ratio)
 
     # 提高解析度上限（大角度需要更多像素）
     max_dim = 4500
@@ -1942,6 +2174,12 @@ def rotate_image(image_data: bytes, angle: int) -> bytes:
 # 7. 完整掃描流水線
 # ══════════════════════════════════════════════════════════════
 
+# 自動套用透視校正的最低信心門檻：
+# 低於此值時仍回傳偵測到的角點（前端可顯示供手動調整），
+# 但不自動裁切 — 誤裁一張沒有文件的照片比不裁更糟。
+MIN_AUTO_APPLY_CONFIDENCE = 0.45
+
+
 def scan_document(image_data: bytes,
                   corners: Optional[list[list[int]]] = None,
                   filter_name: str = "auto",
@@ -1957,6 +2195,7 @@ def scan_document(image_data: bytes,
     detected_corners = corners
     auto_detected = False
     distortion_info = None
+    confidence = None
 
     # Step 1: 邊界偵測 + 透視校正
     if corners:
@@ -1968,17 +2207,23 @@ def scan_document(image_data: bytes,
             logger.error("透視校正失敗（手動角點）: %s", e, exc_info=True)
             # 失敗時跳過透視校正，繼續處理原圖
     elif auto_detect:
-        detected_corners = detect_document_edges(image_data)
-        if detected_corners:
+        detection = detect_document(image_data)
+        detected_corners = detection["corners"]
+        confidence = detection["confidence"]
+        if detected_corners and confidence >= MIN_AUTO_APPLY_CONFIDENCE:
             try:
                 auto_detected = True
                 distortion_info = _estimate_distortion_level(
                     np.array(detected_corners, dtype="float32"))
                 processed = perspective_transform(processed, detected_corners)
-                logger.info("自動邊界偵測 + 透視校正完成")
+                logger.info("自動邊界偵測 + 透視校正完成 (信心 %.2f, %s)",
+                            confidence, detection["method"])
             except Exception as e:
                 logger.error("透視校正失敗（自動偵測）: %s", e, exc_info=True)
                 processed = image_data  # fallback 到原圖
+        elif detected_corners:
+            logger.info("偵測信心不足 (%.2f < %.2f)，不自動裁切（回傳角點供手動調整）",
+                        confidence, MIN_AUTO_APPLY_CONFIDENCE)
         else:
             logger.info("未偵測到邊界，跳過透視校正")
 
@@ -2002,6 +2247,7 @@ def scan_document(image_data: bytes,
         "image": processed,
         "corners": detected_corners,
         "auto_detected": auto_detected,
+        "confidence": confidence,
         "filter_applied": filter_name,
         "original_size": (orig_w, orig_h),
         "processed_size": (proc_w, proc_h),

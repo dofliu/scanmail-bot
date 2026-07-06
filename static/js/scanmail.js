@@ -579,7 +579,11 @@ async function startScanProcessing(originalDataUrl) {
 
         if (detectResult.detected && detectResult.corners) {
             state.cropCorners = detectResult.corners;
-            elements.cropHint.textContent = '✅ 已自動偵測到文件邊界，可拖曳角點微調';
+            if (detectResult.confidence !== undefined && detectResult.confidence < 0.45) {
+                elements.cropHint.textContent = '⚠️ 偵測信心較低，請確認並拖曳角點調整文件範圍';
+            } else {
+                elements.cropHint.textContent = '✅ 已自動偵測到文件邊界，可拖曳角點微調';
+            }
         } else {
             // 未偵測到邊界，設定預設裁切框
             setDefaultCorners();
@@ -1487,7 +1491,11 @@ function setupEventListeners() {
                 state.cropCorners = r.corners;
                 state.cropImageWidth = r.image_width;
                 state.cropImageHeight = r.image_height;
-                elements.cropHint.textContent = '✅ 已偵測到文件邊界';
+                if (r.confidence !== undefined && r.confidence < 0.45) {
+                    elements.cropHint.textContent = '⚠️ 偵測信心較低，請確認並調整角點';
+                } else {
+                    elements.cropHint.textContent = '✅ 已偵測到文件邊界';
+                }
             } else {
                 elements.cropHint.textContent = 'ℹ️ 未偵測到邊界，請手動調整角點';
             }
