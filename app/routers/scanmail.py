@@ -17,10 +17,11 @@ from app.models.template import TemplateModel
 from app.services.ai_analyzer import analyze_document
 from app.services.image_processor import (
     image_to_pdf, images_to_pdf, validate_image, get_image_info,
+    normalize_orientation,
 )
 from app.services.email_sender import send_email
 from app.services.doc_scanner import (
-    detect_document_edges, perspective_transform, apply_filter,
+    detect_document, perspective_transform, apply_filter,
     scan_document, rotate_image,
 )
 
@@ -82,6 +83,11 @@ async def upload_image(request: Request, file: UploadFile = File(...)):
     if media_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
         media_type = "image/jpeg"
 
+    # EXIF 方向轉正：確保前端顯示與後端處理的座標系一致
+    content, reencoded = normalize_orientation(content)
+    if reencoded:
+        media_type = "image/jpeg"
+
     session.image_data = content
     session.image_original = content
     session.image_media_type = media_type
@@ -108,13 +114,15 @@ async def detect_edges(request: Request):
         raise HTTPException(status_code=400, detail="請先上傳圖片")
 
     source = session.image_original or session.image_data
-    corners = detect_document_edges(source)
+    detection = detect_document(source)
     info = get_image_info(source)
 
     return {
         "success": True,
-        "corners": corners,
-        "detected": corners is not None,
+        "corners": detection["corners"],
+        "detected": detection["corners"] is not None,
+        "confidence": detection["confidence"],
+        "method": detection["method"],
         "image_width": info.get("width", 0),
         "image_height": info.get("height", 0),
     }
@@ -156,7 +164,9 @@ async def process_scan(request: Request, body: ScanRequest):
     try:
         session.image_data = result["image"]
         session.image_media_type = "image/jpeg"
-        if result.get("corners"):
+        # 只在真的套用了透視校正時記錄角點（手動指定或高信心自動偵測）
+        # — 否則 /scan/filter 會用被否決的低信心角點重新裁切
+        if result.get("corners") and (corners or result.get("auto_detected")):
             session.detected_corners = result["corners"]
 
         img_b64 = base64.b64encode(result["image"]).decode("utf-8")
@@ -166,6 +176,7 @@ async def process_scan(request: Request, body: ScanRequest):
             "image_base64": img_b64,
             "corners": result.get("corners"),
             "auto_detected": result.get("auto_detected", False),
+            "confidence": result.get("confidence"),
             "filter_applied": result.get("filter_applied", "auto"),
             "original_size": result.get("original_size"),
             "processed_size": result.get("processed_size"),

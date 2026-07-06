@@ -33,6 +33,35 @@ def validate_image(image_data: bytes) -> tuple[bool, str]:
     return True, ""
 
 
+def normalize_orientation(image_data: bytes) -> tuple[bytes, bool]:
+    """依 EXIF Orientation 把像素轉正（手機直拍照片必要）
+
+    瀏覽器顯示 <img> 時會套用 EXIF 方向，但 OpenCV 解碼時不會 —
+    若不先轉正，前端看到的圖與後端處理的圖方向不同，
+    使用者手動框選的角點座標會對不上。
+
+    只在方向標籤 ≠ 1 時才重新編碼（避免無謂的品質損失）。
+
+    Returns:
+        (image_bytes, was_reencoded)：轉正後為 JPEG；未轉動時原樣返回
+    """
+    try:
+        img = Image.open(io.BytesIO(image_data))
+        orientation = img.getexif().get(0x0112, 1)
+        if orientation == 1:
+            return image_data, False
+        img = ImageOps.exif_transpose(img)
+        if img.mode in ("RGBA", "P", "LA"):
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=95)
+        logger.info("EXIF 方向 %s → 已轉正並重新編碼", orientation)
+        return buf.getvalue(), True
+    except Exception as e:
+        logger.warning("EXIF 方向正規化失敗（使用原圖）: %s", e)
+        return image_data, False
+
+
 def optimize_image(image_data: bytes, max_dimension: int = 2480,
                    quality: int = 85) -> bytes:
     """最佳化圖片（旋轉、壓縮、調整尺寸）"""
