@@ -1,6 +1,6 @@
 # ScanMail+ 開發規劃與 TODO
 
-> 最後更新：2026/06/07
+> 最後更新：2026/07/08
 
 ---
 
@@ -103,6 +103,19 @@
 - [x] **M4.5 — Layer 2 表格擴充**：`page.find_tables()` 偵測 cell-based 表單（label cell + 相鄰空白 cell）
 - [x] **M4.6 — Layer 2→4 Auto Fallback**：Layer 2 偵測 0 欄位時自動轉影像走 Gemini
 
+### Phase 10：文件邊界偵測 v5（產品級掃描品質）
+
+> PR: [#21](https://github.com/dofliu/scanmail-bot/pull/21) · 22 案例 ground-truth 基準測試：良好偵測 15/22 → 22/22，平均 IoU 0.908 → 0.997，角點誤差中位數 18.2px → 0.6px，單張延遲 11.5s → 0.9s
+
+- [x] **評分系統重寫**：矩形度 → 凸性（不再懲罰透視梯形）；逐邊梯度支持度 + 最弱邊乘法門控（淘汰貼邊/漸層假邊）
+- [x] **效能優化**：灰階/Sobel 特徵每張圖只算一次；HED/GrabCut 等昂貴策略延遲到便宜策略信心不足時才啟動
+- [x] **次像素角點精修**：原始解析度下沿邊緣法線方向拋物線內插 + Huber 穩健直線擬合
+- [x] **真實寬高比恢復**：Zhang–He whiteboard 法從透視幾何反推文件物理寬高比，校正輸出不再拉伸變形
+- [x] **偵測信心值 API 化**：`detect_document()` 回傳 `{corners, confidence, method}`；信心 < 0.45 不自動裁切，前端顯示提示改為手動調整
+- [x] **EXIF 方向正規化**：上傳時轉正手機直拍照片，避免前後端座標系不一致
+- [x] **模型下載失敗快取**：HED/U-Net 模型無法下載時進入 1 小時冷卻，不再每次掃描請求都重試
+- [x] 新增 `tests/test_doc_scanner_v5.py`：20 個回歸測試（精度、誤報抑制、寬高比恢復、EXIF、API 契約）
+
 ---
 
 ## 待開發功能 🚧
@@ -118,10 +131,12 @@
 ### 掃描體驗
 
 - [x] 裁切即時預覽 — 拖曳角點時即時顯示校正後效果
-- [x] 邊界偵測持續優化 — 更多真實場景測試（2026/06/07 已完成六大失真場景自動化評估測試）
+- [x] 邊界偵測持續優化 — 更多真實場景測試（2026/06/07 已完成六大失真場景自動化評估測試；2026/07/08 v5 完成 22 案例合成 ground-truth 基準測試，見 Phase 10）
 - [x] 邊界偵測優化：改善角點被手指/物體遮擋的辨識度 (Scene 5)
   - [x] 導入凸包 (Convex Hull) 運算修復被遮擋的邊界缺口
   - [x] 對近似後的五/六邊形進行直角邊外推，計算交點以重建被「圓角化」的直角頂點
+- [x] 次像素角點精修 + 真實寬高比恢復（v5，見 Phase 10）
+- [ ] 前端：低信心偵測時提供「重新拍攝建議」而非僅文字提示（例如反光/過暗場景引導）
 
 
 ### 使用者體驗
@@ -142,16 +157,16 @@
 
 | 項目 | 數量 |
 |------|------|
-| API 路由 | 73 |
+| API 路由 | 85 |
 | 工具頁面 | 7 |
 | JS 模組 | 8 |
 | 後端服務模組 | 10 |
 | 資料庫表 | 7 |
 | 資料模型 | 5 (contact, group, template, history, sender) |
-| 邊界偵測策略 | 5 (Canny, WhiteRegion, Otsu, Laplacian, GrabCut) |
+| 邊界偵測策略 | 7 (UNet_Mask, Canny×3, WhiteRegion, Otsu, Laplacian, HED, GrabCut — v5 逐邊證據評分 + 次像素精修) |
 | 掃描濾鏡 | 7 (auto, scan, color_doc, document, enhance, bw, original) |
 | 郵件模板 | 8 種文件類型預設 + 自訂 |
-| 測試 | 164 (含 Form Fill 14 + review fixes 4 + Sprint 1 52) |
+| 測試 | 205（202 passed + 3 skipped，含 Form Fill 14 + review fixes 4 + Sprint 1 52 + Scan v5 20） |
 
 ---
 
@@ -171,6 +186,17 @@
 ---
 
 ## 變更日誌
+
+### 2026/07/08 (v3.4.0 — 文件邊界偵測 v5)
+- 評分系統重寫：矩形度 → 凸性（v4 懲罰透視梯形，導致大角度拍攝時包圍盒贏過真正邊界）
+- 逐邊梯度支持度 + 最弱邊乘法門控：淘汰貼圖框假邊、明暗漸層誤判
+- 效能：共用特徵預計算 + 昂貴策略（HED/GrabCut）延遲啟動，單張延遲 11.5s → 0.9s
+- 新增：原始解析度次像素角點精修、Zhang–He 法真實寬高比恢復（透視校正不再拉伸變形）
+- 新增：偵測信心值貫穿 `detect_document()` 與 `/scan/detect`、`/scan/process` API，信心 < 0.45 不自動裁切
+- 新增：上傳時 EXIF 方向正規化；模型下載失敗 1 小時冷卻快取（不再每次掃描重試）
+- 22 案例 ground-truth 基準：良好偵測 15/22 → 22/22，平均 IoU 0.908 → 0.997，角點誤差中位數 18.2px → 0.6px
+- 新增 20 個回歸測試（`tests/test_doc_scanner_v5.py`）；全測試套件 205 個（202 passed + 3 skipped）
+- 版本號統一升級至 3.4.0（`main.py` / PWA cache `scanmail-v4` / 前端資源版號）
 
 ### 2026/06/16 (v3.3.1)
 - 修正 `static/js/desktop.jsx` 於 AI 辨識區塊之 React JSX 語法錯誤。
