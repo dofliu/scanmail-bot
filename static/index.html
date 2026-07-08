@@ -47,7 +47,7 @@
     // PWA Service Worker 註冊
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=3.3.1').catch(err => {
+        navigator.serviceWorker.register('sw.js?v=3.4.0').catch(err => {
           console.error('ServiceWorker 註冊失敗: ', err);
         });
       });
@@ -78,11 +78,11 @@
 <body>
 <div id="root"></div>
 
-<script src="js/api.js?v=3.3.1"></script>
-<script src="js/store.js?v=3.3.1"></script>
-<script type="text/babel" src="js/atoms.jsx?v=3.3.1"></script>
-<script type="text/babel" src="js/mobile.jsx?v=3.3.1"></script>
-<script type="text/babel" src="js/desktop.jsx?v=3.3.1"></script>
+<script src="js/api.js?v=3.4.0"></script>
+<script src="js/store.js?v=3.4.0"></script>
+<script type="text/babel" src="js/atoms.jsx?v=3.4.0"></script>
+<script type="text/babel" src="js/mobile.jsx?v=3.4.0"></script>
+<script type="text/babel" src="js/desktop.jsx?v=3.4.0"></script>
 
 <script type="text/babel">
 const { useState, useEffect } = React;

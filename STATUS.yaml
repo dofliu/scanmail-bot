@@ -3,7 +3,7 @@ name_zh: 文件掃描郵件平台
 category: personal_tools
 progress: 100
 status: production
-last_updated: "2026-06-17"
+last_updated: "2026-07-08"
 next_milestone: "Production maintenance & deployment verification"
 technologies:
   - Python
@@ -14,5 +14,6 @@ outputs:
   - tool
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "81 API endpoints, 8 tool categories, 183 tests"
+key_metrics: "85 API endpoints, 8 tool categories, 205 tests"
+recent_changes: "v3.4.0 — document boundary detection v5: per-edge evidence scoring, sub-pixel corner refinement, true aspect-ratio recovery (Zhang-He), detection confidence gating, EXIF normalization (PR #21, merged)"
 

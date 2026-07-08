@@ -12,8 +12,9 @@
 
 | 功能 | 說明 |
 |------|------|
-| 拍照 / 上傳 | 手機相機、桌機 Webcam、或直接上傳圖檔 |
-| 文件掃描處理 | OpenCV 自動邊界偵測（5 種策略）+ 透視校正 + 7 種濾鏡 |
+| 拍照 / 上傳 | 手機相機、桌機 Webcam、或直接上傳圖檔（自動 EXIF 方向轉正） |
+| 文件掃描處理 | OpenCV 自動邊界偵測（v5：逐邊證據評分 + 次像素角點精修）+ 透視校正（真實寬高比恢復）+ 7 種濾鏡 |
+| 偵測信心值 | 低信心自動判斷不裁切，改為提示使用者手動調整角點 |
 | 角點手動調整 | Canvas 可視化拖曳四個角點，精確裁切文件 |
 | 圖片旋轉 | 90°/180°/270° 順時針/逆時針旋轉 |
 | 多頁掃描 | 連續拍攝多張，合併為一份多頁 PDF |
@@ -231,7 +232,7 @@ scanmail-bot/
 │   │   └── batch_rename.py         #   批次改名
 │   │
 │   ├── services/                   # 業務邏輯
-│   │   ├── doc_scanner.py          #   邊界偵測/透視校正/濾鏡
+│   │   ├── doc_scanner.py          #   邊界偵測 v5（逐邊評分/次像素精修/寬高比恢復）/透視校正/濾鏡
 │   │   ├── image_processor.py      #   圖片驗證/PDF 轉換
 │   │   ├── ai_analyzer.py          #   Gemini AI 辨識
 │   │   ├── email_sender.py         #   SMTP 寄送
@@ -270,15 +271,16 @@ scanmail-bot/
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
-### API 端點總覽（81 個）
+### API 端點總覽（85 個）
 
 | 群組 | 主要端點 | 數量 |
 |------|------|------|
-| 掃描郵寄 | `/api/upload`, `/api/scan/*`, `/api/pages/*`, `/api/analyze`, `/api/send` | 20 |
+| 掃描郵寄 | `/api/upload`, `/api/scan/*`（v5：回傳 `confidence`/`method`）, `/api/pages/*`, `/api/analyze`, `/api/send` | 20 |
 | 批次寄送 | `/api/send/batch` | 1 |
 | 收件人群組 | `/api/groups`, `/api/groups/{id}`, `/api/groups/{id}/members` | 5 |
 | 郵件模板 | `/api/templates`, `/api/templates/{doc_type}` | 5 |
 | 聯絡人/歷史/設定 | `/api/contacts`, `/api/history`, `/api/stats`, `/api/settings` | 7 |
+| 使用者認證 | `/auth/register`, `login`, `logout`, `status` | 4 |
 | 圖片工具 | `/api/tools/image/resize`, `convert`, `compress`, `watermark`, `batch/*` | 11 |
 | PDF 工具 | `/api/tools/pdf/merge`, `watermark/*`, `protect`, `info` | 7 |
 | 文件轉檔 | `/api/tools/convert/word-to-pdf`, `pdf-to-word`, `md-to-*`, `word-to-md` | 5 |
