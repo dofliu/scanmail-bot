@@ -15,7 +15,15 @@ const ScanMailAPI = (() => {
       const res = await fetch(url, opts);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || `HTTP ${res.status}`);
+        // FastAPI 422 驗證錯誤的 detail 是物件陣列（非字串），
+        // 直接丟進 Error 會變成不可讀的 "[object Object]"
+        let message = err.detail;
+        if (Array.isArray(message)) {
+          message = message.map(d => d.msg || JSON.stringify(d)).join('；');
+        } else if (message && typeof message === 'object') {
+          message = message.msg || JSON.stringify(message);
+        }
+        throw new Error(message || `HTTP ${res.status}`);
       }
       const ct = res.headers.get('content-type') || '';
       if (ct.includes('application/json')) return await res.json();
