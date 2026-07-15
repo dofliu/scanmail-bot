@@ -104,8 +104,12 @@ def _is_valid_doc_quad(corners: np.ndarray, img_w: int, img_h: int) -> bool:
     img_area = img_w * img_h
     ratio = area / img_area
 
-    # 面積限制：5% ~ 80%
-    if ratio < 0.05 or ratio > 0.80:
+    # 面積限制：5% ~ 97%
+    # 上限原本是 80%，會誤拒近距離拍攝（文件填滿畫面）這種常見且建議的
+    # 拍攝方式 —— 使用者為了最大解析度把文件拍到快滿版是標準做法，
+    # 不該被當成異常。真正的「整張照片＝文件」誤判由下方的貼邊規則把關，
+    # 不需要靠面積上限重複防禦。
+    if ratio < 0.05 or ratio > 0.97:
         return False
 
     ordered = _order_points(corners.astype("float32"))
@@ -231,15 +235,16 @@ def _score_doc_quad(corners: np.ndarray, img_w: int, img_h: int,
 
     # ── 幾何分數 ──
 
-    # 面積分：偏好 10%~60%
+    # 面積分：10%~90% 都給滿分（近距離拍攝文件填滿畫面是常見且建議的拍法），
+    # 90%~97% 緩降，> 97% 才視為可疑（見 _is_valid_doc_quad 的硬性上限）
     if ratio < 0.05:
         area_s = 0
     elif ratio < 0.15:
         area_s = (ratio - 0.05) / 0.10
-    elif ratio < 0.65:
+    elif ratio < 0.90:
         area_s = 1.0
-    elif ratio < 0.85:
-        area_s = 1.0 - (ratio - 0.65) / 0.20
+    elif ratio < 0.97:
+        area_s = 1.0 - (ratio - 0.90) / 0.07
     else:
         area_s = 0
 

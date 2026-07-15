@@ -233,13 +233,19 @@ function DScan(){
   const [processing, setProcessing] = dUseState(false);
   const [sending, setSending] = dUseState(false);
   const [showCamera, setShowCamera] = dUseState(false);
+  // 裁切確認畫面 — 上傳/拍照後先讓使用者看到自動偵測的邊界並可拖曳微調，
+  // 確認後才送出裁切+透視校正。與 mobile 版 MScanCrop 用同一套 CropEditor，
+  // 修正先前「偵測到角點就直接強制套用透視校正」略過確認、且會蓋掉後端
+  // 信心門檻判斷的問題。
+  const [cropping, setCropping] = dUseState(false);
+  const [processedUrl, setProcessedUrl] = dUseState(null);
   const subjectRef = dUseRef(null);
   const bodyRef = dUseRef(null);
 
   const runPostUpload = async () => {
+    setProcessedUrl(null);
     await store.detectEdges().catch(() => {});
-    await store.processScan(state.detectedCorners, state.selectedFilter, true);
-    await store.addPageAPI();
+    setCropping(true);
   };
 
   const handleUpload = async (files) => {
@@ -258,6 +264,17 @@ function DScan(){
     try {
       await store.captureAndUpload(blob);
       await runPostUpload();
+    } catch(e) { /* toast handled */ }
+    setProcessing(false);
+  };
+
+  const applyCrop = async () => {
+    setProcessing(true);
+    try {
+      const result = await store.processScan(state.detectedCorners, state.selectedFilter, !state.detectedCorners);
+      if (result?.image_base64) setProcessedUrl('data:image/jpeg;base64,' + result.image_base64);
+      await store.addPageAPI();
+      setCropping(false);
     } catch(e) { /* toast handled */ }
     setProcessing(false);
   };
@@ -300,7 +317,8 @@ function DScan(){
     setSending(false);
   };
 
-  const imgSrc = state.scanImageBase64 ? 'data:image/jpeg;base64,' + state.scanImageBase64 : state.scanOriginalDataUrl;
+  const imgSrc = processedUrl || (state.scanImageBase64 ? 'data:image/jpeg;base64,' + state.scanImageBase64 : state.scanOriginalDataUrl);
+  const lowConfidence = state.detectionConfidence !== null && state.detectionConfidence !== undefined && state.detectionConfidence < 0.45;
 
   return (
     <div className="d-scan-layout">
@@ -353,13 +371,21 @@ function DScan(){
 
       {/* CENTER: editor */}
       <div style={{display:'flex', flexDirection:'column', gap:'12px', minHeight:0}}>
-        <div style={{background:'var(--paper-2)', borderRadius:'14px', padding:'24px', flex:1, display:'flex', alignItems:'center', justifyContent:'center', border:'1.25px solid var(--line-soft)', position:'relative', overflow:'hidden'}}>
+        <div style={{background:'var(--paper-2)', borderRadius:'14px', padding: cropping ? '0' : '24px', flex:1, display:'flex', alignItems:'center', justifyContent:'center', border:'1.25px solid var(--line-soft)', position:'relative', overflow:'hidden'}}>
           {processing && (
             <div style={{position:'absolute', inset:0, zIndex:10, background:'rgba(255,255,255,0.8)', display:'flex', alignItems:'center', justifyContent:'center'}}>
               <LoadingSpinner text="處理中..."/>
             </div>
           )}
-          {state.pages.length === 0 && !processing ? (
+          {cropping && state.scanOriginalDataUrl ? (
+            <CropEditor
+              imageSrc={state.scanOriginalDataUrl}
+              corners={state.detectedCorners}
+              imgW={state.imageWidth}
+              imgH={state.imageHeight}
+              onChange={(newCorners) => store.set({detectedCorners: newCorners})}
+            />
+          ) : state.pages.length === 0 && !processing ? (
             <div style={{textAlign:'center'}}>
               <div style={{fontSize:'64px', opacity:0.3}}>📄</div>
               <div className="hand" style={{fontSize:'22px', marginTop:'10px', color:'var(--ink-3)'}}>尚未匯入文件</div>
@@ -375,21 +401,38 @@ function DScan(){
         </div>
 
         <div className="card" style={{padding:'12px 16px'}}>
-          <div className="row">
-            <div style={{display:'flex', gap:'6px'}}>
-              <button className="iconbtn" title="左轉" onClick={() => store.rotateImageAPI(-90)}>↺</button>
-              <button className="iconbtn" title="右轉" onClick={() => store.rotateImageAPI(90)}>↻</button>
-              <button className="iconbtn" title="偵測" onClick={() => store.detectEdges()}>🔍</button>
+          {cropping ? (
+            <div className="row between">
+              <div style={{display:'flex', gap:'6px', alignItems:'center'}}>
+                <button className="iconbtn" title="重新自動偵測" onClick={() => store.detectEdges()}>🔍</button>
+                <button className="iconbtn" title="重設為預設範圍" onClick={() => store.set({detectedCorners:null})}>↩</button>
+                {lowConfidence && (
+                  <span style={{fontSize:'11px', color:'var(--warn, #b5772e)'}}>⚠️ 偵測信心較低，請拖曳角點確認邊界</span>
+                )}
+              </div>
+              <button className="btn primary" disabled={processing} onClick={applyCrop}>
+                {processing ? '處理中...' : '✂️ 套用裁切 →'}
+              </button>
             </div>
-            <div style={{flex:1, marginLeft:'16px'}}>
-              <FilterStrip
-                selected={state.selectedFilter}
-                onChange={async (f) => {
-                  store.setFilter(f);
-                  try { await store.applyFilterAPI(f); } catch(e) {}
-                }}/>
+          ) : (
+            <div className="row">
+              <div style={{display:'flex', gap:'6px'}}>
+                <button className="iconbtn" title="左轉" onClick={() => { setProcessedUrl(null); store.rotateImageAPI(-90); }}>↺</button>
+                <button className="iconbtn" title="右轉" onClick={() => { setProcessedUrl(null); store.rotateImageAPI(90); }}>↻</button>
+              </div>
+              <div style={{flex:1, marginLeft:'16px'}}>
+                <FilterStrip
+                  selected={state.selectedFilter}
+                  onChange={async (f) => {
+                    store.setFilter(f);
+                    try {
+                      const result = await store.applyFilterAPI(f);
+                      if (result?.image_base64) setProcessedUrl('data:image/jpeg;base64,' + result.image_base64);
+                    } catch(e) {}
+                  }}/>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
