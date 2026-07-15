@@ -66,6 +66,19 @@ def _scene(quad, w=800, h=600):
     return buf.tobytes(), quad
 
 
+def _scene_with_hand(quad, hand_poly, w=800, h=600):
+    """同 _scene，但額外疊加一塊膚色區域（模擬手拿著文件的一角/一邊）"""
+    import cv2
+    data, gt = _scene(quad, w, h)
+    img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+    skin_bgr = (140, 180, 225)
+    cv2.fillPoly(img, [np.array(hand_poly, np.int32)], skin_bgr)
+    img = cv2.GaussianBlur(img, (7, 7), 0)
+    ok, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 85])
+    assert ok
+    return buf.tobytes(), gt
+
+
 def _quad_iou(a, b, w, h):
     import cv2
     ma = np.zeros((h, w), np.uint8)
@@ -159,6 +172,41 @@ class TestCloseUpFraming:
         r = detect_document(data)
         assert r["corners"] is not None
         assert _quad_iou(r["corners"], gt, 1600, 1200) > 0.9
+        assert r["confidence"] >= 0.45
+
+
+class TestHandOcclusion:
+    """手拿文件拍照 — 大範圍膚色遮擋角落/邊緣的迴歸測試
+
+    使用者回報：手拿著文件拍照時，偵測到的「文件」把手掌也框了進去
+    （裁切結果含手掌、且因為框到的是紙+手的合併輪廓而非紙張真正的
+    四個角，透視校正後看起來還是歪的）。根因：Canny/Otsu/Laplacian/
+    GrabCut 等策略沒有膚色感知，形態學閉運算容易把手掌與紙張「焊」成
+    同一塊前景。修正：在找輪廓前，從每個候選遮罩中先挖除膚色像素
+    （而非事後用分數懲罰 —— 分數懲罰在暖色調背景/紙張下精確度太差，
+    容易誤傷不相干的候選，已於開發過程中驗證並改用遮罩層級的修正）。
+    """
+
+    def test_hand_gripping_edge_excluded_from_crop(self):
+        from app.services.doc_scanner import detect_document
+        # 文件本體（同 mild_perspective 案例的四邊形），右側有一大塊
+        # 模擬手掌的膚色多邊形，與文件右緣重疊
+        quad = [[220, 60], [590, 75], [575, 545], [205, 530]]
+        hand_poly = [[560, 90], [800, 40], [800, 560], [530, 500]]
+        data, gt = _scene_with_hand(quad, hand_poly)
+        r = detect_document(data)
+        assert r["corners"] is not None
+        # 手掌不該被框進文件邊界 —— IoU 應該還是緊貼紙張本身
+        assert _quad_iou(r["corners"], gt, 800, 600) > 0.85
+
+    def test_hand_does_not_regress_clean_detection(self):
+        """沒有手的乾淨場景不該被膚色遮罩機制連累（例如暖色調背景/紙張）"""
+        from app.services.doc_scanner import detect_document
+        quad = [[220, 60], [590, 75], [575, 545], [205, 530]]
+        data, gt = _scene(quad)
+        r = detect_document(data)
+        assert r["corners"] is not None
+        assert _quad_iou(r["corners"], gt, 800, 600) > 0.95
         assert r["confidence"] >= 0.45
 
 

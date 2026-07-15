@@ -170,6 +170,15 @@ class _ScoreContext:
         self.grad_max3 = cv2.dilate(grad, cv2.getStructuringElement(
             cv2.MORPH_RECT, (3, 3)))
 
+        # 膚色遮罩（供逐邊/內容評分排除手指/手掌）—— 手拿著文件拍照時，
+        # 沒有膚色感知的策略（Canny/Otsu/Laplacian/GrabCut）可能把手掌
+        # 誤認成文件的一部分（手掌與背景的邊界一樣有清楚梯度），
+        # 產生「一部分是紙、一部分是手」的錯誤四邊形。
+        hsv = cv2.cvtColor(img_s, cv2.COLOR_BGR2HSV)
+        skin = cv2.inRange(hsv, (0, 30, 60), (25, 170, 255))
+        skin2 = cv2.inRange(hsv, (160, 30, 60), (180, 170, 255))
+        self.skin_mask = cv2.bitwise_or(skin, skin2)
+
 
 def _edge_support_scores(ctx: _ScoreContext, corners: np.ndarray) -> list[float]:
     """逐邊評估「這條邊下方真的存在文件邊緣嗎」
@@ -969,6 +978,12 @@ def detect_document(image_data: bytes) -> dict:
     def _try_mask(mask, name):
         if mask is None:
             return
+        # 從候選遮罩中挖除膚色像素 —— 手拿文件拍照時，形態學閉運算容易把
+        # 手掌和紙張「焊」成同一塊前景，讓輪廓把手也框進文件邊界。
+        # 在找輪廓前先挖掉膚色像素，讓紙張與手掌自然分離成獨立區塊，
+        # 面積排序後手掌碎片自然選不到。比起事後用分數懲罰更精準（只動
+        # 真的疊到膚色的像素，不會像分數懲罰一樣連累暖色調背景的其他候選）。
+        mask = cv2.bitwise_and(mask, cv2.bitwise_not(ctx.skin_mask))
         result = _find_best_quad(mask, w, h, ctx)
         if result is not None:
             pts, s = result
@@ -2097,29 +2112,33 @@ def _filter_bw(img: np.ndarray) -> np.ndarray:
 
 
 def _filter_enhance(img: np.ndarray) -> np.ndarray:
-    """增強模式 — 保持彩色，去除陰影，提升清晰度（改良版）"""
-    # 白平衡
-    img = _white_balance_grayworld(img)
+    """增強模式 v2 — 保持彩色，去除陰影/摺痕光影，提升清晰度
 
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
+    v2 改進：光照正規化改用 Multi-Scale Retinex（與「專業掃描」同一套），
+    取代形態學背景估計。單一形態學核心大小只能撫平比核心窄的暗紋，
+    紙張摺痕造成的陰影常常是跨越大半頁面的漸層，單一尺度處理不掉；
+    MSR 用多個尺度（15/80/250px）疊加，能同時處理細部文字陰影和
+    大範圍摺痕/光照不均，效果更接近「壓平」紙張的視覺觀感。
+    """
+    # 紙張白點白平衡（比灰色世界更適合文件場景）
+    img = _white_balance_paper(img)
 
-    # 用形態學估計背景
-    l_bg = _estimate_background_morphological(l)
-    l_norm = _normalize_illumination(l, l_bg, target=220.0)
+    # Multi-Scale Retinex 光照正規化（保留完整色彩，只處理亮度）
+    result = _multi_scale_retinex_luminance(img, sigmas=[15, 80, 250], target=232.0)
 
-    # CLAHE 加強對比
+    # CLAHE 加強對比（只對 L 通道，避免色偏）
+    lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l_enhanced = clahe.apply(l_norm)
-
-    lab_out = cv2.merge([l_enhanced, a, b])
+    l_enhanced = clahe.apply(l_ch)
+    lab_out = cv2.merge([l_enhanced, a_ch, b_ch])
     result = cv2.cvtColor(lab_out, cv2.COLOR_LAB2BGR)
 
     # 雙邊濾波（去噪保邊）
     result = cv2.bilateralFilter(result, 5, 40, 40)
 
-    # 銳化
-    result = _adaptive_sharpening(result, strength=0.3)
+    # 邊緣感知自適應銳化（自動估計強度，比固定 0.3 更能因應模糊照片）
+    result = _adaptive_sharpening(result)
 
     return result
 
