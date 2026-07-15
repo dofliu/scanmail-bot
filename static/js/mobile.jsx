@@ -416,7 +416,11 @@ function MScanCrop(){
                 ))}
               </div>
               {state.detectedCorners && (
-                <div style={{fontSize:'11px', color:'var(--mint-4)', textAlign:'center', marginBottom:'6px'}}>✅ 已偵測到文件邊界</div>
+                state.detectionConfidence !== null && state.detectionConfidence !== undefined && state.detectionConfidence < 0.45 ? (
+                  <div style={{fontSize:'11px', color:'var(--warn, #b5772e)', textAlign:'center', marginBottom:'6px'}}>⚠️ 偵測信心較低，請拖曳角點確認邊界</div>
+                ) : (
+                  <div style={{fontSize:'11px', color:'var(--mint-4)', textAlign:'center', marginBottom:'6px'}}>✅ 已偵測到文件邊界</div>
+                )
               )}
               {state.pages.length > 0 && (
                 <>

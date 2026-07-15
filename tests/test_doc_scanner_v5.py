@@ -128,6 +128,40 @@ class TestDetectionAccuracy:
         assert r["confidence"] == 0.0
 
 
+class TestCloseUpFraming:
+    """近距離拍攝（文件填滿畫面）— v5 迴歸測試
+
+    v4/v5 的 `_is_valid_doc_quad` 曾以 80% 面積比例為硬性上限，直接拒絕
+    近距離拍攝（使用者為求解析度把文件拍到接近滿版）的合理候選，導致
+    偵測完全失敗、confidence < 0.15、前端拿不到任何角點可自動裁切。
+    """
+
+    def test_is_valid_doc_quad_accepts_near_full_frame(self):
+        from app.services.doc_scanner import _is_valid_doc_quad
+        W, H = 1600, 1200
+        # 82% 面積比例的合理文件四邊形（先前會被硬性拒絕）
+        quad = np.array([[W*0.06, H*0.03], [W*0.95, H*0.05],
+                         [W*0.93, H*0.97], [W*0.05, H*0.95]], np.float32)
+        assert _is_valid_doc_quad(quad, W, H) is True
+
+    def test_is_valid_doc_quad_still_rejects_full_bleed(self):
+        """真正貼滿整張照片（幾乎等於畫面本身）仍應拒絕"""
+        from app.services.doc_scanner import _is_valid_doc_quad
+        W, H = 1600, 1200
+        quad = np.array([[1, 1], [W-2, 1], [W-2, H-2], [1, H-2]], np.float32)
+        assert _is_valid_doc_quad(quad, W, H) is False
+
+    def test_closeup_document_detected_with_high_confidence(self):
+        """82% 面積比例、近距離拍攝的文件應可靠偵測，信心足以自動裁切"""
+        from app.services.doc_scanner import detect_document
+        quad = [[48, 36], [1520, 60], [1488, 1164], [80, 1140]]
+        data, gt = _scene(quad, 1600, 1200)
+        r = detect_document(data)
+        assert r["corners"] is not None
+        assert _quad_iou(r["corners"], gt, 1600, 1200) > 0.9
+        assert r["confidence"] >= 0.45
+
+
 class TestFalsePositiveSuppression:
 
     def test_textured_background_low_confidence(self):

@@ -157,17 +157,23 @@
     async uploadFile(file) {
       state.uploadedFile = file;
       state.apiError = null;
+      // 清除上一張圖片殘留的處理結果/角點，避免裁切編輯器顯示到舊圖
+      state.scanImageBase64 = null;
+      state.detectedCorners = null;
       notify();
       try {
         const result = await window.API.uploadImage(file);
         if (result.success) {
-          // Create data URL for preview
-          const reader = new FileReader();
-          reader.onload = (e) => {
-            state.scanOriginalDataUrl = e.target.result;
-            notify();
-          };
-          reader.readAsDataURL(file);
+          // Create data URL for preview — 用 Promise 包裝，確保回傳前
+          // scanOriginalDataUrl 已就緒（先前用 fire-and-forget 的方式，
+          // 呼叫端緊接著讀取 state.scanOriginalDataUrl 可能拿到 null）
+          state.scanOriginalDataUrl = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          });
+          notify();
           store.toast('📁 上傳成功', 'ok');
           return result;
         }
@@ -192,6 +198,7 @@
         const result = await window.API.detectEdges();
         if (result.success) {
           state.detectedCorners = result.detected ? result.corners : null;
+          state.detectionConfidence = result.confidence ?? null;
           state.imageWidth = result.image_width;
           state.imageHeight = result.image_height;
           notify();
