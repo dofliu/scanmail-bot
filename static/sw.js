@@ -49,7 +49,13 @@ self.addEventListener('fetch', (e) => {
     return;
   }
   e.respondWith(
-    caches.match(e.request).then((cachedResponse) => {
+    // ignoreSearch: true — 靜態資源在 index.html 用 ?v=X.Y.Z 做快取破壞，
+    // 但 install 階段 cache.addAll(ASSETS) 是用不含版號的路徑預存。
+    // 若比對時要求精確符合（預設行為），這兩者永遠對不上，預存快取形同
+    // 白做工，每次都得改打網路。手機訊號不穩/離線時網路請求失敗，
+    // 又拿不到快取，關鍵腳本（如 api.js）整個載入失敗，
+    // 導致 window.API 是 undefined、上傳功能直接壞掉。
+    caches.match(e.request, { ignoreSearch: true }).then((cachedResponse) => {
       if (cachedResponse) {
         // Fetch new version in background (Stale-While-Revalidate)
         fetch(e.request).then((networkResponse) => {
@@ -61,6 +67,7 @@ self.addEventListener('fetch', (e) => {
         }).catch(() => {});
         return cachedResponse;
       }
+      // 快取未命中（含 ignoreSearch 都找不到）時才真的打網路
       return fetch(e.request);
     })
   );
