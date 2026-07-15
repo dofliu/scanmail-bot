@@ -169,7 +169,9 @@ input,select,textarea{font-family:inherit; color:inherit;}
 /* Toast */
 .toast-host{
   position:fixed; top:70px; left:50%; transform:translateX(-50%);
-  z-index:200; display:flex; flex-direction:column; gap:8px;
+  /* 必須高於 AuthScreen (zIndex 99999)，否則登入/註冊的成功或失敗訊息
+     會被全螢幕登入遮罩蓋住，使用者看起來像是點擊「沒反應」 */
+  z-index:100000; display:flex; flex-direction:column; gap:8px;
   pointer-events:none;
 }
 .toast{
