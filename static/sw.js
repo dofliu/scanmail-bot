@@ -1,10 +1,11 @@
-const CACHE_NAME = 'scanmail-v6';
+const CACHE_NAME = 'scanmail-v7';
 const ASSETS = [
   '/',
   '/index.html',
   '/css/palette.css',
   '/js/config.js',
   '/js/native.js',
+  '/js/image-local.js',
   '/js/store.js',
   '/js/atoms.jsx',
   '/js/mobile.jsx',

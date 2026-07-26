@@ -3,6 +3,18 @@ const { useState: mUseState, useRef: mUseRef, useCallback: mUseCallback } = Reac
 
 function MobileShell(){
   const [state, store] = window.useStore();
+
+  // 離線精簡版：不需要登入、不需要導覽，整個 App 就是圖片工具
+  if (window.SM_CONFIG?.offlineOnly) {
+    return (
+      <div className="phone">
+        <div className="phone-inner">
+          <div className="m-screen"><MToolImage/></div>
+          <Toasts toasts={state.toasts}/>
+        </div>
+      </div>
+    );
+  }
   
   if (state.auth?.enabled && state.authLoading) {
     return (
@@ -976,15 +988,17 @@ function MToolImage(){
     direction:'vertical', gap:0, bg_color:'#ffffff', columns:0, normalize:true,
     angle:90, flipAxis:'horizontal',
   });
-  const actions = [
-    {id:'resize',i:'📐',l:'縮放'},
-    {id:'convert',i:'🔄',l:'轉檔'},
-    {id:'compress',i:'📦',l:'壓縮'},
-    {id:'rotate',i:'🔁',l:'旋轉'},
-    {id:'flip',i:'↔️',l:'翻轉'},
+  const allActions = [
+    {id:'resize',i:'📐',l:'縮放',local:true},
+    {id:'convert',i:'🔄',l:'轉檔',local:true},
+    {id:'compress',i:'📦',l:'壓縮',local:true},
+    {id:'rotate',i:'🔁',l:'旋轉',local:true},
+    {id:'flip',i:'↔️',l:'翻轉',local:true},
     {id:'watermark',i:'💧',l:'浮水印'},
-    {id:'merge',i:'🧩',l:'拼接'},
+    {id:'merge',i:'🧩',l:'拼接',local:true},
   ];
+  // 離線版沒有後端，只留在裝置上就能做完的操作
+  const actions = window.SM_CONFIG?.offlineOnly ? allActions.filter(a => a.local) : allActions;
 
   const singleFn = action === 'merge' ? null : (file) => {
     if(action==='resize') return window.API.imgResize(file, opts.width, opts.height, opts.mode, opts.format, opts.quality);
@@ -1040,7 +1054,7 @@ function MToolImage(){
             <div><div className="field-label">高度</div><input className="input" value={opts.height} onChange={e=>setOpts({...opts,height:+e.target.value})}/></div>
           </div>
         )}
-        {action === 'convert' && (<div><div className="field-label">輸出格式</div><div className="row" style={{gap:'4px'}}>{['PNG','JPG','WebP','BMP'].map(f=><button key={f} className={`chip ${opts.format===f?'on':''}`} onClick={()=>setOpts({...opts,format:f})}>{f}</button>)}</div></div>)}
+        {action === 'convert' && (<div><div className="field-label">輸出格式</div><div className="row" style={{gap:'4px'}}>{(window.SM_CONFIG?.offlineOnly ? ['PNG','JPG','WebP'] : ['PNG','JPG','WebP','BMP']).map(f=><button key={f} className={`chip ${opts.format===f?'on':''}`} onClick={()=>setOpts({...opts,format:f})}>{f}</button>)}</div></div>)}
         {action === 'compress' && (<div><div className="field-label">品質 {opts.quality}%</div><input type="range" className="slider" min="10" max="100" value={opts.quality} onChange={e=>setOpts({...opts,quality:+e.target.value})}/></div>)}
         {action === 'rotate' && (<div>
           <div className="field-label">角度</div>
@@ -1106,6 +1120,7 @@ function MToolImage(){
       </div>
 
       <ToolProcessor files={files} single={singleFn} batch={batchFn}
+        local={window.SMImageLocal?.runner(action, opts)}
         taskProgressUrl={window.API.imgTaskProgress} taskDownloadUrl={downloadUrl}
         resultFilename={resultFilename}/>
     </MToolShell>
@@ -1113,9 +1128,11 @@ function MToolImage(){
 }
 
 function MToolShell({ title, children }){
+  // 離線版沒有上一頁可回
+  const back = !window.SM_CONFIG?.offlineOnly;
   return (
     <>
-      <MHeader title={title} back/>
+      <MHeader title={title} back={back}/>
       <div className="m-body">{children}</div>
     </>
   );

@@ -201,8 +201,19 @@ python scripts/build_mobile.py --dev-server http://192.168.1.50:8000 --sync
 cd mobile/android && ./gradlew installDebug
 ```
 
-推上 GitHub 後，`.github/workflows/android.yml` 會自動建置 debug APK 放到
-workflow 的 Artifacts；打 `android-v*` 標籤則會產出（可簽章的）release APK。
+**離線精簡版**：只要圖片工具、完全不需要後端的話：
+
+```bash
+python scripts/build_mobile.py --offline --sync
+cd mobile/android && ./gradlew assembleDebug
+```
+
+這個版本整個 App 就是圖片工具 —— 縮放、格式轉換、壓縮、拼接、旋轉、翻轉，
+全部用 Canvas 在手機上做完，照片不會離開裝置，沒網路也能用。
+
+推上 GitHub 後，`.github/workflows/android.yml` 會自動建置兩份 debug APK
+（完整版與離線精簡版）放到 workflow 的 Artifacts；
+打 `android-v*` 標籤則會產出（可簽章的）release APK。
 
 > 完整說明、簽章上架、CORS 與疑難排解請見 **[docs/ANDROID.md](docs/ANDROID.md)**。
 
@@ -290,8 +301,9 @@ scanmail-bot/
 │   ├── index.html                  #   HTML Shell
 │   ├── css/                        #   共用樣式
 │   └── js/
-│       ├── config.js               #   執行環境設定（決定 API 位址）
+│       ├── config.js               #   執行環境設定（決定 API 位址 / 離線模式）
 │       ├── native.js               #   App 專用：存檔/分享、伺服器設定畫面
+│       ├── image-local.js          #   本地圖片引擎（Canvas，離線版靠它）
 │       ├── api.js                  #   API 層
 │       ├── store.js                #   狀態管理
 │       └── *.jsx                   #   atoms / mobile / desktop / boot

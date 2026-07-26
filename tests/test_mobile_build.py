@@ -121,6 +121,64 @@ def test_jsx_outputs_do_not_collide_with_existing_js():
 
 
 # ══════════════════════════════════════════════
+#  離線精簡版
+# ══════════════════════════════════════════════
+
+def test_offline_build_injects_flag():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    offline = build_mobile.transform_index_html(html, "", "3.5.0", offline=True)
+    assert "window.SM_OFFLINE = true;" in offline
+    # 旗標必須在 config.js 之前，config.js 才讀得到
+    assert offline.index("window.SM_OFFLINE") < offline.index("js/config.js")
+
+
+def test_normal_build_has_no_offline_flag():
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    normal = build_mobile.transform_index_html(html, "", "3.5.0")
+    assert "SM_OFFLINE" not in normal
+
+
+def test_config_reads_offline_flag():
+    source = (JS / "config.js").read_text(encoding="utf-8")
+    assert "window.SM_OFFLINE === true" in source
+    # 離線版沒有後端，isConfigured 必須直接為真，否則會卡在伺服器設定畫面
+    assert "offlineOnly ||" in source
+
+
+def test_local_image_engine_is_self_contained():
+    """本地引擎不能依賴 window.API / SM_CONFIG —— 它要能在完全沒有後端時運作。"""
+    source = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    for forbidden in ("window.API", "fetch(", "SM_CONFIG"):
+        assert forbidden not in source, f"image-local.js 不該用到 {forbidden}"
+    for symbol in ("window.SMImageLocal", "runner", "supportsOutput"):
+        assert symbol in source, f"image-local.js 少了 {symbol}"
+
+
+def test_local_engine_rejects_formats_canvas_cannot_encode():
+    """canvas.toBlob 遇到不認得的型別會安靜地吐 PNG，必須先擋掉。"""
+    source = (JS / "image-local.js").read_text(encoding="utf-8")
+    mime_block = source[source.index("const MIME"):source.index("const EXT")]
+    assert "BMP" not in mime_block and "GIF" not in mime_block
+
+
+def test_offline_ui_only_offers_local_actions():
+    """離線版的圖片工具只能列出本地做得到的操作，浮水印必須被濾掉。"""
+    for name in ("mobile.jsx", "desktop.jsx"):
+        source = (JS / name).read_text(encoding="utf-8")
+        assert "offlineOnly ? allActions.filter(a => a.local)" in source, f"{name} 沒有依離線模式過濾操作"
+        watermark = [ln for ln in source.splitlines() if "'watermark'" in ln and "id:" in ln]
+        assert watermark, f"{name} 找不到浮水印選項"
+        assert all("local:true" not in ln for ln in watermark), \
+            f"{name} 把浮水印標成本地可用，但 Canvas 版並未實作"
+
+
+def test_offline_build_makes_no_backend_calls_on_startup():
+    """store.init() 在離線版必須直接返回，否則一開 App 就會噴連線錯誤。"""
+    source = (JS / "store.js").read_text(encoding="utf-8")
+    assert "offlineOnly" in source, "store.js 沒有處理離線版"
+
+
+# ══════════════════════════════════════════════
 #  全域 script 的頂層變數
 # ══════════════════════════════════════════════
 

@@ -4,6 +4,19 @@ const { useState: dUseState, useRef: dUseRef, useCallback: dUseCallback } = Reac
 function DesktopShell(){
   const [state, store] = window.useStore();
 
+  // 離線精簡版：整個畫面就是圖片工具，沒有側邊導覽與登入
+  if (window.SM_CONFIG?.offlineOnly) {
+    return (
+      <div className="desktop" style={{padding:'24px'}}>
+        <div className="hand" style={{fontSize:'22px', fontWeight:700, marginBottom:'16px'}}>
+          ScanMail<span style={{color:'var(--mint-3)'}}>+</span> 圖片工具
+        </div>
+        <DToolImage/>
+        <window.Toasts toasts={state.toasts}/>
+      </div>
+    );
+  }
+
   if (state.auth?.enabled && state.authLoading) {
     return (
       <div className="desktop" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -774,15 +787,17 @@ function DToolImage(){
     direction:'vertical', gap:0, bg_color:'#ffffff', columns:0, normalize:true,
     angle:90, flipAxis:'horizontal',
   });
-  const actions = [
-    {id:'resize',l:'📐 縮放'},
-    {id:'convert',l:'🔄 轉檔'},
-    {id:'compress',l:'📦 壓縮'},
-    {id:'rotate',l:'🔁 旋轉'},
-    {id:'flip',l:'↔️ 翻轉'},
+  const allActions = [
+    {id:'resize',l:'📐 縮放',local:true},
+    {id:'convert',l:'🔄 轉檔',local:true},
+    {id:'compress',l:'📦 壓縮',local:true},
+    {id:'rotate',l:'🔁 旋轉',local:true},
+    {id:'flip',l:'↔️ 翻轉',local:true},
     {id:'watermark',l:'💧 浮水印'},
-    {id:'merge',l:'🧩 拼接'},
+    {id:'merge',l:'🧩 拼接',local:true},
   ];
+  // 離線版沒有後端，只留在裝置上就能做完的操作
+  const actions = window.SM_CONFIG?.offlineOnly ? allActions.filter(a => a.local) : allActions;
 
   const singleFn = action === 'merge' ? null : (f) => {
     if(action==='resize') return window.API.imgResize(f,opts.width,opts.height,opts.mode,opts.format,opts.quality);
@@ -927,6 +942,7 @@ function DToolImage(){
         </>}
         <div style={{marginTop:'16px'}}>
           <ToolProcessor files={files} single={singleFn} batch={batchFn}
+            local={window.SMImageLocal?.runner(action, opts)}
             taskProgressUrl={window.API.imgTaskProgress}
             taskDownloadUrl={downloadUrl}
             resultFilename={resultFilename}/>

@@ -39,7 +39,8 @@ const ScanMailAPI = (() => {
       console.error(`[API] ${opts.method || 'GET'} ${url} failed:`, e);
       // App 內建前端連不到後端時，多半是位址填錯或伺服器沒開 —
       // 直接把設定畫面叫出來，比丟一個看不懂的 "Failed to fetch" 有用。
-      if (e instanceof TypeError && window.SM_CONFIG && window.SM_CONFIG.bundled && window.SMNative) {
+      if (e instanceof TypeError && window.SM_CONFIG && window.SM_CONFIG.bundled &&
+          !window.SM_CONFIG.offlineOnly && window.SMNative) {
         window.SMNative.openServerSetup(`無法連線到 ${ROOT || '伺服器'}，請確認位址是否正確。`);
       }
       throw e;
@@ -541,6 +542,21 @@ const ScanMailAPI = (() => {
     return res.blob();
   }
 
+  /** 一次儲存多個結果檔（本地批次處理用） */
+  function triggerDownloadAll(items) {
+    if (window.SMNative) {
+      return window.SMNative.saveFiles(items).catch((e) => {
+        console.error('[API] 儲存檔案失敗:', e);
+        if (window.SMStore) window.SMStore.toast('儲存失敗：' + e.message, 'err');
+        throw e;
+      });
+    }
+    return (items || []).reduce(
+      (chain, it) => chain.then(() => triggerDownload(it.blob, it.filename)),
+      Promise.resolve()
+    );
+  }
+
   /** 從後端 URL 取回檔案並存到裝置 — 瀏覽器與 App 都適用 */
   async function saveFromUrl(url, filename) {
     try {
@@ -620,7 +636,7 @@ const ScanMailAPI = (() => {
     // Auth
     getAuthStatus, login, register, logout,
     // Helpers
-    watchTask, downloadBlob, saveFromUrl, formatBytes, triggerDownload,
+    watchTask, downloadBlob, saveFromUrl, formatBytes, triggerDownload, triggerDownloadAll,
   };
 })();
 

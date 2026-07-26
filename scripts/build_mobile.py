@@ -210,7 +210,7 @@ def transpile_jsx() -> None:
         log(f"{jsx.name} → {out.name}")
 
 
-def transform_index_html(html: str, api_base: str, version: str) -> str:
+def transform_index_html(html: str, api_base: str, version: str, offline: bool = False) -> str:
     """把 index.html 的內容改成 App 版本。
 
     每個替換都會檢查命中次數，static/index.html 一改結構就會直接失敗，
@@ -251,9 +251,10 @@ def transform_index_html(html: str, api_base: str, version: str) -> str:
         "<!-- 以下由 scripts/build_mobile.py 注入 —— 請勿手動編輯 mobile/www/ -->\n"
         "<script>\n"
         "  window.SM_NATIVE = true;\n"
-        f'  window.SM_DEFAULT_API_BASE = "{default_api}";\n'
-        "</script>\n"
-        f'<script src="vendor/capacitor-bridge.js?v={version}"></script>\n'
+        + ("  window.SM_OFFLINE = true;\n" if offline else "")
+        + f'  window.SM_DEFAULT_API_BASE = "{default_api}";\n'
+        + "</script>\n"
+        + f'<script src="vendor/capacitor-bridge.js?v={version}"></script>\n'
     )
     sub(r"<head>\n", inject, "注入 App 執行環境旗標")
 
@@ -266,14 +267,17 @@ def transform_index_html(html: str, api_base: str, version: str) -> str:
     return html
 
 
-def rewrite_index(api_base: str, version: str) -> None:
+def rewrite_index(api_base: str, version: str, offline: bool) -> None:
     step("改寫 index.html")
     index = WWW_DIR / "index.html"
     index.write_text(
-        transform_index_html(index.read_text(encoding="utf-8"), api_base, version),
+        transform_index_html(index.read_text(encoding="utf-8"), api_base, version, offline),
         encoding="utf-8",
     )
-    log(f"預設後端位址：{api_base.rstrip('/') or '（未設定，App 首次啟動時詢問使用者）'}")
+    if offline:
+        log("離線精簡版：只保留在裝置上就能做完的圖片工具，不需要後端")
+    else:
+        log(f"預設後端位址：{api_base.rstrip('/') or '（未設定，App 首次啟動時詢問使用者）'}")
 
 
 def write_version_props(version: str) -> None:
@@ -320,6 +324,11 @@ def main() -> int:
              "需搭配 --sync。",
     )
     parser.add_argument(
+        "--offline", action="store_true", default=bool(os.environ.get("SM_OFFLINE")),
+        help="建置離線精簡版：只保留能在裝置上用 Canvas 做完的圖片工具"
+             "（縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 翻轉），完全不需要後端。",
+    )
+    parser.add_argument(
         "--sync", action="store_true",
         help="產生 www/ 後執行 npx cap sync android",
     )
@@ -327,7 +336,8 @@ def main() -> int:
 
     try:
         version = read_version()
-        print(f"ScanMail+ {version} — 建置 Android App 前端")
+        mode = "離線精簡版" if args.offline else "完整版"
+        print(f"ScanMail+ {version} — 建置 Android App 前端（{mode}）")
 
         ensure_node_modules()
         copy_static()
@@ -335,7 +345,7 @@ def main() -> int:
         vendor_fonts()
         build_bridge()
         transpile_jsx()
-        rewrite_index(args.api_base, version)
+        rewrite_index(args.api_base, version, args.offline)
         write_version_props(version)
         if args.sync:
             cap_sync(args.dev_server)

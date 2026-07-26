@@ -109,6 +109,48 @@
     return { method: 'native', filename: name, uri };
   }
 
+  /**
+   * 一次儲存多個檔案（批次處理的結果）。
+   * App 內把全部寫到裝置後只叫一次系統分享 —— 逐檔跳分享面板會很煩。
+   * 瀏覽器則維持逐檔下載。
+   */
+  async function saveFiles(items) {
+    const list = (items || []).filter((it) => it && it.blob);
+    if (!list.length) return { method: 'none', count: 0 };
+    if (list.length === 1) return saveFile(list[0].blob, list[0].filename);
+
+    if (!isNative()) {
+      for (const it of list) {
+        anchorDownload(it.blob, safeName(it.filename));
+        // 連續觸發下載時瀏覽器會擋掉後面的，稍微錯開
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      return { method: 'browser', count: list.length };
+    }
+
+    const { Filesystem, Directory, Share } = CAP();
+    const uris = [];
+    for (const it of list) {
+      const name = safeName(it.filename);
+      const data = await blobToBase64(it.blob);
+      const path = 'ScanMail/' + name;
+      for (const directory of [Directory.Documents, Directory.External, Directory.Cache]) {
+        try {
+          const res = await Filesystem.writeFile({ path, data, directory, recursive: true });
+          if (res && res.uri) { uris.push(res.uri); break; }
+        } catch (e) { /* 換下一個目錄 */ }
+      }
+    }
+    if (!uris.length) throw new Error('無法寫入檔案');
+
+    try {
+      await Share.share({ title: `${uris.length} 個檔案`, files: uris });
+    } catch (e) {
+      toast(`已儲存 ${uris.length} 個檔案`, 'ok');
+    }
+    return { method: 'native', count: uris.length };
+  }
+
   // ══════════════════════════════════════════════
   //  伺服器設定畫面
   // ══════════════════════════════════════════════
@@ -259,6 +301,7 @@
   window.SMNative = {
     isNative: isNative,
     saveFile: saveFile,
+    saveFiles: saveFiles,
     openServerSetup: openServerSetup,
     closeServerSetup: closeSetup,
   };
