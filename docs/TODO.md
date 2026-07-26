@@ -62,6 +62,7 @@
 - [x] PDF → Word（pymupdf 文字提取）
 - [x] Markdown → PDF / Word（markdown + BeautifulSoup + ReportLab）
 - [x] Word → Markdown（python-docx 樣式解析）
+- [x] PDF → Markdown（pymupdf 文字提取）
 
 ### Phase 6：GIF + 影片工具（整合自 myPicasa）
 

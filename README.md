@@ -61,6 +61,7 @@
 | Markdown → PDF | markdown → HTML → ReportLab PDF |
 | Markdown → Word | markdown → python-docx |
 | Word → Markdown | python-docx 樣式解析 → Markdown 語法 |
+| PDF → Markdown | pymupdf 文字提取 → Markdown |
 
 ### 🎞️ GIF 製作
 
@@ -332,23 +333,23 @@ scanmail-bot/
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
 
-### API 端點總覽（85 個）
+### API 端點總覽（91 個）
 
 | 群組 | 主要端點 | 數量 |
 |------|------|------|
-| 掃描郵寄 | `/api/upload`, `/api/scan/*`（v5：回傳 `confidence`/`method`）, `/api/pages/*`, `/api/analyze`, `/api/send` | 20 |
-| 批次寄送 | `/api/send/batch` | 1 |
+| 掃描流程 | `/api/upload`, `/api/scan/*`（v5：回傳 `confidence`/`method`）, `/api/pages/*`, `/api/analyze` | 12 |
+| 寄送 | `/api/send`, `/api/send/batch` | 2 |
 | 收件人群組 | `/api/groups`, `/api/groups/{id}`, `/api/groups/{id}/members` | 5 |
-| 郵件模板 | `/api/templates`, `/api/templates/{doc_type}` | 5 |
+| 郵件模板 | `/api/templates`, `/api/templates/{doc_type}`, `/api/templates/{id}` | 5 |
 | 聯絡人/歷史/設定 | `/api/contacts`, `/api/history`, `/api/stats`, `/api/settings` | 7 |
-| 使用者認證 | `/auth/register`, `login`, `logout`, `status` | 4 |
-| 圖片工具 | `/api/tools/image/resize`, `convert`, `compress`, `watermark`, `batch/*` | 11 |
-| PDF 工具 | `/api/tools/pdf/merge`, `watermark/*`, `protect`, `info` | 7 |
-| 文件轉檔 | `/api/tools/convert/word-to-pdf`, `pdf-to-word`, `md-to-*`, `word-to-md` | 5 |
-| GIF 製作 | `/api/tools/gif/create` | 3 |
-| 影片工具 | `/api/tools/video/merge`, `to-gif`, `compress` | 5 |
-| 批次改名 | `/api/tools/rename/preview`, `apply` | 6 |
-| 表單填寫 | `/api/tools/form/detect`, `suggest`, `fill`, `task/*` | 5 |
+| 使用者認證 | `/api/auth/register`, `login`, `logout`, `status` | 4 |
+| 圖片工具 | `/api/tools/image/resize`, `convert`, `compress`, `rotate`, `flip`, `watermark`, `info`, `merge`, `batch/*`, `task/*` | 15 |
+| PDF 工具 | `/api/tools/pdf/merge`, `split`, `compress`, `to-images`, `watermark/*`, `protect`, `info`, `task/*` | 10 |
+| 文件轉檔 | `/api/tools/convert/word-to-pdf`, `pdf-to-word`, `md-to-pdf`, `md-to-word`, `word-to-md`, `pdf-to-md` | 6 |
+| GIF 製作 | `/api/tools/gif/create`, `task/*` | 3 |
+| 影片工具 | `/api/tools/video/merge`, `to-gif`, `compress`, `task/*` | 5 |
+| 批次改名 | `/api/tools/rename/preview`, `apply`, `ai/*`, `task/*` | 6 |
+| 表單填寫 | `/api/tools/form/detect`, `suggest`, `fill`, `templates/*`, `task/*` | 11 |
 
 ---
 
