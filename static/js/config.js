@@ -23,6 +23,10 @@
   // 前端來自 APK 內建檔案 → 需要另外指定後端位址
   const bundled = window.SM_NATIVE === true;
 
+  // 精簡離線版（build_mobile.py --offline）：只保留在裝置上就能做完的功能，
+  // 完全不需要後端，因此也不會出現伺服器設定畫面。
+  const offlineOnly = window.SM_OFFLINE === true;
+
   /** 補上 scheme、去掉結尾斜線；空字串代表「未設定」 */
   function normalize(raw) {
     let url = String(raw == null ? '' : raw).trim();
@@ -41,7 +45,9 @@
 
   // apiBase 在載入時就固定下來（改設定會重新載入頁面），
   // 因此 api.js 等模組可以安全地在載入時用它組出常數字串。
-  const apiBase = bundled ? normalize(readStored() || window.SM_DEFAULT_API_BASE || '') : '';
+  const apiBase = offlineOnly
+    ? ''
+    : (bundled ? normalize(readStored() || window.SM_DEFAULT_API_BASE || '') : '');
 
   window.SM_CONFIG = {
     /** API 位址前綴。網頁版恆為 ''（同源） */
@@ -50,8 +56,11 @@
     /** 前端是否來自 APK 內建檔案 */
     bundled: bundled,
 
+    /** 精簡離線版：所有功能都在裝置上完成，沒有後端 */
+    offlineOnly: offlineOnly,
+
     /** 是否已經有可用的後端位址 */
-    isConfigured: !bundled || !!apiBase,
+    isConfigured: offlineOnly || !bundled || !!apiBase,
 
     normalize: normalize,
 

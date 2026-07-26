@@ -795,21 +795,65 @@ function DownloadResult({ blob, filename }){
   );
 }
 
+// ─── Download Results（多檔）────────────────────────────────────
+// 本地批次處理不打包成 ZIP：手機上 ZIP 還得再找程式解，
+// 直接列出來讓使用者單存或一次全存到系統分享比較順。
+function DownloadResults({ items }){
+  if (!items || !items.length) return null;
+  if (items.length === 1) return <DownloadResult blob={items[0].blob} filename={items[0].filename}/>;
+
+  const total = items.reduce((a, it) => a + it.blob.size, 0);
+  return (
+    <div style={{padding:'12px', background:'var(--mint-wash)', borderRadius:'10px', border:'1px solid var(--mint-3)'}}>
+      <div className="row between" style={{alignItems:'center', marginBottom:'10px'}}>
+        <div>
+          <div style={{fontWeight:600, fontSize:'14px'}}>✅ 完成 {items.length} 個檔案</div>
+          <div style={{fontSize:'12px', color:'var(--ink-3)'}}>共 {window.API?.formatBytes(total)}</div>
+        </div>
+        <button className="btn primary" style={{flexShrink:0}}
+                onClick={() => window.API.triggerDownloadAll(items).catch(() => {})}>⬇ 全部儲存</button>
+      </div>
+      <div style={{maxHeight:'180px', overflowY:'auto'}}>
+        {items.map((it, i) => (
+          <div key={i} className="row between" style={{alignItems:'center', padding:'6px 0', borderTop:'1px solid var(--line-soft)'}}>
+            <div style={{fontSize:'12px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', flex:1}}>
+              {it.filename} <span style={{color:'var(--ink-3)'}}>({window.API?.formatBytes(it.blob.size)})</span>
+            </div>
+            <button className="pill" style={{flexShrink:0, fontSize:'11px', padding:'4px 10px'}}
+                    onClick={() => window.API.triggerDownload(it.blob, it.filename).catch(() => {})}>存檔</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Tool Processor (handles file upload → single/batch process → download) ──
-function ToolProcessor({ files, single, batch, getFormParams, taskProgressUrl, taskDownloadUrl, resultFilename }){
+// local 這個 prop 讓工具可以完全在裝置上處理，不經過後端 —— 精簡離線版靠它運作。
+// 有給 local 且處於離線版時就走本地，其餘情況維持原本的後端流程。
+function ToolProcessor({ files, single, batch, local, getFormParams, taskProgressUrl, taskDownloadUrl, resultFilename }){
   const [processing, setProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState('');
-  const [resultBlob, setResultBlob] = useState(null);
+  const [results, setResults] = useState(null);
   const [error, setError] = useState(null);
+
+  const useLocal = !!local && !!window.SM_CONFIG?.offlineOnly;
 
   const process = useCallback(async () => {
     if (!files || !files.length) return;
-    setProcessing(true); setError(null); setResultBlob(null);
+    setProcessing(true); setError(null); setResults(null);
     setProgress(10); setMessage('處理中...');
 
+    const setResultBlob = (blob) => setResults([{ blob, filename: resultFilename || 'result' }]);
+
     try {
-      if (files.length === 1 && single) {
+      if (useLocal) {
+        setProgress(0); setMessage('處理中...');
+        const out = await local(files, (p, m) => { setProgress(p); setMessage(m || ''); });
+        setResults(out);
+        setProgress(100); setMessage('完成！');
+      } else if (files.length === 1 && single) {
         setProgress(50);
         const res = await single(files[0]);
         if (res && res.task_id) {
@@ -849,20 +893,20 @@ function ToolProcessor({ files, single, batch, getFormParams, taskProgressUrl, t
       setError(e.message);
     }
     setProcessing(false);
-  }, [files, single, batch, taskProgressUrl, taskDownloadUrl]);
+  }, [files, single, batch, local, useLocal, resultFilename, taskProgressUrl, taskDownloadUrl]);
 
   return (
     <div>
       {processing && <ProgressBar percent={progress} message={message}/>}
       {error && <div style={{padding:'10px', background:'#fef2f2', borderRadius:'8px', color:'var(--danger)', fontSize:'13px', marginBottom:'10px'}}>❌ {error}</div>}
-      {resultBlob && <DownloadResult blob={resultBlob} filename={resultFilename || 'result'}/>}
-      {!processing && !resultBlob && (
+      {results && <DownloadResults items={results}/>}
+      {!processing && !results && (
         <button className="btn primary" onClick={process} disabled={!files?.length} style={{width:'100%', justifyContent:'center', marginTop:'10px'}}>
           ▶ 開始處理 ({files?.length || 0} 個檔案)
         </button>
       )}
-      {resultBlob && (
-        <button className="btn" onClick={() => setResultBlob(null)} style={{width:'100%', justifyContent:'center', marginTop:'8px'}}>
+      {results && (
+        <button className="btn" onClick={() => setResults(null)} style={{width:'100%', justifyContent:'center', marginTop:'8px'}}>
           重新處理
         </button>
       )}
@@ -1114,7 +1158,8 @@ function AuthScreen() {
 // 網頁版前端與後端同源，沒有「要連到哪一台」的問題，因此不顯示。
 function ServerSetting(){
   const cfg = window.SM_CONFIG;
-  if (!cfg || !cfg.bundled) return null;
+  // 精簡離線版沒有後端可連，設定這一項只會讓人困惑
+  if (!cfg || !cfg.bundled || cfg.offlineOnly) return null;
   return (
     <div style={{marginBottom:'12px'}}>
       <div className="label" style={{marginBottom:'6px'}}>伺服器連線</div>
@@ -1138,6 +1183,6 @@ function ServerSetting(){
 Object.assign(window, {
   PaperDoc, CropCorners, CropEditor, PageThumb, FilterStrip, DocTypeBadge,
   ContactTile, CameraView, Toasts, AuthScreen,
-  UploadDropzone, LoadingSpinner, ProgressBar, FileList, DownloadResult, ToolProcessor,
+  UploadDropzone, LoadingSpinner, ProgressBar, FileList, DownloadResult, DownloadResults, ToolProcessor,
   ServerSetting,
 });

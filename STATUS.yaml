@@ -17,6 +17,6 @@ outputs:
   - mobile_app
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "85 API endpoints, 8 tool categories, 228 tests, web + Android from one frontend"
-recent_changes: "v3.5.0 — Android app: same static/ frontend ships to browser and APK via Capacitor; build_mobile.py vendors CDN assets and pre-compiles JSX for offline start; runtime-configurable API base with in-app server setup; native file save/share; CI builds APK artifacts"
+key_metrics: "85 API endpoints, 8 tool categories, 235 pytest + 35 browser tests, web + Android + offline-only APK from one frontend"
+recent_changes: "v3.6.0 — offline-only lite APK: Canvas image engine (resize/convert/compress/merge/rotate/flip) runs entirely on-device with layout semantics matched to the Pillow backend; build_mobile.py --offline strips the app down to image tools with no server at all; 35 browser tests for the engine"
 

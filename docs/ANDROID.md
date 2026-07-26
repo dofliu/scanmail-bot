@@ -115,6 +115,45 @@ mobile/android/app/build/outputs/apk/release/app-release.apk
 
 ---
 
+## 情境 D：離線精簡版（不需要後端）
+
+只想要一個「隨手處理圖片」的工具，不想架伺服器、也不想在沒網路時卡住：
+
+```bash
+python scripts/build_mobile.py --offline --sync
+cd mobile/android && ./gradlew assembleDebug
+```
+
+這個版本的 App **整個就是圖片工具**，沒有導覽列、不用登入、不會問伺服器位址，
+所有處理都用 Canvas 在手機上直接做完，照片也不會離開裝置。
+
+| 功能 | 說明 |
+|------|------|
+| 📐 縮放 | 等比填充（白底）/ 等比裁切 / 強制拉伸 |
+| 🔄 轉檔 | PNG · JPG · WebP 互轉 |
+| 📦 壓縮 | 品質 1–100，可另外限制最大邊長 |
+| 🧩 拼接 | 直向 / 橫向 / 九宮格，可調間距、底色、欄數、等比對齊 |
+| 🔁 旋轉 | 90° / 180° / 270° |
+| ↔️ 翻轉 | 水平 / 垂直 |
+
+版面與縮放規則刻意對齊後端的 `app/services/image_batch.py`，同一組參數兩邊結果一致。
+已知的兩點差異：
+
+* **輸出只支援 PNG / JPG / WebP。** Canvas 編不出 BMP / GIF（讀得進來，但存不出去）。
+  完整版走後端的 Pillow 就沒有這個限制。
+* **透明圖轉 JPG 會填白底**，後端則是直接丟掉 alpha（結果常常是黑底）。這裡刻意做得比較合理。
+
+畫質方面，直接把大圖一次畫成小圖在瀏覽器裡是雙線性取樣，縮很多倍會糊；
+引擎改成先反覆對半縮再畫最後一步，結果接近後端的 LANCZOS。
+
+**批次結果不打包成 ZIP** —— 手機上還要再找程式解壓縮很麻煩。
+改成列出每個檔案，可以單獨存，也可以「全部儲存」一次丟進系統分享面板。
+
+> 完整版仍然保有全部功能，兩種版本共用同一份 `static/`，
+> 差別只在打包時有沒有加 `--offline`。
+
+---
+
 ## `build_mobile.py` 做了什麼
 
 | 步驟 | 說明 |
@@ -123,7 +162,7 @@ mobile/android/app/build/outputs/apk/release/app-release.apk
 | 換掉 CDN | React / pdf.js / 字型改成打包在 App 內的檔案，手機沒網路也開得起來 |
 | 預編譯 JSX | 用 esbuild 先把 `.jsx` 轉成 `.js`，App 內不必再載 3MB 的 Babel 即時編譯 |
 | 橋接 | 打包 `mobile/src/bridge.js` → `window.SMCap`（存檔、分享、狀態列） |
-| 注入旗標 | `window.SM_NATIVE = true`，讓前端知道要用絕對位址呼叫 API |
+| 注入旗標 | `window.SM_NATIVE = true`，讓前端知道要用絕對位址呼叫 API；加 `--offline` 時另外注入 `window.SM_OFFLINE = true` |
 | 版本 | 從 `main.py` 讀版本號寫進 `mobile/android/version.properties` |
 
 中文字型沿用 Android 內建的 Noto Sans CJK，不另外打包（省好幾 MB，外觀幾乎沒差）。
@@ -192,8 +231,8 @@ cd mobile/android && ./gradlew assembleRelease
 
 版本號的唯一來源是 `main.py` 的 `version="x.y.z"`：
 
-* `versionName` = `3.5.0`
-* `versionCode` = `30500`（`major*10000 + minor*100 + patch`）
+* `versionName` = `3.6.0`
+* `versionCode` = `30600`（`major*10000 + minor*100 + patch`）
 
 改版時只要改 `main.py`，重跑 `build_mobile.py` 就會同步。
 上架 Google Play 需要 `versionCode` 嚴格遞增，必要時可用 `ANDROID_VERSION_CODE` 覆寫。
@@ -204,8 +243,9 @@ cd mobile/android && ./gradlew assembleRelease
 
 `.github/workflows/android.yml`：
 
-* push / PR 動到 `static/`、`mobile/`、`scripts/build_mobile.py` → 自動建置 debug APK，
-  在該次 workflow 的 **Artifacts** 下載（確認「這次改動在手機上也裝得起來」）
+* push / PR 動到 `static/`、`mobile/`、`scripts/build_mobile.py` → 先跑本地圖片引擎的
+  瀏覽器測試，再建置兩份 debug APK（完整版 `scanmail-debug-apk`、離線精簡版
+  `scanmail-offline-apk`），都放在該次 workflow 的 **Artifacts**
 * 打 `android-v*` 標籤 → 另外建置 release APK
 * 設定以下 repository secrets 後，release APK 會自動簽章：
   `ANDROID_KEYSTORE_BASE64`（`base64 -w0 scanmail-release.jks`）、
@@ -216,7 +256,8 @@ cd mobile/android && ./gradlew assembleRelease
 
 ## 目前的限制
 
-* **後端必須連得到。** 手機上沒有 Python，離線只能開得起 App，做不了事。
+* **完整版的後端必須連得到。** 手機上沒有 Python，離線只能開得起 App，做不了事。
+  只需要圖片工具的話請改用情境 D 的離線精簡版。
 * **iOS 沒有做。** Capacitor 支援 iOS，但需要 Mac + Xcode，且要另外 `npx cap add ios`。
 * **App 內的「下載」是寫檔 + 叫出系統分享面板**，因為 Android WebView 不支援
   `blob:` 下載。可以存到「檔案」、雲端硬碟，或直接傳給別人。

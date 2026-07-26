@@ -680,6 +680,8 @@
     // ═══════════════════════════════════════════
 
     async init() {
+      // 離線版沒有後端可問，連認證狀態都不用查
+      if (window.SM_CONFIG?.offlineOnly) return;
       await store.checkAuth();
     },
   };

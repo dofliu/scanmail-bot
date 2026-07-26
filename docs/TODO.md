@@ -131,6 +131,19 @@
 - [x] CI 自動建置 APK（`.github/workflows/android.yml`，支援簽章）
 - [x] 18 個防呆測試（`tests/test_mobile_build.py`）
 
+### Phase 12：離線精簡版（不需要後端的圖片工具）
+
+- [x] `static/js/image-local.js`：純 Canvas 圖片引擎
+  - 縮放（fit / cover / stretch）、格式轉換、壓縮、拼接（直向 / 橫向 / 九宮格）、旋轉、翻轉
+  - 版面與縮放語意對齊後端 `image_batch.py`（含 fit 不放大、normalize 主軸對齊、grid 格子計算）
+  - 逐次對半縮放再繪製，畫質接近後端的 LANCZOS
+  - 明確拒絕 Canvas 編不出的 BMP / GIF（`toBlob` 會安靜地吐 PNG）
+- [x] `build_mobile.py --offline`：注入 `SM_OFFLINE`，App 收斂成只有圖片工具
+- [x] 離線版不呼叫任何後端 API（`store.init()` 直接返回、不顯示伺服器設定）
+- [x] 批次結果改為逐檔列出 + 一次全存（App 內走系統分享，不打包 ZIP）
+- [x] 35 個瀏覽器功能測試（`mobile/test/image-local.test.mjs`）＋ 7 個 pytest 防呆測試
+- [x] CI 另外建置並上傳 `scanmail-offline-apk`
+
 ---
 
 ## 待開發功能 🚧
@@ -174,14 +187,14 @@
 |------|------|
 | API 路由 | 85 |
 | 工具頁面 | 7 |
-| JS 模組 | 10（新增 config.js / native.js） |
+| JS 模組 | 11（新增 config.js / native.js / image-local.js） |
 | 後端服務模組 | 10 |
 | 資料庫表 | 7 |
 | 資料模型 | 5 (contact, group, template, history, sender) |
 | 邊界偵測策略 | 7 (UNet_Mask, Canny×3, WhiteRegion, Otsu, Laplacian, HED, GrabCut — v5 逐邊證據評分 + 次像素精修) |
 | 掃描濾鏡 | 7 (auto, scan, color_doc, document, enhance, bw, original) |
 | 郵件模板 | 8 種文件類型預設 + 自訂 |
-| 測試 | 228（225 passed + 3 skipped，含 Form Fill 14 + review fixes 4 + Sprint 1 52 + Scan v5 20 + Android 打包 18） |
+| 測試 | 235 pytest（232 passed + 3 skipped）＋ 35 個瀏覽器測試（本地圖片引擎） |
 
 ---
 
@@ -201,6 +214,17 @@
 ---
 
 ## 變更日誌
+
+### 2026/07/26 (v3.6.0 — 離線精簡版)
+- 新增純 Canvas 圖片引擎 `static/js/image-local.js`，縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 翻轉
+  全部在裝置上完成，不需要後端、照片不離開手機
+- 版面規則刻意對齊後端 `image_batch.py`：fit 只縮不放、normalize 主軸對齊、grid 格子取最大寬高
+- 畫質：逐次對半縮放再繪製，避免瀏覽器單次雙線性取樣造成的鋸齒
+- 兩點刻意的差異：只支援 PNG / JPG / WebP 輸出（Canvas 限制）；透明轉 JPG 填白底而非黑底
+- `build_mobile.py --offline`：整個 App 收斂成圖片工具，無導覽、無登入、無伺服器設定
+- 批次結果不打包 ZIP，改為逐檔列出 + 「全部儲存」一次送進系統分享
+- CI 增加瀏覽器測試與第二份 APK 產物（`scanmail-offline-apk`）
+- 版本升至 3.6.0（PWA cache `scanmail-v7`、Android versionCode 30600）
 
 ### 2026/07/26 (v3.5.0 — Android App)
 - 同一份 `static/` 前端同時服務網頁版與 Android App，開發流程不變（改 static/ → 重整瀏覽器）
