@@ -34,6 +34,9 @@ def get_user_id(request: Request) -> str:
             token = auth_header[7:].strip()
         if not token:
             token = request.cookies.get("session_token")
+        if not token:
+            # SSE / 跨來源請求只能靠 query string 帶 token（見 app/core/auth.py）
+            token = request.query_params.get("token")
         if token:
             uid = verify_access_token(token)
             if uid:

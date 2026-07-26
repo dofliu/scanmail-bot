@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 蓋掉 capacitor-android 預設的靛藍/桃紅，改用 ScanMail+ 的 Paper + Mint 配色 -->
+<resources>
+    <color name="colorPrimary">#141c18</color>
+    <color name="colorPrimaryDark">#0c120f</color>
+    <color name="colorAccent">#2d6b52</color>
+</resources>

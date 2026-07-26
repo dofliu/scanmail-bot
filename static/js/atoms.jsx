@@ -780,7 +780,8 @@ function FileList({ files, onRemove }){
 // ─── Download Result ──────────────────────────────────────────
 function DownloadResult({ blob, filename }){
   if (!blob) return null;
-  const url = React.useMemo(() => URL.createObjectURL(blob), [blob]);
+  // 用 triggerDownload 而不是 <a download>：Android WebView 不支援 blob: 下載，
+  // 點下去不會有任何反應。triggerDownload 在瀏覽器仍是同樣的 <a download> 行為。
   return (
     <div style={{display:'flex', alignItems:'center', gap:'12px', padding:'12px', background:'var(--mint-wash)', borderRadius:'10px', border:'1px solid var(--mint-3)'}}>
       <span style={{fontSize:'24px'}}>✅</span>
@@ -788,7 +789,8 @@ function DownloadResult({ blob, filename }){
         <div style={{fontWeight:600, fontSize:'14px'}}>處理完成</div>
         <div style={{fontSize:'12px', color:'var(--ink-3)'}}>{filename} ({window.API?.formatBytes(blob.size)})</div>
       </div>
-      <a href={url} download={filename} className="btn primary" style={{flexShrink:0, textDecoration:'none'}}>⬇ 下載</a>
+      <button className="btn primary" style={{flexShrink:0}}
+              onClick={() => window.API.triggerDownload(blob, filename).catch(() => {})}>⬇ 下載</button>
     </div>
   );
 }
@@ -1108,9 +1110,34 @@ function AuthScreen() {
   );
 }
 
+// ─── Server Setting（僅 Android App 內建前端才有意義）─────────────
+// 網頁版前端與後端同源，沒有「要連到哪一台」的問題，因此不顯示。
+function ServerSetting(){
+  const cfg = window.SM_CONFIG;
+  if (!cfg || !cfg.bundled) return null;
+  return (
+    <div style={{marginBottom:'12px'}}>
+      <div className="label" style={{marginBottom:'6px'}}>伺服器連線</div>
+      <div className="card" style={{padding:'12px'}}>
+        <div style={{fontSize:'12px', color:'var(--ink-3)', lineHeight:1.6, marginBottom:'8px'}}>
+          掃描、AI 辨識與寄信都在後端執行，App 需要知道後端位址。
+        </div>
+        <div style={{fontSize:'13px', fontWeight:600, wordBreak:'break-all', marginBottom:'10px'}}>
+          {cfg.apiBase || '尚未設定'}
+        </div>
+        <button className="btn" style={{width:'100%'}}
+                onClick={() => window.SMNative && window.SMNative.openServerSetup()}>
+          🔗 變更伺服器位址
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Expose ───────────────────────────────────────────────────
 Object.assign(window, {
   PaperDoc, CropCorners, CropEditor, PageThumb, FilterStrip, DocTypeBadge,
   ContactTile, CameraView, Toasts, AuthScreen,
   UploadDropzone, LoadingSpinner, ProgressBar, FileList, DownloadResult, ToolProcessor,
+  ServerSetting,
 });

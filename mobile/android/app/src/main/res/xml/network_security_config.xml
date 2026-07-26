@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ScanMail+ 的後端通常跑在同一個 Wi-Fi 下的電腦上（http://192.168.x.x:8000），
+  沒有 HTTPS 憑證。Android 9 之後預設禁止明文 HTTP，因此這裡明確放行。
+
+  若之後把後端部署到有正式憑證的網域，可以把 cleartextTrafficPermitted 改成 false，
+  只保留 HTTPS，安全性會更好。
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

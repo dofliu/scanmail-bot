@@ -3,11 +3,18 @@
  * Centralized fetch wrapper for all backend endpoints
  */
 const ScanMailAPI = (() => {
-  const BASE = '/api';
+  // 網頁版是空字串（同源，維持 `/api/...`）；
+  // Android App 內建前端時是後端的絕對位址（見 js/config.js）。
+  const ROOT = (window.SM_CONFIG && window.SM_CONFIG.apiBase) || '';
+  const BASE = `${ROOT}/api`;
+
+  function authToken() {
+    try { return localStorage.getItem('session_token'); } catch (e) { return null; }
+  }
 
   async function request(url, opts = {}) {
     try {
-      const token = localStorage.getItem('session_token');
+      const token = authToken();
       if (token) {
         opts.headers = opts.headers || {};
         opts.headers['Authorization'] = `Bearer ${token}`;
@@ -30,6 +37,11 @@ const ScanMailAPI = (() => {
       return res;   // return raw Response for binary downloads
     } catch (e) {
       console.error(`[API] ${opts.method || 'GET'} ${url} failed:`, e);
+      // App 內建前端連不到後端時，多半是位址填錯或伺服器沒開 —
+      // 直接把設定畫面叫出來，比丟一個看不懂的 "Failed to fetch" 有用。
+      if (e instanceof TypeError && window.SM_CONFIG && window.SM_CONFIG.bundled && window.SMNative) {
+        window.SMNative.openServerSetup(`無法連線到 ${ROOT || '伺服器'}，請確認位址是否正確。`);
+      }
       throw e;
     }
   }
@@ -454,30 +466,39 @@ const ScanMailAPI = (() => {
   // ══════════════════════════════════════════════
 
   function getAuthStatus() {
-    return request('/api/auth/status');
+    return request(`${BASE}/auth/status`);
   }
 
   function login(username, password) {
-    return json('/api/auth/login', { username, password });
+    return json(`${BASE}/auth/login`, { username, password });
   }
 
   function register(username, password) {
-    return json('/api/auth/register', { username, password });
+    return json(`${BASE}/auth/register`, { username, password });
   }
 
   function logout() {
-    return json('/api/auth/logout', {});
+    return json(`${BASE}/auth/logout`, {});
   }
 
   // ══════════════════════════════════════════════
   //  Task progress helper (SSE)
   // ══════════════════════════════════════════════
 
+  // EventSource 無法自訂 header，因此啟用認證時只能把 token 放在 query string。
+  // 未啟用認證（預設）時不會附加任何東西。
+  function withToken(url) {
+    const token = authToken();
+    if (!token) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(token);
+  }
+
   // SSE watcher with auto-reconnect.
   //  - 任務未完成時連線中斷會重試（指數退避），不直接 reject
   //  - 已收到 completed/failed 事件後關閉，視為終態，不再重連
   //  - 連線重試上限 (default 3 次) 用盡後才 reject
   function watchTask(progressUrl, onProgress, { maxRetries = 3 } = {}) {
+    progressUrl = withToken(progressUrl);
     return new Promise((resolve, reject) => {
       let es = null;
       let settled = false;
@@ -514,9 +535,21 @@ const ScanMailAPI = (() => {
   }
 
   async function downloadBlob(url) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error('下載失敗');
+    // 走 request() 才會帶上 Authorization header（啟用認證時的下載會需要）
+    const res = await request(url);
+    if (!(res instanceof Response)) throw new Error('下載失敗：伺服器未回傳檔案');
     return res.blob();
+  }
+
+  /** 從後端 URL 取回檔案並存到裝置 — 瀏覽器與 App 都適用 */
+  async function saveFromUrl(url, filename) {
+    try {
+      const blob = await downloadBlob(url);
+      return await triggerDownload(blob, filename);
+    } catch (e) {
+      if (window.SMStore) window.SMStore.toast('下載失敗：' + e.message, 'err');
+      throw e;
+    }
   }
 
   // ══════════════════════════════════════════════
@@ -529,12 +562,24 @@ const ScanMailAPI = (() => {
     return (b / (1024 * 1024)).toFixed(1) + ' MB';
   }
 
+  // 儲存產生的檔案，一律回傳 Promise。
+  // 有 native.js 時交給它決定：瀏覽器 <a download>，App 內 Capacitor 寫檔 + 系統分享
+  // （WebView 不支援 blob: 下載，直接點 <a download> 不會有任何反應）。
+  // 下面的 <a download> 只是 native.js 沒載入時的退路。
   function triggerDownload(blob, filename) {
+    if (window.SMNative) {
+      return window.SMNative.saveFile(blob, filename).catch((e) => {
+        console.error('[API] 儲存檔案失敗:', e);
+        if (window.SMStore) window.SMStore.toast('儲存失敗：' + e.message, 'err');
+        throw e;
+      });
+    }
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = filename;
     document.body.appendChild(a); a.click();
     setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    return Promise.resolve({ method: 'browser', filename });
   }
 
   return {
@@ -575,7 +620,7 @@ const ScanMailAPI = (() => {
     // Auth
     getAuthStatus, login, register, logout,
     // Helpers
-    watchTask, downloadBlob, formatBytes, triggerDownload,
+    watchTask, downloadBlob, saveFromUrl, formatBytes, triggerDownload,
   };
 })();
 

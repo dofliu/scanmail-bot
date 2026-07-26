@@ -1,6 +1,6 @@
 # ScanMail+ 開發規劃與 TODO
 
-> 最後更新：2026/07/08
+> 最後更新：2026/07/26
 
 ---
 
@@ -116,6 +116,21 @@
 - [x] **模型下載失敗快取**：HED/U-Net 模型無法下載時進入 1 小時冷卻，不再每次掃描請求都重試
 - [x] 新增 `tests/test_doc_scanner_v5.py`：20 個回歸測試（精度、誤報抑制、寬高比恢復、EXIF、API 契約）
 
+### Phase 11：Android App（同一份前端，兩個平台）
+
+- [x] Capacitor 外殼（`mobile/`），Android 原生專案進版控
+- [x] `scripts/build_mobile.py`：`static/` → `mobile/www/`（唯一的前端來源不變）
+  - CDN 資源（React / pdf.js / 字型）改為打包進 App，離線也開得起來
+  - esbuild 預先編譯 JSX，App 內不再載入 3MB Babel standalone
+  - 注入 `window.SM_NATIVE`，並檢查改寫後沒有殘留外部連結
+- [x] 執行環境設定層 `static/js/config.js`：網頁版同源、App 版用絕對位址
+- [x] App 內伺服器設定畫面（首次啟動 / 連線失敗 / 設定頁皆可進入，含連線測試）
+- [x] 原生檔案儲存 `static/js/native.js`（WebView 不支援 blob: 下載）
+- [x] SSE 支援 `?token=`（EventSource 無法自訂 header，跨來源也拿不到 cookie）
+- [x] `scripts/gen_android_icons.py`：從 `static/icon-512.png` 產生啟動圖示與啟動畫面
+- [x] CI 自動建置 APK（`.github/workflows/android.yml`，支援簽章）
+- [x] 18 個防呆測試（`tests/test_mobile_build.py`）
+
 ---
 
 ## 待開發功能 🚧
@@ -159,14 +174,14 @@
 |------|------|
 | API 路由 | 85 |
 | 工具頁面 | 7 |
-| JS 模組 | 8 |
+| JS 模組 | 10（新增 config.js / native.js） |
 | 後端服務模組 | 10 |
 | 資料庫表 | 7 |
 | 資料模型 | 5 (contact, group, template, history, sender) |
 | 邊界偵測策略 | 7 (UNet_Mask, Canny×3, WhiteRegion, Otsu, Laplacian, HED, GrabCut — v5 逐邊證據評分 + 次像素精修) |
 | 掃描濾鏡 | 7 (auto, scan, color_doc, document, enhance, bw, original) |
 | 郵件模板 | 8 種文件類型預設 + 自訂 |
-| 測試 | 205（202 passed + 3 skipped，含 Form Fill 14 + review fixes 4 + Sprint 1 52 + Scan v5 20） |
+| 測試 | 228（225 passed + 3 skipped，含 Form Fill 14 + review fixes 4 + Sprint 1 52 + Scan v5 20 + Android 打包 18） |
 
 ---
 
@@ -186,6 +201,21 @@
 ---
 
 ## 變更日誌
+
+### 2026/07/26 (v3.5.0 — Android App)
+- 同一份 `static/` 前端同時服務網頁版與 Android App，開發流程不變（改 static/ → 重整瀏覽器）
+- `mobile/`：Capacitor 8 外殼 + Android 原生專案（appId `tw.edu.ncut.doflab.scanmail`）
+- `scripts/build_mobile.py`：把 CDN 依賴改為內建、預編譯 JSX、打包 Capacitor 橋接、注入執行環境旗標
+  - 每個 index.html 改寫規則都檢查命中次數，結構一改就直接失敗而不是產出壞掉的 App
+  - 改寫後檢查沒有殘留 `https://` 資源，確保 App 冷啟動不依賴外網
+- API 位址改由 `static/js/config.js` 在載入時決定：網頁版同源、App 版用使用者設定或打包時預填
+- 新增 App 內伺服器設定畫面（含 `/health` 連線測試），網路錯誤時自動跳出
+- 下載改走 `API.triggerDownload()` → App 內用 Capacitor 寫檔 + 系統分享（WebView 不支援 blob: 下載）
+- `get_current_user` / `get_user_id` 支援 `?token=`，讓 App 在啟用認證時仍能收到 SSE 任務進度
+- 修正：`index.html` 的 inline JSX 抽成 `js/boot.jsx`，並改用 `bUseState` / `bUseEffect`
+  避免與 `atoms.jsx` 的頂層 `const` 撞名（預編譯成一般 script 後會直接 SyntaxError）
+- 新增 `.github/workflows/android.yml`（push 產 debug APK、`android-v*` 標籤產 release APK）
+- 版本號統一升級至 3.5.0（`main.py` / PWA cache `scanmail-v6` / 前端資源版號 / Android versionCode 30500）
 
 ### 2026/07/08 (v3.4.0 — 文件邊界偵測 v5)
 - 評分系統重寫：矩形度 → 凸性（v4 懲罰透視梯形，導致大角度拍攝時包圍盒贏過真正邊界）

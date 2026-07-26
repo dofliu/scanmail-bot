@@ -174,6 +174,40 @@ cd deploy && docker-compose up -d
 
 ---
 
+## 📱 Android App
+
+同一份前端（`static/`），可以同時在電腦瀏覽器跑，也可以打包成手機 App。
+後端仍然在電腦或伺服器上執行 —— OpenCV、Gemini、SMTP 這些跑不進手機裡，
+App 是後端的前端。
+
+```bash
+# 第一次：安裝 Node 相依套件
+cd mobile && npm install && cd ..
+
+# 打包成 APK（後端位址直接內建）
+python scripts/build_mobile.py --api-base http://192.168.1.50:8000 --sync
+cd mobile/android && ./gradlew assembleDebug
+# → mobile/android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+不指定 `--api-base` 的話，App 第一次開啟會請使用者輸入伺服器位址，
+之後可在「設定 → 伺服器連線」隨時更換。
+
+**開發時電腦與手機同步**：讓 App 直接載入電腦上的 dev server，改完存檔兩邊都是新的：
+
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+python scripts/build_mobile.py --dev-server http://192.168.1.50:8000 --sync
+cd mobile/android && ./gradlew installDebug
+```
+
+推上 GitHub 後，`.github/workflows/android.yml` 會自動建置 debug APK 放到
+workflow 的 Artifacts；打 `android-v*` 標籤則會產出（可簽章的）release APK。
+
+> 完整說明、簽章上架、CORS 與疑難排解請見 **[docs/ANDROID.md](docs/ANDROID.md)**。
+
+---
+
 ## ffmpeg 安裝（僅影片工具需要）
 
 ```bash
@@ -193,8 +227,8 @@ choco install ffmpeg
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│              前端 SPA (HTML/CSS/JS)                    │
-│   工具導航列 · 7 個工具頁面 · 8 個 JS 模組             │
+│      前端 SPA (HTML/CSS/JS) — 網頁版 & Android App     │
+│   工具導航列 · 7 個工具頁面 · 手機/桌面雙介面           │
 ├──────────────────────────────────────────────────────┤
 │              FastAPI 後端 (Python)                     │
 │   7 個路由模組 · 10 個服務模組 · SSE 即時進度           │
@@ -252,14 +286,29 @@ scanmail-bot/
 │   │
 │   └── config.py                   # 環境變數設定
 │
-├── static/
-│   ├── index.html                  # HTML Shell + 7 個工具頁面
-│   ├── css/common.css              # 共用樣式
-│   └── js/                         # 8 個 JS 模組
+├── static/                         # 前端唯一來源（網頁版與 App 共用）
+│   ├── index.html                  #   HTML Shell
+│   ├── css/                        #   共用樣式
+│   └── js/
+│       ├── config.js               #   執行環境設定（決定 API 位址）
+│       ├── native.js               #   App 專用：存檔/分享、伺服器設定畫面
+│       ├── api.js                  #   API 層
+│       ├── store.js                #   狀態管理
+│       └── *.jsx                   #   atoms / mobile / desktop / boot
+│
+├── mobile/                         # Android App（Capacitor 外殼）
+│   ├── capacitor.config.js         #   App 設定（含 dev server 模式）
+│   ├── src/bridge.js               #   Capacitor 外掛橋接
+│   ├── android/                    #   Android 原生專案
+│   └── www/                        #   建置產物（不進版控）
+│
+├── scripts/
+│   ├── build_mobile.py             # static/ → App 前端
+│   └── gen_android_icons.py        # icon-512.png → Android 圖示
 │
 ├── deploy/                         # Dockerfile / docker-compose / render.yaml
 ├── tests/                          # pytest 測試
-└── docs/                           # 開發文件
+└── docs/                           # 開發文件（含 ANDROID.md）
 ```
 
 ---
