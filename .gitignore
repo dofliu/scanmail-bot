@@ -51,3 +51,11 @@ data/
 # Claude Code（worktrees 與本地設定不應入版控）
 .claude/worktrees/
 .claude/settings.local.json
+
+# Android App（詳見 mobile/.gitignore；產物與金鑰不進版控）
+mobile/node_modules/
+mobile/www/
+*.apk
+*.aab
+*.jks
+*.keystore

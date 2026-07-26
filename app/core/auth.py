@@ -72,7 +72,13 @@ def get_current_user(request: Request) -> str:
     # 2. 嘗試從 Cookie 取得
     if not token:
         token = request.cookies.get("session_token")
-        
+
+    # 3. 嘗試從 query string 取得
+    #    SSE（EventSource）無法自訂 header，跨來源時也拿不到 cookie，
+    #    Android App 的背景任務進度只能靠 ?token= 帶入。
+    if not token:
+        token = request.query_params.get("token")
+
     if not token:
         raise HTTPException(
             status_code=401,

@@ -944,6 +944,8 @@ function MSettings(){
           </div>
         </div>
 
+        <ServerSetting/>
+
         <div className="label" style={{marginBottom:'6px'}}>寄件人資料</div>
         <div className="card" style={{padding:'12px', marginBottom:'12px'}}>
           <div className="field-label">姓名</div>
@@ -1762,7 +1764,7 @@ function MToolForm(){
           <button className="btn primary" onClick={doFill} disabled={busy} style={{width:'100%', marginTop:'10px'}}>
             ✍️ 填寫並產生 PDF
           </button>
-          {resultUrl && <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginTop:'8px', background:'rgba(46,130,93,0.1)', border:'1.5px solid var(--primary)', color:'var(--primary)'}}>⬇ 下載填寫後的 PDF</a>}
+          {resultUrl && <button className="btn" onClick={() => window.API.saveFromUrl(resultUrl, 'filled.pdf').catch(() => {})} style={{display:'block', width:'100%', textAlign:'center', marginTop:'8px', background:'rgba(46,130,93,0.1)', border:'1.5px solid var(--primary)', color:'var(--primary)'}}>⬇ 下載填寫後的 PDF</button>}
         </div>
       )}
 

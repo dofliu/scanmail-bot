@@ -1,0 +1,9 @@
+# Node
+node_modules/
+
+# 由 scripts/build_mobile.py 從 ../static 產生 —— 不進版控，避免同一份前端有兩份來源
+www/
+
+# 簽章金鑰絕對不進版控
+*.jks
+*.keystore

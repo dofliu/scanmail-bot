@@ -1925,9 +1925,10 @@ function DToolForm(){
           )}
 
           {resultUrl && (
-            <a href={resultUrl} className="btn" style={{display:'block', textAlign:'center', marginBottom:'8px', background:'rgba(46,130,93,0.1)', border:'1.5px solid var(--primary)', color:'var(--primary)'}}>
+            <button className="btn" onClick={() => window.API.saveFromUrl(resultUrl, 'filled.pdf').catch(() => {})}
+                    style={{display:'block', width:'100%', textAlign:'center', marginBottom:'8px', background:'rgba(46,130,93,0.1)', border:'1.5px solid var(--primary)', color:'var(--primary)'}}>
               ⬇ 下載填寫後的 PDF
-            </a>
+            </button>
           )}
 
           {msg && <div style={{fontSize:'11px', color:'var(--ink-3)', marginTop:'10px', lineHeight:1.5}}>{msg}</div>}
@@ -2040,6 +2041,7 @@ function DSettings(){
           </button>
         </div>
       </div>
+      <div style={{gridColumn:'1 / span 2'}}><ServerSetting/></div>
       <div className="card" style={{padding:'20px'}}>
         <div className="hand" style={{fontSize:'20px', fontWeight:700, marginBottom:'14px'}}>寄件人資料</div>
         <div className="field-label">姓名</div>
