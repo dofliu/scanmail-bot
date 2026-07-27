@@ -243,6 +243,27 @@
 
 ## 變更日誌
 
+### 2026/07/27 (v3.9.0 — 裝置端的文件轉檔)
+- 離線版新增「文件」分頁：PDF / Word / Markdown / 純文字 / HTML 互轉，完全不連後端
+- 中間隔一層共用的文件模型，所以是任意組合而不是寫死的每一對轉換；
+  標題階層、清單、表格、引用、程式碼區塊、粗體斜體、超連結都會保留
+- 選好檔案先顯示解析後的排版預覽 —— 轉檔前就看得出來有沒有讀歪
+- 新增 `static/js/zip-lite.js`：用瀏覽器內建的 CompressionStream 讀寫 zip（DOCX 就是 zip 裝 XML），
+  不引入 JSZip
+- 新增 `static/js/ttf-lite.js`：TrueType 解析與子集化。內建字型 4.6 MB，
+  但輸出時只把這份文件用到的字寫進 PDF，所以產出的 PDF 通常只有 30–80 KB
+- 新增 `static/js/pdf-write.js`：PDF 產生器（Type0 / Identity-H / CIDFontType2 內嵌字型），
+  附 ToUnicode 對照表所以中文可以複製、可以搜尋；Markdown 的連結變成可點的連結註解
+- 新增 `scripts/make_pdf_font.py`：把 Noto Sans TC 裁成 Big5 全字集 + 常用符號（OFL 授權一併附上）
+- PDF 讀取靠字級、行距、行首符號還原段落與標題；掃描型 PDF 會明確提示需要 OCR，不給空白檔
+- DOCX 解析支援「清單設定寫在樣式上」的情況（Word 與 python-docx 都這樣做），
+  並沿 basedOn 往上追
+- 中文斷行做了避頭尾，超長網址逐字拆
+- 新增 37 個文件引擎測試 + 7 個介面測試 + 10 個打包防呆測試，全部納入 CI；
+  測試方式是「產完再讀回來」：產出的 PDF 交給 pdf.js 抽文字比對，產出的 DOCX 用自己的
+  zip 解開再解析，另外用 python-docx 產一份 fixture 驗證解析器不是只認得自己的寫法
+- 版本升至 3.9.0（PWA cache `scanmail-v10`、versionCode 30900）
+
 ### 2026/07/27 (v3.8.0 — 畫布優先的介面)
 - 試用回饋：選項太多把圖片擠掉了。這版把所有選項收進底部工具列，畫布吃滿剩餘空間
 - 工具列依情境切換 —— 沒選圖是「版面 / 圖框 / 間距 / 加圖 / 清空 / 製作」，

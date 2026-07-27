@@ -125,9 +125,9 @@ cd mobile/android && ./gradlew assembleDebug
 ```
 
 這個版本的 App **整個就是裝置端的媒體工具**：沒有掃描寄信、沒有導覽列、不用登入、
-不會問伺服器位址。所有處理都用 Canvas 在手機上直接做完，照片不會離開裝置。
+不會問伺服器位址。所有處理都在手機上直接做完，檔案不會離開裝置。
 
-介面只有兩個分頁：
+介面有三個分頁：**編輯**、**圖片**、**文件**。
 
 ### 🎨 編輯
 
@@ -177,12 +177,63 @@ cd mobile/android && ./gradlew assembleDebug
 改成列出每個檔案，可以單獨存，也可以「全部儲存」一次丟進系統分享面板
 （App 內只會跳一次分享面板）。
 
+### 🔄 圖片
+
+縮放、壓縮、轉檔是同一件事，所以併成一次處理：選好檔案，一起設定長邊上限、
+輸出格式與品質，只重新編碼一遍。
+
+### 📑 文件
+
+PDF / Word / Markdown 的互轉，一樣完全在裝置上做完。
+
+| 讀得進來 | 產得出去 |
+|------|------|
+| PDF、Word（.docx）、Markdown、純文字 | PDF、Word、Markdown、純文字、HTML |
+
+中間隔一層共用的文件模型，所以是任意組合而不是寫死的每一對轉換。標題階層、
+項目符號、編號清單、表格、引用、程式碼區塊、粗體斜體、超連結都會保留。
+
+選好檔案會先顯示解析後的排版預覽 —— 轉檔前就看得出來有沒有讀歪，
+比事後開檔案才發現好。工具列同樣是情境式的：格式 / 頁面（只有輸出 PDF 時出現）/
+換檔 / 清空，右側釘著「轉換」。
+
+#### PDF 輸出為什麼要打包字型
+
+PDF 規格要求字型必須嵌在檔案裡，收到檔案的人才看得到中文 —— 沒有「用系統字型」
+這個選項，而且 WebView 也拿不到 Android 內建字型的檔案。
+
+所以 App 內建一份裁過的 **Noto Sans TC**（`static/vendor/fonts/`，OFL 授權）：
+
+| | |
+|------|------|
+| 涵蓋範圍 | Big5 全字集（常用 + 次常用漢字）、ASCII、注音、假名、標點與常用符號 |
+| 大小 | 4.6 MB（原始 7.1 MB / 20812 字符） |
+| 產生方式 | `python scripts/make_pdf_font.py`（需要 fonttools） |
+
+輸出時 `static/js/ttf-lite.js` 會**再裁一次**，只把這份文件實際用到的字寫進 PDF。
+一份幾百字的文件通常只有 30–80 KB，不會背著整份字型。同時附上 ToUnicode 對照表，
+所以 PDF 裡的中文可以複製、可以搜尋，不是一張圖。
+
+文件裡若出現字型沒有的字（例如罕見異體字），轉檔後會跳出提示列出是哪幾個字，
+而不是安靜地留一片空白。
+
+#### PDF 讀取的限制
+
+PDF 裡沒有「段落」這種結構，只有一堆帶座標的文字片段。還原方式是看字級
+（比內文大就是標題）、行距（跳太多就是新段落）與行首符號（項目符號 / 編號）。
+排版複雜的檔案（多欄、圖文混排）還原出來的結構會比較粗糙。
+
+**掃描出來的圖片型 PDF 抽不到文字**，這種情況會明確告訴你需要 OCR，
+而不是給一份空白檔案。完整版可以走後端的 Vision 辨識。
+
 ### 還沒有的東西
 
-* **文件轉檔（PDF / DOCX / MD）** — 目前只在完整版（走後端）。裝置端做得到大部分方向，
-  但「產生 PDF」需要把中文字型打包進 APK（+3～7MB），還沒做。
 * **影片** — ffmpeg.wasm 本體就 25–30MB，在手機上壓一支影片要好幾分鐘且容易記憶體不足，
   評估後認為不適合放進 WebView App。
+* **PDF 裡的圖片** — 讀 PDF 只抽文字，圖片不會保留；Markdown 的圖片語法轉出去時
+  會變成「［圖片：說明］」的文字佔位。
+* **等寬字型** — 程式碼區塊用的是同一份 Noto Sans TC（再帶一份等寬中文字型太大），
+  有底色標示但字寬不對齊。
 
 > 完整版仍然保有全部功能，兩種版本共用同一份 `static/`，
 > 差別只在打包時有沒有加 `--offline`。
@@ -193,7 +244,7 @@ cd mobile/android && ./gradlew assembleDebug
 
 | 步驟 | 說明 |
 |------|------|
-| 複製 | `static/` → `mobile/www/`（`mobile/www/` 是產物，不進版控） |
+| 複製 | `static/` → `mobile/www/`（`mobile/www/` 是產物，不進版控）；缺少 PDF 內嵌字型會直接中止 |
 | 換掉 CDN | React / pdf.js / 字型改成打包在 App 內的檔案，手機沒網路也開得起來 |
 | 預編譯 JSX | 用 esbuild 先把 `.jsx` 轉成 `.js`，App 內不必再載 3MB 的 Babel 即時編譯 |
 | 橋接 | 打包 `mobile/src/bridge.js` → `window.SMCap`（存檔、分享、狀態列） |
@@ -266,7 +317,7 @@ cd mobile/android && ./gradlew assembleRelease
 
 版本號的唯一來源是 `main.py` 的 `version="x.y.z"`：
 
-* `versionName` = `3.8.0`
+* `versionName` = `3.9.0`
 * `versionCode` = `30800`（`major*10000 + minor*100 + patch`）
 
 改版時只要改 `main.py`，重跑 `build_mobile.py` 就會同步。
@@ -278,9 +329,10 @@ cd mobile/android && ./gradlew assembleRelease
 
 `.github/workflows/android.yml`：
 
-* push / PR 動到 `static/`、`mobile/`、`scripts/build_mobile.py` → 先跑本地圖片引擎的
-  瀏覽器測試，再建置兩份 debug APK（完整版 `scanmail-debug-apk`、離線精簡版
-  `scanmail-offline-apk`），都放在該次 workflow 的 **Artifacts**
+* push / PR 動到 `static/`、`mobile/`、`scripts/build_mobile.py` → 先跑裝置端引擎的
+  瀏覽器測試（圖片引擎、文件轉檔、離線版介面），再建置兩份 debug APK
+  （完整版 `scanmail-debug-apk`、離線精簡版 `scanmail-offline-apk`），
+  都放在該次 workflow 的 **Artifacts**
 * 打 `android-v*` 標籤 → 另外建置 release APK
 * 設定以下 repository secrets 後，release APK 會自動簽章：
   `ANDROID_KEYSTORE_BASE64`（`base64 -w0 scanmail-release.jks`）、
@@ -292,7 +344,7 @@ cd mobile/android && ./gradlew assembleRelease
 ## 目前的限制
 
 * **完整版的後端必須連得到。** 手機上沒有 Python，離線只能開得起 App，做不了事。
-  只需要圖片工具的話請改用情境 D 的離線精簡版。
+  只需要圖片與文件工具的話請改用情境 D 的離線精簡版。
 * **iOS 沒有做。** Capacitor 支援 iOS，但需要 Mac + Xcode，且要另外 `npx cap add ios`。
 * **App 內的「下載」是寫檔 + 叫出系統分享面板**，因為 Android WebView 不支援
   `blob:` 下載。可以存到「檔案」、雲端硬碟，或直接傳給別人。

@@ -38,6 +38,7 @@ WWW_DIR = MOBILE_DIR / "www"
 VENDOR_DIR = WWW_DIR / "vendor"
 NODE_MODULES = MOBILE_DIR / "node_modules"
 ANDROID_DIR = MOBILE_DIR / "android"
+PDF_FONT = STATIC_DIR / "vendor" / "fonts" / "NotoSansTC-Subset.ttf"
 
 IS_WINDOWS = sys.platform.startswith("win")
 NPM = "npm.cmd" if IS_WINDOWS else "npm"
@@ -51,9 +52,10 @@ VENDOR_FILES = [
     ("pdfjs-dist/build/pdf.worker.min.js", "pdf.worker.min.js"),
 ]
 
-# ── 字型：只帶拉丁字母的裝飾字型 ──
-# Noto Sans TC 刻意不打包 —— 中文交給 Android 內建的 Noto Sans CJK，
-# 外觀幾乎沒差，卻能省下好幾 MB。
+# ── 字型 ──
+# 介面用的中文交給 Android 內建的 Noto Sans CJK，不另外打包。
+# 但輸出 PDF 一定要把字型嵌進檔案裡，所以另外帶一份裁過的 Noto Sans TC
+# （static/vendor/fonts/，由 scripts/make_pdf_font.py 產生）。
 FONT_FACES = [
     # (@fontsource 套件, CSS font-family, 檔名 stem, 字重)
     ("@fontsource/caveat", "Caveat", "caveat-latin", [500, 600, 700]),
@@ -127,11 +129,17 @@ def esbuild(args: list[str]) -> None:
 
 def copy_static() -> None:
     step("複製 static/ → mobile/www/")
+    if not PDF_FONT.exists():
+        raise BuildError(
+            f"缺少 {PDF_FONT.relative_to(ROOT)} —— PDF 輸出需要內嵌中文字型。\n"
+            "  請執行：python scripts/make_pdf_font.py"
+        )
     if WWW_DIR.exists():
         shutil.rmtree(WWW_DIR)
     shutil.copytree(STATIC_DIR, WWW_DIR)
     VENDOR_DIR.mkdir(parents=True, exist_ok=True)
     log(f"{sum(1 for _ in WWW_DIR.rglob('*') if _.is_file())} 個檔案")
+    log(f"PDF 中文字型 {PDF_FONT.stat().st_size / 1024 / 1024:.1f} MB")
 
 
 def vendor_libs() -> None:

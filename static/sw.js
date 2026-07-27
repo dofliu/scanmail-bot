@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scanmail-v9';
+const CACHE_NAME = 'scanmail-v10';
 const ASSETS = [
   '/',
   '/index.html',
@@ -6,6 +6,10 @@ const ASSETS = [
   '/js/config.js',
   '/js/native.js',
   '/js/image-local.js',
+  '/js/zip-lite.js',
+  '/js/ttf-lite.js',
+  '/js/pdf-write.js',
+  '/js/doc-local.js',
   '/js/store.js',
   '/js/atoms.jsx',
   '/js/mobile.jsx',
@@ -25,6 +29,9 @@ const ASSETS = [
   '/icon-192.png',
   '/icon-512.png'
 ];
+// vendor/fonts/NotoSansTC-Subset.ttf 刻意不放進 ASSETS ——
+// 4.6 MB，只有輸出 PDF 才會用到，第一次用時再抓就好。
+
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

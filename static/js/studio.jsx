@@ -554,8 +554,263 @@ function StudioConvert() {
   );
 }
 
+// ─── 文件（PDF / Word / Markdown 互轉）────────────────────────
+
+const DOC_TARGETS = [
+  { id: 'pdf',  ic: '📕', label: 'PDF' },
+  { id: 'docx', ic: '📄', label: 'Word' },
+  { id: 'md',   ic: '📝', label: 'Markdown' },
+  { id: 'txt',  ic: '📃', label: '純文字' },
+  { id: 'html', ic: '🌐', label: '網頁' },
+];
+const DOC_PAGES = ['A4', 'A5', 'LETTER'];
+
+/** 解析結果直接畫出來 —— 轉檔前就看得到有沒有讀歪，比事後開檔案才發現好。 */
+function DocPreview({ doc }) {
+  const inline = (spans, key) => (spans || []).map((s, i) => {
+    const style = {
+      fontWeight: s.bold ? 700 : undefined,
+      fontStyle: s.italic ? 'italic' : undefined,
+      color: s.link ? 'var(--mint-4)' : undefined,
+      textDecoration: s.link ? 'underline' : undefined,
+      background: s.code ? 'var(--line-soft)' : undefined,
+      fontFamily: s.code ? 'var(--mono, monospace)' : undefined,
+      padding: s.code ? '0 3px' : undefined,
+      borderRadius: s.code ? '3px' : undefined,
+    };
+    return <span key={`${key}-${i}`} style={style}>{s.text}</span>;
+  });
+
+  const heads = ['19px', '16px', '15px', '14px', '13.5px', '13px'];
+  return (
+    <div style={{ fontSize: '13.5px', lineHeight: 1.8, color: 'var(--ink-1)' }}>
+      {doc.blocks.map((b, i) => {
+        if (b.type === 'heading') {
+          return (
+            <div key={i} style={{
+              fontSize: heads[Math.min(5, b.level - 1)], fontWeight: 700,
+              margin: `${b.level === 1 ? 4 : 16}px 0 6px`, lineHeight: 1.4,
+            }}>{inline(b.spans, i)}</div>
+          );
+        }
+        if (b.type === 'para') return <p key={i} style={{ margin: '0 0 10px' }}>{inline(b.spans, i)}</p>;
+        if (b.type === 'quote') {
+          return (
+            <div key={i} style={{
+              borderLeft: '3px solid var(--line-soft)', paddingLeft: '10px',
+              margin: '0 0 10px', color: 'var(--ink-3)',
+            }}>{inline(b.spans, i)}</div>
+          );
+        }
+        if (b.type === 'hr') return <div key={i} className="stroke soft" style={{ margin: '14px 0' }}/>;
+        if (b.type === 'code') {
+          return (
+            <pre key={i} style={{
+              background: 'var(--line-soft)', borderRadius: '6px', padding: '8px 10px',
+              margin: '0 0 10px', overflowX: 'auto', fontSize: '12px', lineHeight: 1.6,
+            }}>{b.text}</pre>
+          );
+        }
+        if (b.type === 'list') {
+          return (
+            <div key={i} style={{ margin: '0 0 10px' }}>
+              {b.items.map((it, j) => (
+                <div key={j} className="row" style={{
+                  gap: '6px', alignItems: 'flex-start',
+                  paddingLeft: `${(it.level || 0) * 14}px`, marginBottom: '2px',
+                }}>
+                  <span style={{ color: 'var(--ink-3)', flexShrink: 0 }}>{b.ordered ? `${j + 1}.` : '•'}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>{inline(it.spans, `${i}-${j}`)}</span>
+                </div>
+              ))}
+            </div>
+          );
+        }
+        if (b.type === 'table') {
+          return (
+            <div key={i} style={{ overflowX: 'auto', margin: '0 0 12px' }}>
+              <table style={{ borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                <tbody>
+                  {b.rows.map((row, r) => (
+                    <tr key={r}>
+                      {row.map((cell, c) => (
+                        <td key={c} style={{
+                          border: '1px solid var(--line-soft)', padding: '4px 8px',
+                          fontWeight: r === 0 && b.header ? 600 : 400,
+                          background: r === 0 && b.header ? 'var(--line-soft)' : undefined,
+                          whiteSpace: 'nowrap',
+                        }}>{inline(cell, `${i}-${r}-${c}`)}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
+}
+
+function StudioDocs() {
+  const [source, setSource] = stUseState(null);   // { file, kind, doc }
+  const [sheet, setSheet] = stUseState(null);     // null | 'target' | 'page'
+  const [target, setTarget] = stUseState('pdf');
+  const [page, setPage] = stUseState({ size: 'A4', landscape: false });
+  const [busy, setBusy] = stUseState(null);
+  const [result, setResult] = stUseState(null);
+  const pickRef = stUseRef(null);
+
+  const load = stUseCallback(async (files) => {
+    const file = files[0];
+    if (!file) return;
+    setResult(null);
+    setSource(null);
+    setBusy({ percent: 5, message: '讀取文件…' });
+    try {
+      const { doc, kind } = await window.SMDocLocal.parse(file,
+        (percent, message) => setBusy({ percent, message }));
+      setSource({ file, doc, kind });
+      // 預設轉成「不是原本格式」的那個，少按一次
+      setTarget(kind === 'pdf' ? 'docx' : 'pdf');
+    } catch (e) {
+      window.SMStore?.toast(e.message, 'err');
+    }
+    setBusy(null);
+  }, []);
+
+  const run = stUseCallback(async () => {
+    if (!source) return;
+    setBusy({ percent: 10, message: '轉換中…' });
+    try {
+      const out = await window.SMDocLocal.render(source.doc, target, {
+        pageSize: page.size, landscape: page.landscape, title: source.doc.title,
+      });
+      const base = source.file.name.replace(/\.[^.]+$/, '');
+      setResult({ ...out, name: `${base}.${window.SMDocLocal.FORMATS[target].ext}` });
+      if (out.missing && out.missing.length) {
+        window.SMStore?.toast(`有 ${out.missing.length} 個字不在內建字型裡：${out.missing.slice(0, 6).join('')}`, 'warn');
+      }
+    } catch (e) {
+      window.SMStore?.toast('轉換失敗：' + e.message, 'err');
+    }
+    setBusy(null);
+  }, [source, target, page]);
+
+  const targetInfo = DOC_TARGETS.find((t) => t.id === target) || DOC_TARGETS[0];
+
+  if (!source) {
+    return (
+      <div className="m-body" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <UploadDropzone accept=".md,.markdown,.txt,.docx,.pdf" onFiles={load}
+          icon="📑" label="選擇文件開始">
+          <div style={{ fontSize: '11px', color: 'var(--ink-3)', marginTop: '4px' }}>
+            PDF、Word、Markdown、純文字 —— 都在手機上處理，不會上傳
+          </div>
+        </UploadDropzone>
+        {busy && <ProgressBar percent={busy.percent} message={busy.message}/>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <input ref={pickRef} type="file" accept=".md,.markdown,.txt,.docx,.pdf" style={{ display: 'none' }}
+        onChange={(e) => { load(Array.from(e.target.files)); e.target.value = ''; }}/>
+      <div style={{
+        flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 16px',
+        background: 'var(--doc-bg, var(--paper))',
+      }}>
+        <div style={{ fontSize: '11px', color: 'var(--ink-3)', marginBottom: '10px' }}>
+          {source.file.name} → {targetInfo.label}
+          {source.doc.pages ? `（原始 ${source.doc.pages} 頁）` : ''}
+        </div>
+        <DocPreview doc={source.doc}/>
+      </div>
+
+      {busy && <div style={{ padding: '0 16px' }}><ProgressBar percent={busy.percent} message={busy.message}/></div>}
+
+      {result && (
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line-soft)' }}>
+          <div className="row between" style={{ alignItems: 'center', gap: '8px' }}>
+            <div style={{ fontSize: '12px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              ✅ {result.name}<span style={{ color: 'var(--ink-3)' }}> · {studioBytes(result.blob.size)}</span>
+            </div>
+            <button className="btn primary" style={{ flexShrink: 0 }}
+              onClick={() => window.API.triggerDownload(result.blob, result.name).catch(() => {})}>
+              ⬇ 儲存
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sheet === 'target' && (
+        <StudioSheet title="轉成什麼格式" onClose={() => setSheet(null)}>
+          <div className="row" style={{ gap: '6px', flexWrap: 'wrap' }}>
+            {DOC_TARGETS.map((t) => (
+              <button key={t.id} className={`chip ${target === t.id ? 'on' : ''}`}
+                onClick={() => { setTarget(t.id); setResult(null); setSheet(null); }}>
+                {t.ic} {t.label}
+              </button>
+            ))}
+          </div>
+        </StudioSheet>
+      )}
+
+      {sheet === 'page' && (
+        <StudioSheet title="頁面設定" onClose={() => setSheet(null)}>
+          <div className="field-label">紙張</div>
+          <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+            {DOC_PAGES.map((s) => (
+              <button key={s} className={`chip ${page.size === s ? 'on' : ''}`}
+                onClick={() => { setPage({ ...page, size: s }); setResult(null); }}>{s}</button>
+            ))}
+          </div>
+          <div className="field-label">方向</div>
+          <div className="row" style={{ gap: '6px' }}>
+            {[{ v: false, l: '直式' }, { v: true, l: '橫式' }].map((o) => (
+              <button key={o.l} className={`chip ${page.landscape === o.v ? 'on' : ''}`}
+                onClick={() => { setPage({ ...page, landscape: o.v }); setResult(null); }}>{o.l}</button>
+            ))}
+          </div>
+        </StudioSheet>
+      )}
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px', overflowX: 'auto' }}>
+          <BarBtn ic={targetInfo.ic} label={targetInfo.label} on={sheet === 'target'}
+            onClick={() => setSheet(sheet === 'target' ? null : 'target')}/>
+          {target === 'pdf' && (
+            <BarBtn ic="📐" label="頁面" on={sheet === 'page'}
+              onClick={() => setSheet(sheet === 'page' ? null : 'page')}/>
+          )}
+          <BarBtn ic="📂" label="換檔" onClick={() => pickRef.current?.click()}/>
+          <BarBtn ic="🗑" label="清空" onClick={() => { setSource(null); setResult(null); setSheet(null); }}/>
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="⚙" label="轉換" accent disabled={!!busy} onClick={run}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 外殼 ──────────────────────────────────────────────────────
 // 分頁切換放在標題列，把整條底部留給工具列 —— 兩條 bar 疊在一起太吃畫面。
+const STUDIO_TABS = [
+  { id: 'edit', l: '🎨 編輯' },
+  { id: 'convert', l: '🔄 圖片' },
+  { id: 'docs', l: '📑 文件' },
+];
+
 function Studio() {
   const [state, store] = window.useStore();
   const [tab, setTab] = stUseState('edit');
@@ -566,7 +821,7 @@ function Studio() {
         <div className="m-screen">
           <div className="m-header" style={{ flexShrink: 0 }}>
             <div className="row" style={{ gap: '4px', alignItems: 'center' }}>
-              {[{ id: 'edit', l: '🎨 編輯' }, { id: 'convert', l: '🔄 轉換' }].map((t) => (
+              {STUDIO_TABS.map((t) => (
                 <button key={t.id} className={`chip ${tab === t.id ? 'on' : ''}`}
                   onClick={() => setTab(t.id)} style={{ fontSize: '12px' }}>{t.l}</button>
               ))}
@@ -575,7 +830,7 @@ function Studio() {
               <button className="iconbtn" onClick={() => store.toggleTheme()}>◐</button>
             </div>
           </div>
-          {tab === 'edit' ? <StudioEditor/> : <StudioConvert/>}
+          {tab === 'edit' ? <StudioEditor/> : tab === 'convert' ? <StudioConvert/> : <StudioDocs/>}
         </div>
         <Toasts toasts={state.toasts || []}/>
       </div>
@@ -584,6 +839,7 @@ function Studio() {
 }
 
 Object.assign(window, {
-  Studio, StudioEditor, StudioConvert, StudioSheet, BarBtn, LayoutIcon, ColorRow,
-  STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS,
+  Studio, StudioEditor, StudioConvert, StudioDocs, DocPreview,
+  StudioSheet, BarBtn, LayoutIcon, ColorRow,
+  STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_TABS, DOC_TARGETS,
 });
