@@ -188,6 +188,54 @@ def test_studio_offers_only_canvas_supported_formats():
         assert fmt in formats, f"少了 {fmt}"
 
 
+def test_toolbar_is_contextual():
+    """所有選項都在底部工具列，且依有沒有選圖切換 —— 不能兩組同時攤在畫面上。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    # 以 current（= 有選到圖）決定工具列內容
+    assert "{current ? (" in source, "工具列沒有依選取狀態切換"
+    for label in ("左轉", "右轉", "裁切", "大小", "完成"):
+        assert f'label="{label}"' in source, f"圖片工具列少了 {label}"
+    for label in ("版面", "圖框", "間距", "加圖", "製作"):
+        assert f'label="{label}"' in source, f"拼貼工具列少了 {label}"
+
+
+def test_options_live_in_sheets_not_on_screen():
+    """細項一律收進面板，靠 sheet 狀態開關，不常駐佔畫面。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "const [sheet, setSheet]" in source
+    assert "{sheet && sheets[sheet]}" in source, "面板不是依狀態渲染"
+    # 每個面板都要有關閉的方式
+    assert "function StudioSheet(" in source and "onClose" in source
+
+
+def test_layout_presets_cover_common_grids():
+    """版面要能直接選 2×3 / 3×3 這種，不是只給一個欄數輸入框。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    presets = source[source.index("STUDIO_LAYOUTS"):source.index("STUDIO_FRAMES")]
+    for label in ("直式", "橫式", "2×2", "2×3", "3×2", "3×3", "4×4"):
+        assert label in presets, f"版面預設少了 {label}"
+    # 格狀預設要用 cover，格子才會一樣大、圖片填滿
+    assert presets.count("fill: 'cover'") >= 5, "格狀預設沒有使用 cover"
+
+
+def test_frame_and_crop_options_exist():
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    frames = source[source.index("STUDIO_FRAMES"):source.index("STUDIO_CROPS")]
+    for label in ("圓角", "細邊", "白框", "陰影", "拍立得"):
+        assert label in frames, f"圖框樣式少了 {label}"
+    crops = source[source.index("STUDIO_CROPS"):source.index("STUDIO_SWATCHES")]
+    for label in ("原始", "1:1", "16:9"):
+        assert label in crops, f"裁切比例少了 {label}"
+
+
+def test_engine_supports_crop_and_frames():
+    source = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    for fn in ("function cropToAspect(", "function drawCell(", "function roundedPath("):
+        assert fn in source, f"引擎少了 {fn}"
+    # 裁切要在變形階段生效，才會影響版面計算
+    assert "cropToAspect(usePreview" in source, "renderItem 沒有套用裁切"
+
+
 def test_editor_shares_one_layout_source():
     """即時預覽與匯出必須走同一套版面計算，否則會「看到的跟存出來的不一樣」。"""
     source = (JS / "image-local.js").read_text(encoding="utf-8")
