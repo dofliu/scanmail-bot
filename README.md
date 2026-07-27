@@ -209,20 +209,25 @@ python scripts/build_mobile.py --offline --sync
 cd mobile/android && ./gradlew assembleDebug
 ```
 
-介面分三頁：**編輯**、**圖片**、**文件**，全部在裝置上處理，檔案不會離開手機。
+介面分四頁：**編輯**、**圖片**、**文件**、**頁面**，全部在裝置上處理，檔案不會離開手機。
 
 編輯頁的畫面上永遠只有畫布和一條工具列 —— 所有選項收在底部並依情境自動切換：
 沒選圖時是版面（2×2 / 2×3 / 3×3…）、圖框（圓角 / 白框 / 陰影 / 拍立得）、間距；
 點畫布上任一張圖就換成旋轉 / 翻轉 / 裁切 / 大小，按「完成」再切回來。
 細調項目才從下方推出面板，關掉立刻恢復滿版。
 
-圖片頁把縮放、壓縮、轉檔併成一次處理，只重新編碼一遍。
+**裁切是自由拖拉的**：點「裁切」進到獨立畫面，四角拖框、框內拖移、三分線輔助，
+也可以鎖 1:1 / 4:3 / 16:9 等比例。裁切在旋轉「之後」才套用，所以拉的框就是看到的畫面；
+轉圖時框會跟著轉，不會飄掉。
+
+圖片頁把縮放、壓縮、轉檔併成一次處理，只重新編碼一遍，也可以**把多張直接合併成一份 PDF**。
 
 文件頁做 PDF / Word / Markdown 的互轉，同樣不連後端：
 
 | 讀得進來 | 產得出去 |
 | --- | --- |
 | PDF、Word（.docx）、Markdown、純文字 | PDF、Word、Markdown、純文字、HTML |
+| PDF | 圖片（每頁一張，可挑 100 / 150 / 300 dpi） |
 
 中間隔一層共用的文件模型，所以是「任意組合」而不是寫死的每一對轉換；
 標題階層、項目符號、編號清單、表格、引用、程式碼區塊都會保留。
@@ -239,6 +244,24 @@ cd mobile/android && ./gradlew assembleDebug
   掃描出來的圖片型 PDF 抽不到文字，會明確告訴你需要 OCR，而不是給一份空白檔。
 * **DOCX**：是一包 zip 裝 XML，用瀏覽器內建的 `CompressionStream` 自己拆包打包，
   不必引入額外的函式庫。
+* **照片轉 PDF 不掉畫質**：PDF 的 `/DCTDecode` 濾鏡吃的就是 JPEG 原始位元組，
+  所以手機拍的照片是「原樣」放進 PDF —— 不解碼、不重新編碼。只有格式不合
+  （漸進式 JPEG、CMYK、PNG）或要縮小時才重壓一次。PDF 檢視器不看 Exif，
+  方向改用變換矩陣處理，照片本身還是原封不動。
+
+頁面頁做 PDF 的**合併、刪頁、抽頁、重排、轉向**，同樣不連後端：
+
+丟幾份 PDF 進去，所有頁面併成一張縮圖總表；點某一頁就換成該頁的操作
+（左轉 / 右轉 / 前移 / 後移 / 刪除），排好按輸出。
+
+這些都是**無損**的 —— 頁面連同它參照到的字型、圖片整包搬過去，內容串流原封不動，
+所以文字還是文字、圖還是原本那張圖，不是重畫成點陣圖再貼回去。做法是自己寫了一層
+PDF 物件解析器（`static/js/pdf-lite.js`）：讀 xref（傳統表與 PDF 1.5 之後的串流都認）、
+展開物件串流、走頁面樹、把選中的頁面連同相依物件重新編號寫出。
+
+真實世界的 PDF 常常有點壞，所以還留了幾條退路：xref 讀不動就退回全檔掃描、
+增量更新沿著 `/Prev` 往回走、屬性寫在父節點上會沿著頁面樹繼承下來、
+加密的檔案直接明講不能編輯而不是給出壞掉的輸出。
 
 推上 GitHub 後，`.github/workflows/android.yml` 會自動建置兩份 debug APK
 （完整版與離線精簡版）放到 workflow 的 Artifacts；
@@ -338,7 +361,8 @@ scanmail-bot/
 │       ├── zip-lite.js             #   ZIP 讀寫（DOCX 拆包/打包）
 │       ├── ttf-lite.js             #   TrueType 解析與子集化（PDF 內嵌字型）
 │       ├── pdf-write.js            #   PDF 產生器（含中文 CID 字型）
-│       ├── studio.jsx              #   離線版介面（編輯 / 圖片 / 文件）
+│       ├── pdf-lite.js             #   PDF 物件解析器（合併/刪頁/重排，無損）
+│       ├── studio.jsx              #   離線版介面（編輯 / 圖片 / 文件 / 頁面）
 │       ├── api.js                  #   API 層
 │       ├── store.js                #   狀態管理
 │       └── *.jsx                   #   atoms / mobile / desktop / boot
@@ -399,6 +423,7 @@ python -m pytest tests/ -v
 cd mobile && npm ci && npx playwright install chromium
 npm run test:image     # 圖片引擎
 npm run test:doc       # 文件轉檔：產出真的 PDF / DOCX 再讀回來比對
+npm run test:pages     # PDF 頁面操作（pip install pikepdf 可多一層 qpdf 結構檢查）
 npm run test:studio    # 離線版介面（需要先跑過 build_mobile.py --offline）
 
 # 開發模式啟動

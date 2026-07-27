@@ -44,6 +44,7 @@ const HARNESS = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"
 <title>doc engine harness</title>
 <script src="/pdfjs/pdf.min.js"></script>
 <script>window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.js';<\/script>
+<script src="/js/image-local.js"><\/script>
 <script src="/js/zip-lite.js"><\/script>
 <script src="/js/ttf-lite.js"><\/script>
 <script src="/js/pdf-write.js"><\/script>
@@ -287,6 +288,161 @@ check('PDF 讀回來認得出標題', back.title === '專案週報', back.title)
 check('PDF 讀回來認得出項目清單', back.types.includes('list'), back.types.join(','));
 check('PDF 讀回來的內文沒掉字',
   /完成圖片拼接功能/.test(back.md) && /慢慢來比較快/.test(back.md), back.md.slice(0, 300));
+
+// ── 圖片 → PDF ──────────────────────────────────────────
+// 掃描類 App 的核心動作：拍幾張紙本，變成一份 PDF
+const img2pdf = await page.evaluate(async () => {
+  const mk = (w, h, type) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    if (type !== 'image/png') { x.fillStyle = '#fff'; x.fillRect(0, 0, w, h); }
+    x.fillStyle = '#c0392b'; x.fillRect(0, 0, w / 2, h);
+    return new Promise((r) => c.toBlob(r, type, 0.9));
+  };
+  const jpegs = [await mk(800, 600, 'image/jpeg'), await mk(600, 900, 'image/jpeg')];
+  const png = await mk(500, 500, 'image/png');
+
+  const sizeOf = async (blob) => {
+    const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+    const out = [];
+    for (let i = 1; i <= doc.numPages; i++) {
+      const v = (await doc.getPage(i)).getViewport({ scale: 1 });
+      out.push([Math.round(v.width), Math.round(v.height)]);
+    }
+    return out;
+  };
+
+  const a4 = await window.SMImageLocal.imagesToPdf([...jpegs, png], { pageSize: 'A4' });
+  const fit = await window.SMImageLocal.imagesToPdf([...jpegs, png], { pageSize: 'fit' });
+  return {
+    a4: { pages: await sizeOf(a4.blob), reused: a4.reused, size: a4.blob.size },
+    fit: { pages: await sizeOf(fit.blob), reused: fit.reused },
+  };
+});
+
+check('多張圖合併成一份多頁 PDF',
+  img2pdf.a4.pages.length === 3 && img2pdf.a4.pages.every((p) => p[0] === 595 && p[1] === 842),
+  JSON.stringify(img2pdf.a4.pages));
+check('「貼合圖片」讓每頁尺寸等於該張照片',
+  JSON.stringify(img2pdf.fit.pages) === JSON.stringify([[800, 600], [600, 900], [500, 500]]),
+  JSON.stringify(img2pdf.fit.pages));
+check('JPEG 原樣嵌入不重新編碼（PNG 才需要轉一次）',
+  img2pdf.a4.reused === 2 && img2pdf.fit.reused === 2,
+  `${img2pdf.a4.reused} / ${img2pdf.fit.reused}`);
+
+// Exif 方向：PDF 檢視器不看 Exif，得靠變換矩陣轉正
+const exif = await page.evaluate(async () => {
+  const c = document.createElement('canvas');
+  c.width = 800; c.height = 400;
+  const x = c.getContext('2d');
+  x.fillStyle = '#c0392b'; x.fillRect(0, 0, 400, 400);
+  x.fillStyle = '#2980b9'; x.fillRect(400, 0, 400, 400);
+  const base = new Uint8Array(await (await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9))).arrayBuffer());
+
+  // 手工插一段只有 orientation 的 Exif APP1
+  const tag = (src, o) => {
+    const payload = [0x45, 0x78, 0x69, 0x66, 0, 0,
+      0x4D, 0x4D, 0x00, 0x2A, 0, 0, 0, 8, 0, 1,
+      0x01, 0x12, 0, 3, 0, 0, 0, 1, (o >> 8) & 255, o & 255, 0, 0, 0, 0, 0, 0];
+    const len = payload.length + 2;
+    const app1 = [0xFF, 0xE1, (len >> 8) & 255, len & 255, ...payload];
+    const out = new Uint8Array(2 + app1.length + src.length - 2);
+    out.set(src.subarray(0, 2), 0);
+    out.set(app1, 2);
+    out.set(src.subarray(2), 2 + app1.length);
+    return out;
+  };
+
+  const res = {};
+  for (const o of [1, 6]) {
+    const bytes = tag(base, o);
+    const file = new File([bytes], `o${o}.jpg`, { type: 'image/jpeg' });
+    const { blob, reused } = await window.SMImageLocal.imagesToPdf([file], { pageSize: 'fit' });
+    const doc = await window.pdfjsLib.getDocument({ data: new Uint8Array(await blob.arrayBuffer()) }).promise;
+    const pg = await doc.getPage(1);
+    const vp = pg.getViewport({ scale: 1 });
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(vp.width); cv.height = Math.round(vp.height);
+    const cx = cv.getContext('2d');
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+    await pg.render({ canvasContext: cx, viewport: vp }).promise;
+    const at = (px, py) => {
+      const d = cx.getImageData(Math.round(px), Math.round(py), 1, 1).data;
+      return d[0] > 150 && d[1] < 100 ? '紅' : d[2] > 130 && d[0] < 100 ? '藍' : '?';
+    };
+    res[o] = {
+      exif: window.SMPDFWriter.readJpeg(bytes).orientation, reused,
+      page: [cv.width, cv.height],
+      topLeft: at(cv.width * 0.1, cv.height * 0.1),
+      topRight: at(cv.width * 0.9, cv.height * 0.1),
+    };
+  }
+  return res;
+});
+check('讀得出 Exif 方向', exif['1'].exif === 1 && exif['6'].exif === 6, JSON.stringify(exif));
+check('方向 1 的照片左紅右藍、頁面是橫的',
+  exif['1'].page.join() === '800,400' && exif['1'].topLeft === '紅' && exif['1'].topRight === '藍',
+  JSON.stringify(exif['1']));
+check('方向 6 的照片在 PDF 裡被轉正（頁面變直的、紅色跑到上方）',
+  exif['6'].page.join() === '400,800' && exif['6'].topLeft === '紅' && exif['6'].topRight === '紅',
+  JSON.stringify(exif['6']));
+check('轉正是靠矩陣，照片本身還是原樣嵌入', exif['6'].reused === 1, String(exif['6'].reused));
+
+// ── PDF → 圖片 ──────────────────────────────────────────
+const pdf2img = await page.evaluate(async (md) => {
+  const D = window.SMDocLocal;
+  const { blob } = await D.toPdf(D.fromMarkdown(md));
+  const buf = await blob.arrayBuffer();
+  const low = await D.pdfToImages(buf, { dpi: 72 });
+  const high = await D.pdfToImages(buf, { dpi: 200, format: 'PNG' });
+  const bmp = await createImageBitmap(low[0].blob);
+  return {
+    count: low.length, ext: low[0].ext, page: low[0].page,
+    width: bmp.width, height: bmp.height,
+    pngExt: high[0].ext, bigger: high[0].blob.size > low[0].blob.size,
+  };
+}, SAMPLE);
+check('PDF 每頁算成一張圖', pdf2img.count >= 1 && pdf2img.page === 1, JSON.stringify(pdf2img));
+check('72 dpi 的 A4 就是 595×842', pdf2img.width === 595 && pdf2img.height === 842,
+  `${pdf2img.width}x${pdf2img.height}`);
+check('可以挑解析度與格式', pdf2img.ext === 'jpg' && pdf2img.pngExt === 'png' && pdf2img.bigger,
+  JSON.stringify(pdf2img));
+
+// ── 自由裁切 ────────────────────────────────────────────
+const crop = await page.evaluate(async () => {
+  const E = window.SMImageLocal;
+  const c = document.createElement('canvas');
+  c.width = 800; c.height = 400;
+  c.getContext('2d').fillRect(0, 0, 800, 400);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.9));
+  const item = await E.loadItem(new File([blob], 'a.jpg', { type: 'image/jpeg' }));
+
+  const sized = (patch) => {
+    const out = E.renderItem({ ...item, ...patch });
+    return [out.width, out.height];
+  };
+  return {
+    none: sized({}),
+    half: sized({ cropRect: { x: 0.25, y: 0, w: 0.5, h: 1 } }),
+    // 先轉再裁：轉 90 度後畫面是 400×800，裁上半就是 400×400
+    rotated: sized({ rotate: 90, cropRect: { x: 0, y: 0, w: 1, h: 0.5 } }),
+    preset: E.centeredRect(800, 400, 1),
+    rotateRect: E.rotateRect({ x: 0, y: 0, w: 0.5, h: 1 }, 90),
+    flipRect: E.flipRect({ x: 0, y: 0, w: 0.25, h: 1 }, 'h'),
+  };
+});
+check('裁切框用相對座標，切出來的尺寸正確',
+  crop.none.join() === '800,400' && crop.half.join() === '400,400', JSON.stringify(crop));
+check('先旋轉再裁切 —— 使用者裁的是他看到的畫面',
+  crop.rotated.join() === '400,400', JSON.stringify(crop.rotated));
+check('選比例時給一個置中、盡量大的起始框',
+  Math.abs(crop.preset.w - 0.5) < 0.001 && crop.preset.h === 1 && Math.abs(crop.preset.x - 0.25) < 0.001,
+  JSON.stringify(crop.preset));
+check('轉圖 / 翻圖時裁切框跟著動，不會飄到別的地方',
+  JSON.stringify(crop.rotateRect) === JSON.stringify({ x: 0, y: 0, w: 1, h: 0.5 }) &&
+  JSON.stringify(crop.flipRect) === JSON.stringify({ x: 0.75, y: 0, w: 0.25, h: 1 }),
+  JSON.stringify([crop.rotateRect, crop.flipRect]));
 
 // ── 斷行 ────────────────────────────────────────────────
 const wrap = await page.evaluate(() => {

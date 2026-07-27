@@ -58,6 +58,105 @@
     return new Uint8Array(await new Response(out).arrayBuffer());
   }
 
+  // ── JPEG ────────────────────────────────────────────────
+
+  /**
+   * 讀 JPEG 的標頭。
+   *
+   * 為什麼要自己讀：PDF 的 /DCTDecode 濾鏡吃的就是 JPEG 原始位元組，
+   * 所以手機拍的照片可以「原樣」塞進 PDF —— 不解碼、不重新編碼、不掉畫質。
+   * 但要先確認它是 PDF 讀得懂的那種 JPEG，並且知道長寬。
+   *
+   * @returns {null|{width, height, components, orientation, embeddable}}
+   */
+  function readJpeg(bytes) {
+    if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let p = 2;
+    let info = null;
+    let orientation = 1;
+
+    while (p < bytes.length - 1) {
+      if (bytes[p] !== 0xff) { p++; continue; }
+      const marker = bytes[p + 1];
+      if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { p += 2; continue; }
+      if (marker === 0xda || marker === 0xd9) break; // 進入影像資料
+      const len = view.getUint16(p + 2);
+      if (len < 2) return null;
+
+      // SOF0 基線、SOF1 延伸循序 —— PDF 只保證讀得懂這兩種。
+      // SOF2 是漸進式、SOF9/SOFA 是算術編碼，PDF 檢視器常常畫不出來。
+      if (marker === 0xc0 || marker === 0xc1) {
+        info = {
+          height: view.getUint16(p + 5),
+          width: view.getUint16(p + 7),
+          components: bytes[p + 9],
+          embeddable: true,
+        };
+      } else if ((marker >= 0xc2 && marker <= 0xcf) && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        info = {
+          height: view.getUint16(p + 5),
+          width: view.getUint16(p + 7),
+          components: bytes[p + 9],
+          embeddable: false,
+        };
+      } else if (marker === 0xe1) {
+        orientation = readExifOrientation(view, p + 4, len - 2) || 1;
+      }
+      p += 2 + len;
+    }
+
+    if (!info || !info.width || !info.height) return null;
+    // 灰階與 RGB 直接嵌；CMYK（4 通道）還要處理 Adobe 的反相標記，交給重新編碼
+    if (info.components !== 1 && info.components !== 3) info.embeddable = false;
+    return { ...info, orientation };
+  }
+
+  /** APP1 裡的 Exif 方向標記（0x0112）。讀不到就回傳 0。 */
+  function readExifOrientation(view, at, length) {
+    try {
+      if (length < 14) return 0;
+      for (let i = 0; i < 4; i++) {
+        if (view.getUint8(at + i) !== 'Exif'.charCodeAt(i)) return 0;
+      }
+      const tiff = at + 6;
+      const le = view.getUint16(tiff) === 0x4949;
+      if (view.getUint16(tiff + 2, le) !== 42) return 0;
+      const ifd = tiff + view.getUint32(tiff + 4, le);
+      const count = view.getUint16(ifd, le);
+      for (let i = 0; i < count; i++) {
+        const entry = ifd + 2 + i * 12;
+        if (view.getUint16(entry, le) === 0x0112) {
+          const value = view.getUint16(entry + 8, le);
+          return value >= 1 && value <= 8 ? value : 0;
+        }
+      }
+    } catch (e) {
+      return 0;
+    }
+    return 0;
+  }
+
+  /**
+   * Exif 方向 → PDF 的變換矩陣。
+   *
+   * PDF 檢視器不看 Exif，所以原樣嵌入的照片得靠矩陣轉正。
+   * 每個方向都是「來源單位正方形 (u,v) → 顯示單位正方形 (s,t)」的仿射對應，
+   * 再放大到目標方框。s / t 各寫成 [常數, u 係數, v 係數]。
+   */
+  const ORIENT = {
+    1: [[0, 1, 0], [0, 0, 1]],
+    2: [[1, -1, 0], [0, 0, 1]],
+    3: [[1, -1, 0], [1, 0, -1]],
+    4: [[0, 1, 0], [1, 0, -1]],
+    5: [[0, 0, 1], [0, 1, 0]],
+    6: [[0, 0, 1], [1, -1, 0]],
+    7: [[1, 0, -1], [1, -1, 0]],
+    8: [[1, 0, -1], [0, 1, 0]],
+  };
+  /** 5–8 會把長寬對調 */
+  const SWAPS_AXES = (o) => o >= 5 && o <= 8;
+
   // ── 文件 ────────────────────────────────────────────────
 
   function create(opts = {}) {
@@ -70,6 +169,29 @@
     let page = null;
     /** 每個字型一份「用過的字符」，最後才依這份清單裁字型 */
     const fonts = [];
+    const images = [];
+
+    /**
+     * 登記一張要畫進 PDF 的 JPEG。
+     * @param {Uint8Array} jpeg 原始 JPEG 位元組
+     * @returns {{name, width, height, aspect}} width/height 是「轉正後」的顯示尺寸
+     */
+    function useImage(jpeg) {
+      const info = readJpeg(jpeg);
+      if (!info) throw new Error('不是可辨識的 JPEG');
+      if (!info.embeddable) throw new Error('這種 JPEG（漸進式或 CMYK）不能直接嵌入 PDF');
+      const swap = SWAPS_AXES(info.orientation);
+      const ref = {
+        name: `Im${images.length + 1}`,
+        data: jpeg,
+        raw: info,
+        width: swap ? info.height : info.width,
+        height: swap ? info.width : info.height,
+      };
+      ref.aspect = ref.width / ref.height;
+      images.push(ref);
+      return ref;
+    }
 
     function useFont(ttf, name) {
       const ref = {
@@ -94,8 +216,13 @@
       return ref;
     }
 
-    function addPage() {
-      page = { ops: [], links: [] };
+    /** size 可指定這一頁自己的尺寸（圖片轉 PDF 時讓頁面貼合照片比例） */
+    function addPage(size) {
+      page = {
+        ops: [], links: [],
+        width: (size && size.width) || width,
+        height: (size && size.height) || height,
+      };
       pages.push(page);
       return page;
     }
@@ -135,6 +262,11 @@
       need().links.push({ x, y, w, h, url });
     }
 
+    /** 把圖畫進指定方框（左上角座標系）。方框比例請自己算好，這裡不會再等比縮。 */
+    function drawImage(ref, x, y, w, h) {
+      need().ops.push({ t: 'image', ref, x, y, w, h });
+    }
+
     /** 量一段文字的寬度（pt），排版時用 */
     function measure(str, font, size) {
       let total = 0;
@@ -143,6 +275,7 @@
     }
 
     function serialize(p) {
+      const pageHeight = p.height;
       for (const f of fonts) {
         if (f.used.size && !f.remap) throw new Error('內部錯誤：字型還沒子集化就要輸出內容');
       }
@@ -161,12 +294,12 @@
             out.push(`${fmt(r)} ${fmt(g)} ${fmt(b)} RG`);
             out.push(`${fmt(op.size * 0.035)} w 2 Tr`);
           }
-          out.push(`1 0 0 1 ${fmt(op.x)} ${fmt(height - op.y)} Tm`);
+          out.push(`1 0 0 1 ${fmt(op.x)} ${fmt(pageHeight - op.y)} Tm`);
           out.push(`<${hex}> Tj`);
           if (op.bold) out.push('0 Tr');
           out.push('ET');
         } else if (op.t === 'rect') {
-          const box = `${fmt(op.x)} ${fmt(height - op.y - op.h)} ${fmt(op.w)} ${fmt(op.h)} re`;
+          const box = `${fmt(op.x)} ${fmt(pageHeight - op.y - op.h)} ${fmt(op.w)} ${fmt(op.h)} re`;
           if (op.fill) {
             const [r, g, b] = rgb(op.fill);
             out.push(`${fmt(r)} ${fmt(g)} ${fmt(b)} rg`);
@@ -180,7 +313,18 @@
         } else if (op.t === 'line') {
           const [r, g, b] = rgb(op.color);
           out.push(`${fmt(r)} ${fmt(g)} ${fmt(b)} RG ${fmt(op.width)} w`);
-          out.push(`${fmt(op.x1)} ${fmt(height - op.y1)} m ${fmt(op.x2)} ${fmt(height - op.y2)} l S`);
+          out.push(`${fmt(op.x1)} ${fmt(pageHeight - op.y1)} m ${fmt(op.x2)} ${fmt(pageHeight - op.y2)} l S`);
+        } else if (op.t === 'image') {
+          const [s, t] = ORIENT[op.ref.raw.orientation] || ORIENT[1];
+          const bx = op.x;
+          const by = pageHeight - op.y - op.h;
+          out.push('q');
+          out.push(
+            `${fmt(op.w * s[1])} ${fmt(op.h * t[1])} ${fmt(op.w * s[2])} ${fmt(op.h * t[2])} ` +
+            `${fmt(bx + op.w * s[0])} ${fmt(by + op.h * t[0])} cm`
+          );
+          out.push(`/${op.ref.name} Do`);
+          out.push('Q');
         }
       }
       return out.join('\n');
@@ -281,7 +425,20 @@
         fontRes.push(`/${font.name} ${fontId} 0 R`);
       }
 
-      const resources = `<< /Font << ${fontRes.filter(Boolean).join(' ')} >> >>`;
+      // JPEG 原始位元組直接當成串流內容 —— /DCTDecode 吃的就是這個，
+      // 所以照片不必解碼再重新編碼，畫質與檔案大小都跟原檔一樣。
+      const imageRes = images.map((img) => {
+        const id = add({
+          dict: `<< /Type /XObject /Subtype /Image /Width ${img.raw.width} /Height ${img.raw.height} ` +
+            `/ColorSpace ${img.raw.components === 1 ? '/DeviceGray' : '/DeviceRGB'} ` +
+            `/BitsPerComponent 8 /Filter /DCTDecode /Length ${img.data.length} >>`,
+          stream: img.data,
+        });
+        return `/${img.name} ${id} 0 R`;
+      });
+
+      const resources = `<< /Font << ${fontRes.filter(Boolean).join(' ')} >>` +
+        (imageRes.length ? ` /XObject << ${imageRes.join(' ')} >>` : '') + ` >>`;
       const pageIds = [];
       for (const p of pages) {
         const content = enc.encode(serialize(p));
@@ -294,11 +451,11 @@
         });
         const annots = p.links.map((l) => add(
           `<< /Type /Annot /Subtype /Link /Border [0 0 0] ` +
-          `/Rect [${fmt(l.x)} ${fmt(height - l.y - l.h)} ${fmt(l.x + l.w)} ${fmt(height - l.y)}] ` +
+          `/Rect [${fmt(l.x)} ${fmt(p.height - l.y - l.h)} ${fmt(l.x + l.w)} ${fmt(p.height - l.y)}] ` +
           `/A << /S /URI /URI ${pdfString(l.url)} >> >>`
         ));
         pageIds.push(add(
-          `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${fmt(width)} ${fmt(height)}] ` +
+          `<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${fmt(p.width)} ${fmt(p.height)}] ` +
           `/Resources ${resources} /Contents ${contentId} 0 R` +
           (annots.length ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(' ')}]` : '') +
           ` >>`
@@ -349,7 +506,7 @@
     }
 
     return {
-      width, height, useFont, addPage, text, rect, line, link, measure, toBlob,
+      width, height, useFont, useImage, addPage, text, rect, line, link, drawImage, measure, toBlob,
       get pageCount() { return pages.length; },
     };
   }
@@ -361,5 +518,5 @@
       `${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
   }
 
-  window.SMPDFWriter = { create, PAGE_SIZES, PT_PER_MM };
+  window.SMPDFWriter = { create, readJpeg, PAGE_SIZES, PT_PER_MM };
 })();

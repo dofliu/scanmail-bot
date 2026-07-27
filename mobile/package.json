@@ -1,6 +1,6 @@
 {
   "name": "scanmail-plus-mobile",
-  "version": "3.9.0",
+  "version": "3.11.0",
   "private": true,
   "description": "ScanMail+ Android App — Capacitor 外殼；前端來自專案根目錄的 static/",
   "license": "MIT",
@@ -11,7 +11,8 @@
     "doctor": "cap doctor android",
     "test:image": "node test/image-local.test.mjs",
     "test:studio": "node test/studio.test.mjs",
-    "test:doc": "node test/doc-local.test.mjs"
+    "test:doc": "node test/doc-local.test.mjs",
+    "test:pages": "node test/pdf-pages.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",

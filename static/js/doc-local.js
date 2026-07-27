@@ -26,9 +26,12 @@
     pdf:  { label: 'PDF',      ext: 'pdf',  mime: 'application/pdf', accept: '.pdf' },
     txt:  { label: '純文字',    ext: 'txt',  mime: 'text/plain', accept: '.txt' },
     html: { label: '網頁',      ext: 'html', mime: 'text/html', accept: '.html,.htm' },
+    images: { label: '圖片',    ext: 'jpg',  mime: 'image/jpeg', accept: '.pdf' },
   };
   const INPUTS = ['md', 'docx', 'pdf', 'txt'];
   const OUTPUTS = ['md', 'docx', 'pdf', 'txt', 'html'];
+  /** 只有 PDF 進得來的輸出：整頁繪製成圖，走的路徑跟文字轉檔完全不同 */
+  const PAGE_OUTPUTS = ['images'];
 
   // ── 文字工具 ────────────────────────────────────────────
 
@@ -615,6 +618,15 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
   // ── PDF 讀取 ────────────────────────────────────────────
 
   /**
+   * pdf.js 會把傳進去的緩衝區「接管」（detach），原本那份就不能再用了。
+   * 同一份 PDF 想先抽文字、再轉成圖片就會炸掉，所以一律先複製一份給它。
+   */
+  function pdfBytes(input) {
+    const view = input instanceof Uint8Array ? input : new Uint8Array(input);
+    return view.slice();
+  }
+
+  /**
    * PDF 裡沒有「段落」這種東西，只有一堆帶座標的文字片段。
    * 這裡靠三件事還原結構：字級（比內文大就是標題）、
    * 行距（跳太多行就是新段落）、行首符號（項目符號 / 編號）。
@@ -622,7 +634,7 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
   async function fromPdf(buffer, onProgress) {
     const pdfjs = window.pdfjsLib;
     if (!pdfjs) throw new Error('缺少 pdf.js，無法讀取 PDF');
-    const pdf = await pdfjs.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const pdf = await pdfjs.getDocument({ data: pdfBytes(buffer) }).promise;
 
     const lines = [];
     for (let n = 1; n <= pdf.numPages; n++) {
@@ -958,6 +970,73 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
     return { blob, missing: [...font.missing].map((cp) => String.fromCodePoint(cp)) };
   }
 
+  // ── PDF → 圖片 ──────────────────────────────────────────
+
+  /**
+   * 每頁算成一張圖。走的是 pdf.js 的完整繪製（不是只抽文字），
+   * 所以掃描件、表格、圖表都能原樣存成圖片。
+   *
+   * @param {{dpi, format, quality}} opts dpi 預設 150 —— 螢幕看清楚、檔案又不會太大
+   */
+  async function pdfToImages(buffer, opts = {}, onProgress) {
+    const pdfjs = window.pdfjsLib;
+    if (!pdfjs) throw new Error('缺少 pdf.js，無法讀取 PDF');
+    const dpi = Math.max(72, Math.min(600, opts.dpi || 150));
+    const format = (opts.format || 'JPG').toUpperCase();
+    const pdf = await pdfjs.getDocument({ data: pdfBytes(buffer) }).promise;
+
+    const out = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      if (onProgress) onProgress(Math.round((n - 1) / pdf.numPages * 95), `繪製第 ${n}/${pdf.numPages} 頁`);
+      const page = await pdf.getPage(n);
+      const viewport = page.getViewport({ scale: dpi / 72 });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(viewport.width));
+      canvas.height = Math.max(1, Math.round(viewport.height));
+      const ctx = canvas.getContext('2d');
+      // PDF 的頁面背景是「沒有顏色」，直接存成 JPG 會變黑底
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const blob = await new Promise((resolve, reject) => canvas.toBlob(
+        (b) => (b ? resolve(b) : reject(new Error('圖片編碼失敗'))),
+        format === 'PNG' ? 'image/png' : 'image/jpeg',
+        Math.min(1, Math.max(0.01, (opts.quality == null ? 88 : opts.quality) / 100))
+      ));
+      out.push({ blob, page: n, ext: format === 'PNG' ? 'png' : 'jpg' });
+    }
+    return out;
+  }
+
+  /**
+   * 頁面縮圖。逐頁回呼 —— 一份 30 頁的 PDF 全部畫完要好幾秒，
+   * 畫好一張就先顯示一張，使用者不用對著空白畫面等。
+   */
+  async function pdfThumbnails(buffer, opts = {}, onPage) {
+    const pdfjs = window.pdfjsLib;
+    if (!pdfjs) throw new Error('缺少 pdf.js，無法讀取 PDF');
+    const maxWidth = opts.maxWidth || 160;
+    const pdf = await pdfjs.getDocument({ data: pdfBytes(buffer) }).promise;
+
+    const out = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: Math.min(2, maxWidth / base.width) });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(viewport.width));
+      canvas.height = Math.max(1, Math.round(viewport.height));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const url = canvas.toDataURL('image/jpeg', 0.7);
+      out.push(url);
+      if (onPage) onPage(n - 1, url, pdf.numPages);
+    }
+    return out;
+  }
+
   // ── 對外 ────────────────────────────────────────────────
 
   function detect(file) {
@@ -1004,8 +1083,8 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
     get available() {
       return !!(window.SMZip && window.SMZip.available && window.SMTTF && window.SMPDFWriter);
     },
-    FORMATS, INPUTS, OUTPUTS,
-    detect, parse, render, convert, loadFont,
+    FORMATS, INPUTS, OUTPUTS, PAGE_OUTPUTS,
+    detect, parse, render, convert, loadFont, pdfToImages, pdfThumbnails,
     fromMarkdown, toMarkdown, fromDocx, toDocx, fromPdf, toPdf, toHtml, toText,
     // 測試用
     _internals: { parseInline, wrapSpans, tokenize, joinText },

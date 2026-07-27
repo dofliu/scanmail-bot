@@ -72,6 +72,13 @@ jobs:
         working-directory: mobile
         run: npm run test:doc
 
+      # PDF 頁面操作：合併 / 刪頁 / 重排之後，用 pdf.js 與 qpdf 各驗一次
+      - name: Test PDF page operations
+        working-directory: mobile
+        run: |
+          pip install pikepdf
+          npm run test:pages
+
       - name: Build web assets for the app
         env:
           SM_API_BASE: ${{ github.event.inputs.api_base }}
