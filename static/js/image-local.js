@@ -297,6 +297,25 @@
         : Math.max(1, Math.round(Math.sqrt(n)));
       const rows = Math.ceil(n / cols);
       const cellW = Math.max(...sizes.map((v) => v.w));
+
+      // cover：每一格大小完全相同，圖片裁切填滿 —— 「2×3 拼貼」該長的樣子。
+      // contain（預設）：格子取最大寬高、圖片等比縮進去，留白露出底色，
+      // 這是後端 merge_images() 的行為，維持相容。
+      if (opts.fill === 'cover') {
+        const avgAspect = sizes.reduce((a, v) => a + v.w / v.h, 0) / n;
+        const cellH = Math.max(1, Math.round(cellW / avgAspect));
+        return {
+          width: cols * cellW + (cols - 1) * gap,
+          height: rows * cellH + (rows - 1) * gap,
+          boxes: sizes.map((_, i) => ({
+            x: (i % cols) * (cellW + gap),
+            y: Math.floor(i / cols) * (cellH + gap),
+            w: cellW,
+            h: cellH,
+          })),
+        };
+      }
+
       const cellH = Math.max(...sizes.map((v) => v.h));
       const s = normalize
         ? sizes.map((v) => {
@@ -401,9 +420,26 @@
     };
   }
 
-  /** 套用單張的旋轉 / 翻轉 / 縮放，回傳一張新的 canvas */
+  /** 依指定長寬比從中央裁切；ratio 為 0 / 空值代表不裁 */
+  function cropToAspect(src, ratio) {
+    if (!ratio || ratio <= 0) return src;
+    const current = src.width / src.height;
+    if (Math.abs(current - ratio) < 0.001) return src;
+
+    let sw = src.width;
+    let sh = src.height;
+    if (current > ratio) sw = Math.max(1, Math.round(src.height * ratio));
+    else sh = Math.max(1, Math.round(src.width / ratio));
+
+    const out = newCanvas(sw, sh);
+    out.ctx.drawImage(src, Math.round((src.width - sw) / 2), Math.round((src.height - sh) / 2),
+      sw, sh, 0, 0, sw, sh);
+    return out.canvas;
+  }
+
+  /** 套用單張的裁切 / 縮放 / 旋轉 / 翻轉，回傳一張新的 canvas */
   function renderItem(item, { usePreview = false } = {}) {
-    const base = usePreview ? item.preview : item.bitmap;
+    const base = cropToAspect(usePreview ? item.preview : item.bitmap, item.crop);
     const scale = item.scale == null ? 1 : item.scale;
 
     let src = base;
@@ -428,6 +464,91 @@
     return out.canvas;
   }
 
+  /** 在指定方框內畫圖：contain 等比縮入（可能留白）、cover 裁切填滿 */
+  function drawInBox(ctx, src, box, mode) {
+    if (mode !== 'cover') {
+      drawScaled(ctx, src, box.x, box.y, box.w, box.h);
+      return;
+    }
+    const cropped = cropToAspect(src, box.w / box.h);
+    drawScaled(ctx, cropped, box.x, box.y, box.w, box.h);
+  }
+
+  function roundedPath(ctx, x, y, w, h, r) {
+    const radius = Math.max(0, Math.min(r, Math.min(w, h) / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.arcTo(x + w, y, x + w, y + h, radius);
+    ctx.arcTo(x + w, y + h, x, y + h, radius);
+    ctx.arcTo(x, y + h, x, y, radius);
+    ctx.arcTo(x, y, x + w, y, radius);
+    ctx.closePath();
+  }
+
+  /**
+   * 畫一格（圖片 + 圖框）。
+   * 圖框一律往方框「內」縮，不往外長 —— 否則會超出 layoutBoxes 算好的版面。
+   */
+  function drawCell(ctx, src, box, frame = {}, fillMode = 'contain') {
+    const style = frame.style || 'none';
+    const color = frame.color || '#ffffff';
+    const unit = Math.min(box.w, box.h);
+    const pad = Math.round(unit * (frame.width == null ? 0 : frame.width) / 100);
+    const radius = Math.round(unit * (frame.radius == null ? 0 : frame.radius) / 100);
+
+    // 拍立得：下緣特別厚，模仿相紙
+    const bottomExtra = style === 'polaroid' ? Math.round(pad * 2.2) : 0;
+    const inner = {
+      x: box.x + pad,
+      y: box.y + pad,
+      w: Math.max(1, box.w - pad * 2),
+      h: Math.max(1, box.h - pad * 2 - bottomExtra),
+    };
+
+    ctx.save();
+
+    if (style === 'shadow') {
+      ctx.shadowColor = 'rgba(0,0,0,0.35)';
+      ctx.shadowBlur = Math.max(2, Math.round(unit * 0.04));
+      ctx.shadowOffsetY = Math.max(1, Math.round(unit * 0.015));
+    }
+
+    // 有底的圖框先鋪一塊底板
+    if (style === 'card' || style === 'polaroid' || style === 'shadow') {
+      ctx.fillStyle = color;
+      if (radius > 0) { roundedPath(ctx, box.x, box.y, box.w, box.h, radius); ctx.fill(); }
+      else ctx.fillRect(box.x, box.y, box.w, box.h);
+    }
+    ctx.shadowColor = 'transparent';
+
+    // 圓角要裁切影像本身
+    if (radius > 0 && style !== 'card' && style !== 'polaroid' && style !== 'shadow') {
+      roundedPath(ctx, inner.x, inner.y, inner.w, inner.h, radius);
+      ctx.clip();
+    } else if (radius > 0) {
+      roundedPath(ctx, inner.x, inner.y, inner.w, inner.h, Math.max(0, radius - pad));
+      ctx.clip();
+    }
+
+    drawInBox(ctx, src, inner, fillMode);
+    ctx.restore();
+
+    // 細邊：畫在影像邊緣上
+    if (style === 'line') {
+      ctx.save();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = Math.max(1, Math.round(unit * 0.012));
+      const half = ctx.lineWidth / 2;
+      if (radius > 0) {
+        roundedPath(ctx, inner.x + half, inner.y + half, inner.w - ctx.lineWidth, inner.h - ctx.lineWidth, radius);
+        ctx.stroke();
+      } else {
+        ctx.strokeRect(inner.x + half, inner.y + half, inner.w - ctx.lineWidth, inner.h - ctx.lineWidth);
+      }
+      ctx.restore();
+    }
+  }
+
   /** 把一組已編輯的項目排版成一張 canvas */
   function composeToCanvas(items, opts = {}, renderOpts = {}) {
     if (!items || !items.length) throw new Error('至少需要一張圖片');
@@ -435,11 +556,13 @@
     const sizes = rendered.map((c) => ({ w: c.width, h: c.height }));
     const { width, height, boxes } = layoutBoxes(sizes, opts);
     const out = newCanvas(width, height);
-    // 單張時不鋪底色，才不會把透明背景蓋掉；多張拼接一定要有底色
-    if (items.length > 1 || needsOpaqueBackground(opts.format || 'JPG')) {
+    // 單張且沒有圖框時不鋪底色，才不會把透明背景蓋掉
+    const hasFrame = opts.frame && opts.frame.style && opts.frame.style !== 'none';
+    if (items.length > 1 || hasFrame || needsOpaqueBackground(opts.format || 'JPG')) {
       fill(out.ctx, width, height, opts.bgColor);
     }
-    boxes.forEach((b, i) => drawScaled(out.ctx, rendered[i], b.x, b.y, b.w, b.h));
+    const fillMode = opts.fill === 'cover' ? 'cover' : 'contain';
+    boxes.forEach((b, i) => drawCell(out.ctx, rendered[i], b, opts.frame, fillMode));
     return out.canvas;
   }
 
@@ -603,6 +726,8 @@
     renderItem,
     layoutBoxes,
     composeToCanvas,
+    drawCell,
+    cropToAspect,
     composeToBlob,
     previewInto,
     // 轉換三合一

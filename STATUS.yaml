@@ -17,6 +17,6 @@ outputs:
   - mobile_app
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "91 API endpoints, 8 tool categories, 235 pytest + 54 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "v3.7.0 — offline app reworked into a live editor: rotate/flip/scale respond instantly instead of submit-and-wait, merge doubles as a multi-image editor with per-image transforms, resize+compress+convert collapsed into one pass; new media-toolbox logo generated from code; 54 browser tests"
+key_metrics: "91 API endpoints, 8 tool categories, 240 pytest + 57 browser tests, web + Android + offline-only APK from one frontend"
+recent_changes: "v3.8.0 — canvas-first UI: every option moved into a contextual bottom toolbar that swaps between collage and per-image modes, detail panels slide up on demand; grid presets (2x2..4x4) with uniform cover cells, six frame styles, crop ratios; 57 browser tests"
 
