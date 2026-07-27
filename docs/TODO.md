@@ -132,6 +132,20 @@
 - [x] CI 自動建置 APK（`.github/workflows/android.yml`，支援簽章）
 - [x] 18 個防呆測試（`tests/test_mobile_build.py`）
 
+### Phase 13：離線版介面重做（即時編輯）
+
+- [x] `static/js/studio.jsx`：離線版自己的介面，只有「編輯 / 轉換」兩頁
+  - 拿掉掃描寄信、導覽列、登入 —— 離線版就是一個裝置端媒體工具
+- [x] 即時反應：旋轉 / 翻轉 / 縮放按一下就更新預覽，不再是「送出 → 等候 → 下載」
+  - 預覽走縮圖（長邊 1400px）所以不卡，匯出才用原圖重算
+- [x] 旋轉 / 翻轉併入拼接：單張就是單張編輯，多張自動變拼接
+  - 可點畫布或縮圖選中任一張，只調整那一張
+- [x] 縮放 + 壓縮 + 轉檔合成單一流程（本來就是同一次重新編碼）
+- [x] `layoutBoxes()` 抽成唯一的版面來源，預覽與匯出共用，不會「看到的跟存出來的不一樣」
+- [x] 新標誌 `scripts/gen_logo.py`：三張疊起來的媒體卡片，程式繪製、48px 仍可辨識
+  - Android 圖示與啟動畫面改由標誌直接產生，不再從 PNG 裁中央
+- [x] 19 個介面測試（`mobile/test/studio.test.mjs`）＋ CI 步驟
+
 ### Phase 12：離線精簡版（不需要後端的圖片工具）
 
 - [x] `static/js/image-local.js`：純 Canvas 圖片引擎
@@ -142,7 +156,7 @@
 - [x] `build_mobile.py --offline`：注入 `SM_OFFLINE`，App 收斂成只有圖片工具
 - [x] 離線版不呼叫任何後端 API（`store.init()` 直接返回、不顯示伺服器設定）
 - [x] 批次結果改為逐檔列出 + 一次全存（App 內走系統分享，不打包 ZIP）
-- [x] 35 個瀏覽器功能測試（`mobile/test/image-local.test.mjs`）＋ 7 個 pytest 防呆測試
+- [x] 35 個瀏覽器功能測試（`mobile/test/image-local.test.mjs`）＋ pytest 防呆測試
 - [x] CI 另外建置並上傳 `scanmail-offline-apk`
 
 ---
@@ -188,14 +202,14 @@
 |------|------|
 | API 路由 | 85 |
 | 工具頁面 | 7 |
-| JS 模組 | 11（新增 config.js / native.js / image-local.js） |
+| JS 模組 | 12（新增 config.js / native.js / image-local.js / studio.jsx） |
 | 後端服務模組 | 10 |
 | 資料庫表 | 7 |
 | 資料模型 | 5 (contact, group, template, history, sender) |
 | 邊界偵測策略 | 7 (UNet_Mask, Canny×3, WhiteRegion, Otsu, Laplacian, HED, GrabCut — v5 逐邊證據評分 + 次像素精修) |
 | 掃描濾鏡 | 7 (auto, scan, color_doc, document, enhance, bw, original) |
 | 郵件模板 | 8 種文件類型預設 + 自訂 |
-| 測試 | 235 pytest（232 passed + 3 skipped）＋ 35 個瀏覽器測試（本地圖片引擎） |
+| 測試 | 235 pytest（232 passed + 3 skipped）＋ 54 個瀏覽器測試（引擎 35 + 介面 19） |
 
 ---
 
@@ -215,6 +229,18 @@
 ---
 
 ## 變更日誌
+
+### 2026/07/27 (v3.7.0 — 離線版改成即時編輯)
+- 離線版介面整個重做（`static/js/studio.jsx`）：只有「編輯 / 轉換」兩頁，
+  不再借用完整版的導覽殼
+- 旋轉 / 翻轉 / 縮放改為即時反應 —— 原本是「送出 → 排隊 → 下載」，一個旋轉要等好幾秒
+- 拼接同時就是多圖編輯器：可點畫布或縮圖選中任一張單獨旋轉 / 翻轉 / 縮放
+- 縮放、壓縮、轉檔合併成一個流程，只重新編碼一次（原本要跑三趟、掉三次畫質）
+- 引擎抽出 `layoutBoxes()` 作為唯一版面來源，即時預覽與匯出共用同一套計算
+- 預覽用縮圖（長邊 1400px）確保按下去就有反應，匯出時才用原圖重算
+- 新標誌：從「相機快門 + 信封」改為三張疊起來的媒體卡片，由 `scripts/gen_logo.py`
+  程式繪製；Android 圖示與啟動畫面改為直接從標誌產生
+- 新增 19 個介面測試並納入 CI；版本升至 3.7.0（PWA cache `scanmail-v8`、versionCode 30700）
 
 ### 2026/07/26 (v3.6.0 — 離線精簡版)
 - 新增純 Canvas 圖片引擎 `static/js/image-local.js`，縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 翻轉

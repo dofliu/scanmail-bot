@@ -83,11 +83,18 @@ jobs:
           path: mobile/android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
-      # 離線精簡版：只有圖片工具，完全不需要後端
-      - name: Build offline-only APK
-        run: |
-          python scripts/build_mobile.py --offline --sync
-          cd mobile/android && ./gradlew --no-daemon assembleDebug
+      # 離線精簡版：只有裝置端的媒體工具，完全不需要後端
+      - name: Build offline-only web assets
+        run: python scripts/build_mobile.py --offline --sync
+
+      # 介面測試要有 mobile/www 才能跑，所以排在離線建置之後
+      - name: Test offline studio UI
+        working-directory: mobile
+        run: npm run test:studio
+
+      - name: Assemble offline-only APK
+        working-directory: mobile/android
+        run: ./gradlew --no-daemon assembleDebug
 
       - name: Upload offline APK
         uses: actions/upload-artifact@v4

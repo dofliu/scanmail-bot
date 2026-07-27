@@ -202,15 +202,16 @@ python scripts/build_mobile.py --dev-server http://192.168.1.50:8000 --sync
 cd mobile/android && ./gradlew installDebug
 ```
 
-**離線精簡版**：只要圖片工具、完全不需要後端的話：
+**離線精簡版**：不需要後端、完全在手機上跑的媒體工具：
 
 ```bash
 python scripts/build_mobile.py --offline --sync
 cd mobile/android && ./gradlew assembleDebug
 ```
 
-這個版本整個 App 就是圖片工具 —— 縮放、格式轉換、壓縮、拼接、旋轉、翻轉，
-全部用 Canvas 在手機上做完，照片不會離開裝置，沒網路也能用。
+介面只有兩頁：**編輯**（選圖直接看到結果，旋轉/翻轉/縮放即時反應；多張自動變拼接，
+還能單獨調整其中任何一張）與**轉換**（縮放＋壓縮＋轉檔一次做完）。
+全部用 Canvas 在裝置上處理，照片不會離開手機，沒網路也能用。
 
 推上 GitHub 後，`.github/workflows/android.yml` 會自動建置兩份 debug APK
 （完整版與離線精簡版）放到 workflow 的 Artifacts；
@@ -305,6 +306,7 @@ scanmail-bot/
 │       ├── config.js               #   執行環境設定（決定 API 位址 / 離線模式）
 │       ├── native.js               #   App 專用：存檔/分享、伺服器設定畫面
 │       ├── image-local.js          #   本地圖片引擎（Canvas，離線版靠它）
+│       ├── studio.jsx              #   離線版介面（編輯 / 轉換）
 │       ├── api.js                  #   API 層
 │       ├── store.js                #   狀態管理
 │       └── *.jsx                   #   atoms / mobile / desktop / boot
@@ -317,7 +319,8 @@ scanmail-bot/
 │
 ├── scripts/
 │   ├── build_mobile.py             # static/ → App 前端
-│   └── gen_android_icons.py        # icon-512.png → Android 圖示
+│   ├── gen_logo.py                 # App 標誌（唯一來源）
+│   └── gen_android_icons.py        # 標誌 → Android 圖示與啟動畫面
 │
 ├── deploy/                         # Dockerfile / docker-compose / render.yaml
 ├── tests/                          # pytest 測試

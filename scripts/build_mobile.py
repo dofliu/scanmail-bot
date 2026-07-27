@@ -242,7 +242,7 @@ def transform_index_html(html: str, api_base: str, version: str, offline: bool =
 
     # 已預先編譯，改載入 .js
     sub(r'<script type="text/babel" src="js/([a-z0-9-]+)\.jsx',
-        r'<script src="js/\1.js', "JSX script 標籤", expected=4)
+        r'<script src="js/\1.js', "JSX script 標籤", expected=5)
 
     # 執行環境旗標（必須在 js/config.js 之前）
     default_api = api_base.rstrip("/")
