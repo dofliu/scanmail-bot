@@ -1043,7 +1043,7 @@ function StudioDocs() {
       )}
 
       {sheet === 'page' && target === 'pdf' && (
-        <StudioSheet title="頁面設定" onClose={() => setSheet(null)}>
+        <StudioSheet title="紙張設定" onClose={() => setSheet(null)}>
           <div className="field-label">紙張</div>
           <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
             {DOC_PAGES.map((s) => (
@@ -1069,7 +1069,7 @@ function StudioDocs() {
           <BarBtn ic={targetInfo.ic} label={targetInfo.label} on={sheet === 'target'}
             onClick={() => setSheet(sheet === 'target' ? null : 'target')}/>
           {(target === 'pdf' || target === 'images') && (
-            <BarBtn ic="📐" label={target === 'images' ? '畫質' : '頁面'} on={sheet === 'page'}
+            <BarBtn ic="📐" label={target === 'images' ? '畫質' : '紙張'} on={sheet === 'page'}
               onClick={() => setSheet(sheet === 'page' ? null : 'page')}/>
           )}
           <BarBtn ic="📂" label="換檔" onClick={() => pickRef.current?.click()}/>
@@ -1086,12 +1086,209 @@ function StudioDocs() {
   );
 }
 
+// ─── 頁面（合併 / 刪頁 / 抽頁 / 重排 / 轉向）──────────────────
+
+/**
+ * 這一頁做的都是「無損」的操作 —— 頁面連同它參照到的東西整包搬過去，
+ * 內容串流原封不動，所以文字還是文字、圖還是原本那張圖。
+ * 細節在 static/js/pdf-lite.js。
+ */
+function StudioPages() {
+  const [sources, setSources] = stUseState([]);   // { name, doc }
+  const [pages, setPages] = stUseState([]);       // { src, page, rotate }
+  const [thumbs, setThumbs] = stUseState({});     // 'src:page' → dataURL
+  const [sel, setSel] = stUseState(-1);
+  const [busy, setBusy] = stUseState(null);
+  const [result, setResult] = stUseState(null);
+  const pickRef = stUseRef(null);
+
+  const add = stUseCallback(async (files) => {
+    const list = Array.from(files || []).filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    if (!list.length) return;
+    setResult(null);
+    setBusy({ percent: 5, message: '讀取 PDF…' });
+    try {
+      for (const file of list) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        // 一份給頁面操作、一份給縮圖 —— pdf.js 會把傳進去的緩衝區接管掉
+        const doc = await window.SMPDFLite.open(bytes.slice());
+        const src = sources.length + list.indexOf(file);
+        setSources((prev) => [...prev, { name: file.name, doc }]);
+        setPages((prev) => [
+          ...prev,
+          ...doc.pages.map((_, i) => ({ src, page: i, rotate: 0 })),
+        ]);
+        setBusy({ percent: 40, message: `產生 ${file.name} 的縮圖…` });
+        await window.SMDocLocal.pdfThumbnails(bytes.slice(), { maxWidth: 200 }, (i, url, total) => {
+          setThumbs((prev) => ({ ...prev, [`${src}:${i}`]: url }));
+          setBusy({ percent: 40 + Math.round((i / total) * 55), message: `縮圖 ${i + 1}/${total}` });
+        });
+      }
+    } catch (e) {
+      window.SMStore?.toast(e.message, 'err');
+    }
+    setBusy(null);
+  }, [sources]);
+
+  const patch = (changes) => {
+    setPages((prev) => prev.map((p, i) => (i === sel ? { ...p, ...changes } : p)));
+    setResult(null);
+  };
+
+  const move = (delta) => {
+    const to = sel + delta;
+    if (to < 0 || to >= pages.length) return;
+    const next = [...pages];
+    [next[sel], next[to]] = [next[to], next[sel]];
+    setPages(next);
+    setSel(to);
+    setResult(null);
+  };
+
+  const remove = () => {
+    setPages((prev) => prev.filter((_, i) => i !== sel));
+    setSel(-1);
+    setResult(null);
+  };
+
+  const save = stUseCallback(async () => {
+    if (!pages.length) return;
+    setBusy({ percent: 20, message: '組合 PDF…' });
+    try {
+      const blob = await window.SMPDFLite.compose(
+        pages.map((p) => ({ doc: sources[p.src].doc, page: p.page, rotate: p.rotate })));
+      const stem = (sources[0]?.name || '文件').replace(/\.[^.]+$/, '');
+      setResult({ blob, name: `${stem}-編輯後.pdf` });
+    } catch (e) {
+      window.SMStore?.toast('組合失敗：' + e.message, 'err');
+    }
+    setBusy(null);
+  }, [pages, sources]);
+
+  if (!pages.length && !busy) {
+    return (
+      <div className="m-body" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+        <UploadDropzone accept=".pdf,application/pdf" multiple onFiles={add}
+          icon="📚" label="選擇 PDF 開始">
+          <div style={{ fontSize: '11px', color: 'var(--ink-3)', marginTop: '4px' }}>
+            合併、刪頁、抽頁、重排、轉向 —— 內容原封不動，文字不會變成圖
+          </div>
+        </UploadDropzone>
+      </div>
+    );
+  }
+
+  const current = sel >= 0 ? pages[sel] : null;
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <input ref={pickRef} type="file" accept=".pdf,application/pdf" multiple style={{ display: 'none' }}
+        onChange={(e) => { add(e.target.files); e.target.value = ''; }}/>
+
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '10px', background: 'var(--paper-2)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(88px, 1fr))', gap: '8px' }}>
+          {pages.map((p, i) => {
+            const on = i === sel;
+            const url = thumbs[`${p.src}:${p.page}`];
+            const quarter = ((p.rotate % 360) + 360) % 360;
+            return (
+              <button key={i} className="pagecell" onClick={() => setSel(on ? -1 : i)}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px',
+                  padding: '5px', borderRadius: '8px', background: on ? 'var(--mint-wash)' : 'transparent',
+                  border: on ? '1.5px solid var(--mint-3)' : '1.25px solid var(--line-soft)',
+                }}>
+                <div style={{
+                  width: '100%', aspectRatio: '3 / 4', display: 'flex',
+                  alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+                  background: 'var(--paper)',
+                }}>
+                  {url ? (
+                    <img src={url} alt="" style={{
+                      maxWidth: quarter % 180 ? '75%' : '100%',
+                      maxHeight: quarter % 180 ? '75%' : '100%',
+                      transform: quarter ? `rotate(${quarter}deg)` : undefined,
+                    }}/>
+                  ) : (
+                    <span style={{ fontSize: '11px', color: 'var(--ink-3)' }}>…</span>
+                  )}
+                </div>
+                <span style={{ fontSize: '10px', color: on ? 'var(--mint-4)' : 'var(--ink-3)' }}>
+                  {i + 1}{sources.length > 1 ? ` · ${String.fromCharCode(65 + p.src)}` : ''}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {busy && <div style={{ padding: '0 16px' }}><ProgressBar percent={busy.percent} message={busy.message}/></div>}
+
+      <div style={{
+        padding: '6px 14px', fontSize: '11px', color: 'var(--ink-3)', flexShrink: 0,
+        borderTop: '1px solid var(--line-soft)',
+      }}>
+        共 {pages.length} 頁
+        {sources.length > 1 && ` · 來自 ${sources.length} 個檔案（${sources.map((s, i) => String.fromCharCode(65 + i)).join(' ')}）`}
+      </div>
+
+      {result && (
+        <div style={{ padding: '10px 16px', borderTop: '1px solid var(--line-soft)' }}>
+          <div className="row between" style={{ alignItems: 'center', gap: '8px' }}>
+            <div style={{ fontSize: '12px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              ✅ {result.name}<span style={{ color: 'var(--ink-3)' }}> · {studioBytes(result.blob.size)}</span>
+            </div>
+            <button className="btn primary" style={{ flexShrink: 0 }}
+              onClick={() => window.API.triggerDownload(result.blob, result.name).catch(() => {})}>
+              ⬇ 儲存
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px', overflowX: 'auto' }}>
+          {current ? (
+            <>
+              <BarBtn ic="↺" label="左轉" onClick={() => patch({ rotate: current.rotate - 90 })}/>
+              <BarBtn ic="↻" label="右轉" onClick={() => patch({ rotate: current.rotate + 90 })}/>
+              <BarBtn ic="←" label="前移" disabled={sel === 0} onClick={() => move(-1)}/>
+              <BarBtn ic="→" label="後移" disabled={sel === pages.length - 1} onClick={() => move(1)}/>
+              <BarBtn ic="🗑" label="刪除" onClick={remove}/>
+            </>
+          ) : (
+            <>
+              <BarBtn ic="➕" label="加檔" onClick={() => pickRef.current?.click()}/>
+              <BarBtn ic="🗑" label="清空"
+                onClick={() => { setSources([]); setPages([]); setThumbs({}); setSel(-1); setResult(null); }}/>
+            </>
+          )}
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          {current ? (
+            <BarBtn ic="✓" label="完成" accent onClick={() => setSel(-1)}/>
+          ) : (
+            <BarBtn ic="💾" label="輸出" accent disabled={!!busy || !pages.length} onClick={save}/>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 外殼 ──────────────────────────────────────────────────────
 // 分頁切換放在標題列，把整條底部留給工具列 —— 兩條 bar 疊在一起太吃畫面。
 const STUDIO_TABS = [
   { id: 'edit', l: '🎨 編輯' },
   { id: 'convert', l: '🔄 圖片' },
   { id: 'docs', l: '📑 文件' },
+  { id: 'pages', l: '📚 頁面' },
 ];
 
 function Studio() {
@@ -1103,17 +1300,21 @@ function Studio() {
       <div className="phone-inner">
         <div className="m-screen">
           <div className="m-header" style={{ flexShrink: 0 }}>
-            <div className="row" style={{ gap: '4px', alignItems: 'center' }}>
+            <div className="row" style={{ gap: '3px', alignItems: 'center', minWidth: 0, overflowX: 'auto' }}>
               {STUDIO_TABS.map((t) => (
                 <button key={t.id} className={`chip ${tab === t.id ? 'on' : ''}`}
-                  onClick={() => setTab(t.id)} style={{ fontSize: '12px' }}>{t.l}</button>
+                  onClick={() => setTab(t.id)}
+                  style={{ fontSize: '11.5px', padding: '5px 8px', flexShrink: 0 }}>{t.l}</button>
               ))}
             </div>
             <div className="acts">
               <button className="iconbtn" onClick={() => store.toggleTheme()}>◐</button>
             </div>
           </div>
-          {tab === 'edit' ? <StudioEditor/> : tab === 'convert' ? <StudioConvert/> : <StudioDocs/>}
+          {tab === 'edit' ? <StudioEditor/>
+            : tab === 'convert' ? <StudioConvert/>
+            : tab === 'docs' ? <StudioDocs/>
+            : <StudioPages/>}
         </div>
         <Toasts toasts={state.toasts || []}/>
       </div>
@@ -1122,7 +1323,7 @@ function Studio() {
 }
 
 Object.assign(window, {
-  Studio, StudioEditor, StudioConvert, StudioDocs, StudioCropper, DocPreview,
+  Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages, StudioCropper, DocPreview,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,
 });

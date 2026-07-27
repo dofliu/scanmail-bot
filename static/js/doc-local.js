@@ -1008,6 +1008,35 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
     return out;
   }
 
+  /**
+   * 頁面縮圖。逐頁回呼 —— 一份 30 頁的 PDF 全部畫完要好幾秒，
+   * 畫好一張就先顯示一張，使用者不用對著空白畫面等。
+   */
+  async function pdfThumbnails(buffer, opts = {}, onPage) {
+    const pdfjs = window.pdfjsLib;
+    if (!pdfjs) throw new Error('缺少 pdf.js，無法讀取 PDF');
+    const maxWidth = opts.maxWidth || 160;
+    const pdf = await pdfjs.getDocument({ data: pdfBytes(buffer) }).promise;
+
+    const out = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const viewport = page.getViewport({ scale: Math.min(2, maxWidth / base.width) });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(viewport.width));
+      canvas.height = Math.max(1, Math.round(viewport.height));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const url = canvas.toDataURL('image/jpeg', 0.7);
+      out.push(url);
+      if (onPage) onPage(n - 1, url, pdf.numPages);
+    }
+    return out;
+  }
+
   // ── 對外 ────────────────────────────────────────────────
 
   function detect(file) {
@@ -1055,7 +1084,7 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
       return !!(window.SMZip && window.SMZip.available && window.SMTTF && window.SMPDFWriter);
     },
     FORMATS, INPUTS, OUTPUTS, PAGE_OUTPUTS,
-    detect, parse, render, convert, loadFont, pdfToImages,
+    detect, parse, render, convert, loadFont, pdfToImages, pdfThumbnails,
     fromMarkdown, toMarkdown, fromDocx, toDocx, fromPdf, toPdf, toHtml, toText,
     // 測試用
     _internals: { parseInline, wrapSpans, tokenize, joinText },

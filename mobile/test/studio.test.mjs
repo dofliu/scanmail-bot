@@ -292,13 +292,13 @@ check('文件解析後直接顯示排版預覽',
   (await page.locator('td:has-text("小王")').count()) === 1, '預覽沒有出現');
 
 labels = await barLabels();
-check('文件工具列是格式 / 頁面 / 換檔 / 轉換',
-  ['PDF', '頁面', '換檔', '清空', '轉換'].every((l) => labels.some((x) => x.includes(l))),
+check('文件工具列是格式 / 紙張 / 換檔 / 轉換',
+  ['PDF', '紙張', '換檔', '清空', '轉換'].every((l) => labels.some((x) => x.includes(l))),
   labels.join(','));
 
-await page.locator('button:has-text("頁面")').click();
+await page.locator('button:has-text("紙張")').click();
 await page.waitForTimeout(300);
-check('頁面設定可以挑紙張與方向',
+check('紙張設定可以挑尺寸與方向',
   (await page.locator('.chip:has-text("A4")').count()) === 1 &&
   (await page.locator('.chip:has-text("橫式")').count()) === 1, '沒有頁面設定');
 await page.locator('.pill:has-text("完成")').click();
@@ -334,6 +334,58 @@ check('Markdown 來源不會出現「轉成圖片」的選項',
   (await page.locator('.chip').allInnerTexts()).join(','));
 await page.locator('.pill:has-text("完成")').click();
 await page.waitForTimeout(200);
+
+// ── 頁面分頁：合併 / 重排 / 轉向 / 刪頁 ──────────────────
+await page.locator('.chip:has-text("📚 頁面")').click();
+await page.waitForTimeout(300);
+check('頁面分頁起始是選檔畫面',
+  (await page.locator('text=選擇 PDF 開始').count()) === 1, '沒有出現選檔畫面');
+
+await page.locator('input[type=file]').first().setInputFiles([
+  path.join(HERE, 'fixtures/pages-a.pdf'),
+  path.join(HERE, 'fixtures/pages-b.pdf'),
+]);
+await page.waitForTimeout(4000);
+
+const cells = () => page.locator('.pagecell');
+check('兩份 PDF 的頁面併成一張總表', (await cells().count()) === 5,
+  String(await cells().count()));
+check('每頁標示來自哪一個檔案',
+  (await cells().allInnerTexts()).map((t) => t.trim()).join(',') === '1 · A,2 · A,3 · A,4 · B,5 · B',
+  (await cells().allInnerTexts()).join('|'));
+check('縮圖畫得出來', (await page.locator('.pagecell img').count()) === 5,
+  String(await page.locator('.pagecell img').count()));
+
+labels = await barLabels();
+check('沒選頁時工具列是加檔 / 清空 / 輸出',
+  ['加檔', '清空', '輸出'].every((l) => labels.some((x) => x.includes(l))) &&
+  !labels.some((x) => x.includes('前移')), labels.join(','));
+
+await cells().nth(3).click();
+await page.waitForTimeout(300);
+labels = await barLabels();
+check('點某一頁就換成該頁的操作',
+  ['左轉', '右轉', '前移', '後移', '刪除', '完成'].every((l) => labels.some((x) => x.includes(l))),
+  labels.join(','));
+
+await page.locator('button:has-text("前移")').click();
+await page.waitForTimeout(300);
+check('前移把該頁往前挪一格',
+  (await cells().allInnerTexts()).map((t) => t.trim()).join(',') === '1 · A,2 · A,3 · B,4 · A,5 · B',
+  (await cells().allInnerTexts()).join('|'));
+
+await page.locator('button:has-text("刪除")').click();
+await page.waitForTimeout(300);
+check('刪除把該頁拿掉，工具列回到預設',
+  (await cells().count()) === 4 &&
+  (await barLabels()).some((x) => x.includes('加檔')), String(await cells().count()));
+
+await page.locator('button:has-text("輸出")').click();
+await page.waitForTimeout(2500);
+check('輸出產生一份 PDF',
+  (await page.locator('text=.pdf').count()) >= 1 &&
+  (await page.locator('button:has-text("儲存")').count()) === 1,
+  await page.locator('.m-screen').innerText());
 
 const realErrors = pageErrors.filter((e) => !/favicon/i.test(e) && !/status of 404/.test(e));
 check('全程沒有 JS 錯誤', realErrors.length === 0, realErrors.join(' | '));

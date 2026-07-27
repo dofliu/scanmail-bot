@@ -290,7 +290,7 @@ def test_pdf_buffer_is_copied_before_handing_to_pdfjs():
     """pdf.js 會接管傳進去的緩衝區，同一份檔案想抽文字又轉圖片就會炸。"""
     source = _strip_comments((JS / "doc-local.js").read_text(encoding="utf-8"))
     assert "function pdfBytes(" in source
-    assert source.count("getDocument({ data: pdfBytes(") == 2
+    assert source.count("getDocument({ data: pdfBytes(") == 3
     assert "getDocument({ data: new Uint8Array(" not in source
 
 
@@ -386,13 +386,54 @@ def test_docx_reader_handles_list_styles():
     assert "function resolveStyle(" in source, "樣式的 basedOn 要能往上追"
 
 
+def test_pdf_object_layer_is_lossless():
+    """頁面操作要無損 —— 內容串流原樣搬過去，不是重畫成圖再貼回去。"""
+    source = _strip_comments((JS / "pdf-lite.js").read_text(encoding="utf-8"))
+    assert "async function open(" in source
+    assert "async function compose(" in source
+    # 兩種 xref 格式都要讀：舊的表格與 PDF 1.5 之後的串流
+    assert "function readXrefTable(" in source
+    assert "async function readXrefStream(" in source
+    assert "async function expandObjectStream(" in source, "物件串流沒展開，現代 PDF 會讀不到東西"
+    assert "function unpredict(" in source, "xref 串流幾乎都用 PNG 預測子"
+    # 串流原樣保留：複製時只換字典，raw 直接沿用
+    assert "new PdfStream(copy(doc, value.dict, depth + 1), value.raw)" in source
+
+
+def test_pdf_parser_survives_real_world_files():
+    source = _strip_comments((JS / "pdf-lite.js").read_text(encoding="utf-8"))
+    # xref 壞掉是常態，要有退路
+    assert "function scanAllObjects(" in source
+    # 屬性可以寫在父節點上，抽頁時要一起帶走
+    assert "const INHERITED = ['Resources', 'MediaBox', 'CropBox', 'Rotate']" in source
+    # 加密的檔案要明講，不要產出壞掉的輸出
+    assert "有加密保護" in (JS / "pdf-lite.js").read_text(encoding="utf-8")
+
+
+def test_page_copy_does_not_drag_in_other_pages():
+    """註解的跳頁目的地會指向別頁，照抄就會把整份文件帶過來。"""
+    source = _strip_comments((JS / "pdf-lite.js").read_text(encoding="utf-8"))
+    assert "isName(dict.get('Type'), 'Page') && !included.get(doc).has(target)" in source
+    assert "if (k === 'Parent') continue" in source, "頁面樹要自己重建，不能沿用來源的 Parent"
+
+
+def test_studio_has_a_pages_tab():
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "function StudioPages(" in source
+    assert "SMPDFLite.compose(" in source
+    for label in ("加檔", "前移", "後移", "左轉", "右轉"):
+        assert f"label=\"{label}\"" in source, f"頁面工具列少了 {label}"
+    # 分頁名稱不能撞名，不然使用者跟測試都會分不清
+    assert "label={target === 'images' ? '畫質' : '紙張'}" in source
+
+
 def test_studio_has_a_document_tab():
     source = (JS / "studio.jsx").read_text(encoding="utf-8")
     assert "function StudioDocs(" in source
     assert "文件" in source
     # 跟圖片編輯同一套規則：內容佔滿，選項收進工具列的面板
     assert "StudioSheet title=\"轉成什麼格式\"" in source
-    assert "StudioSheet title=\"頁面設定\"" in source
+    assert "StudioSheet title=\"紙張設定\"" in source
 
 
 def test_offline_build_makes_no_backend_calls_on_startup():
