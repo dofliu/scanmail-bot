@@ -49,7 +49,7 @@
     // 再包一層 Service Worker 快取只會多一份可能過期的副本。
     if (!window.SM_NATIVE && 'serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js?v=3.9.0').catch(err => {
+        navigator.serviceWorker.register('sw.js?v=3.10.0').catch(err => {
           console.error('ServiceWorker 註冊失敗: ', err);
         });
       });
@@ -80,20 +80,20 @@
 <body>
 <div id="root"></div>
 
-<script src="js/config.js?v=3.9.0"></script>
-<script src="js/native.js?v=3.9.0"></script>
-<script src="js/image-local.js?v=3.9.0"></script>
-<script src="js/zip-lite.js?v=3.9.0"></script>
-<script src="js/ttf-lite.js?v=3.9.0"></script>
-<script src="js/pdf-write.js?v=3.9.0"></script>
-<script src="js/doc-local.js?v=3.9.0"></script>
-<script src="js/api.js?v=3.9.0"></script>
-<script src="js/store.js?v=3.9.0"></script>
-<script type="text/babel" src="js/atoms.jsx?v=3.9.0"></script>
-<script type="text/babel" src="js/mobile.jsx?v=3.9.0"></script>
-<script type="text/babel" src="js/desktop.jsx?v=3.9.0"></script>
-<script type="text/babel" src="js/studio.jsx?v=3.9.0"></script>
-<script type="text/babel" src="js/boot.jsx?v=3.9.0"></script>
+<script src="js/config.js?v=3.10.0"></script>
+<script src="js/native.js?v=3.10.0"></script>
+<script src="js/image-local.js?v=3.10.0"></script>
+<script src="js/zip-lite.js?v=3.10.0"></script>
+<script src="js/ttf-lite.js?v=3.10.0"></script>
+<script src="js/pdf-write.js?v=3.10.0"></script>
+<script src="js/doc-local.js?v=3.10.0"></script>
+<script src="js/api.js?v=3.10.0"></script>
+<script src="js/store.js?v=3.10.0"></script>
+<script type="text/babel" src="js/atoms.jsx?v=3.10.0"></script>
+<script type="text/babel" src="js/mobile.jsx?v=3.10.0"></script>
+<script type="text/babel" src="js/desktop.jsx?v=3.10.0"></script>
+<script type="text/babel" src="js/studio.jsx?v=3.10.0"></script>
+<script type="text/babel" src="js/boot.jsx?v=3.10.0"></script>
 
 </body>
 </html>

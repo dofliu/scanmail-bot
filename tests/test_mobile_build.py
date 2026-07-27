@@ -224,16 +224,74 @@ def test_frame_and_crop_options_exist():
     for label in ("圓角", "細邊", "白框", "陰影", "拍立得"):
         assert label in frames, f"圖框樣式少了 {label}"
     crops = source[source.index("STUDIO_CROPS"):source.index("STUDIO_SWATCHES")]
-    for label in ("原始", "1:1", "16:9"):
+    for label in ("自由", "1:1", "16:9"):
         assert label in crops, f"裁切比例少了 {label}"
 
 
 def test_engine_supports_crop_and_frames():
     source = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
-    for fn in ("function cropToAspect(", "function drawCell(", "function roundedPath("):
+    for fn in ("function cropToRect(", "function drawCell(", "function roundedPath("):
         assert fn in source, f"引擎少了 {fn}"
     # 裁切要在變形階段生效，才會影響版面計算
-    assert "cropToAspect(usePreview" in source, "renderItem 沒有套用裁切"
+    assert "return cropToRect(out.canvas, item.cropRect)" in source, "renderItem 沒有套用裁切"
+
+
+def test_crop_happens_after_rotation():
+    """裁切框是使用者在畫面上拉的，而畫面是轉過的 —— 先裁再轉會裁到別的地方。"""
+    source = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    body = source[source.index("function renderItem("):]
+    body = body[: body.index("function rotateRect(")]
+    assert body.index("ctx.rotate(") < body.index("cropToRect("), "renderItem 的裁切排在旋轉之前"
+    # 轉圖時裁切框要跟著轉，否則轉一下就會裁到別的地方
+    for fn in ("function rotateRect(", "function flipRect("):
+        assert fn in source, f"引擎少了 {fn}"
+    studio = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "rotateRect(current.cropRect" in studio
+    assert "flipRect(current.cropRect" in studio
+
+
+def test_free_crop_is_a_full_screen_editor():
+    """固定比例的置中裁切不夠用 —— 要能自己拉框。"""
+    studio = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "function StudioCropper(" in studio
+    for handler in ("onPointerDown", "onPointerMove", "onPointerUp"):
+        assert handler in studio, f"裁切少了 {handler}，手機上拖不動"
+    assert "touchAction: 'none'" in studio, "沒有擋掉捲動，手機上會邊拖邊捲"
+    assert "setCropping(true)" in studio, "裁切沒有進入獨立畫面"
+    # 離開裁切後 canvas 是新的 DOM 元素，不重畫會停在瀏覽器預設的空白畫布
+    assert "[items, layout, frame, sel, cropping]" in studio
+
+
+def test_images_convert_to_pdf_losslessly():
+    """PDF 的 /DCTDecode 吃的就是 JPEG 原始位元組，照片可以完全不重新編碼。"""
+    writer = _strip_comments((JS / "pdf-write.js").read_text(encoding="utf-8"))
+    assert "function readJpeg(" in writer
+    assert "/DCTDecode" in writer
+    assert "/Subtype /Image" in writer
+    # PDF 檢視器不看 Exif，轉正得靠變換矩陣
+    assert "function readExifOrientation(" in writer
+    assert "const ORIENT = {" in writer
+
+    engine = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    assert "async function imagesToPdf(" in engine
+    assert "async function jpegBytesFor(" in engine
+    assert "return { bytes: raw, reused: true }" in engine, "沒有原樣沿用的路徑，等於每張都重壓一次"
+
+
+def test_pdf_renders_back_to_images():
+    source = _strip_comments((JS / "doc-local.js").read_text(encoding="utf-8"))
+    assert "async function pdfToImages(" in source
+    # 空白頁沒有底色，直接存 JPG 會變黑底
+    body = source[source.index("async function pdfToImages("):]
+    assert "fillRect(0, 0, canvas.width, canvas.height)" in body[:2000]
+
+
+def test_pdf_buffer_is_copied_before_handing_to_pdfjs():
+    """pdf.js 會接管傳進去的緩衝區，同一份檔案想抽文字又轉圖片就會炸。"""
+    source = _strip_comments((JS / "doc-local.js").read_text(encoding="utf-8"))
+    assert "function pdfBytes(" in source
+    assert source.count("getDocument({ data: pdfBytes(") == 2
+    assert "getDocument({ data: new Uint8Array(" not in source
 
 
 def test_editor_shares_one_layout_source():

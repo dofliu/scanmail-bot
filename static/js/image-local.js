@@ -417,7 +417,40 @@
       flipH: false,
       flipV: false,
       scale: 1,
+      cropRect: null,
     };
+  }
+
+  /**
+   * 依矩形裁切。rect 用 0–1 的相對座標，這樣不管拿的是原圖還是縮圖都通用。
+   * rect 為空代表不裁。
+   */
+  function cropToRect(src, rect) {
+    if (!rect) return src;
+    const x = Math.round(clamp01(rect.x) * src.width);
+    const y = Math.round(clamp01(rect.y) * src.height);
+    const w = Math.max(1, Math.round(Math.min(rect.w, 1 - clamp01(rect.x)) * src.width));
+    const h = Math.max(1, Math.round(Math.min(rect.h, 1 - clamp01(rect.y)) * src.height));
+    if (x === 0 && y === 0 && w === src.width && h === src.height) return src;
+    const out = newCanvas(w, h);
+    out.ctx.drawImage(src, x, y, w, h, 0, 0, w, h);
+    return out.canvas;
+  }
+
+  const clamp01 = (v) => Math.max(0, Math.min(1, v || 0));
+
+  /**
+   * 指定長寬比時，先給一個置中、盡量大的裁切框當起點。
+   * 使用者再自己拖，所以這只是預設值不是最終值。ratio 為 0 代表整張。
+   */
+  function centeredRect(width, height, ratio) {
+    if (!ratio || ratio <= 0) return null;
+    const current = width / height;
+    let w = 1;
+    let h = 1;
+    if (current > ratio) w = ratio / current;
+    else h = current / ratio;
+    return { x: (1 - w) / 2, y: (1 - h) / 2, w, h };
   }
 
   /** 依指定長寬比從中央裁切；ratio 為 0 / 空值代表不裁 */
@@ -437,9 +470,14 @@
     return out.canvas;
   }
 
-  /** 套用單張的裁切 / 縮放 / 旋轉 / 翻轉，回傳一張新的 canvas */
+  /**
+   * 套用單張的縮放 / 旋轉 / 翻轉 / 裁切，回傳一張新的 canvas。
+   *
+   * 順序是「先轉再裁」：裁切框是使用者在畫面上拉的，而畫面上看到的是轉過的圖，
+   * 所以 cropRect 存的是「轉正之後」的相對座標。反過來做會裁到別的地方。
+   */
   function renderItem(item, { usePreview = false } = {}) {
-    const base = cropToAspect(usePreview ? item.preview : item.bitmap, item.crop);
+    const base = usePreview ? item.preview : item.bitmap;
     const scale = item.scale == null ? 1 : item.scale;
 
     let src = base;
@@ -461,7 +499,26 @@
     out.ctx.rotate((rotate * Math.PI) / 180);
     out.ctx.scale(item.flipH ? -1 : 1, item.flipV ? -1 : 1);
     out.ctx.drawImage(src, -src.width / 2, -src.height / 2);
-    return out.canvas;
+    return cropToRect(out.canvas, item.cropRect);
+  }
+
+  /**
+   * 轉圖的時候裁切框要跟著轉，不然「轉一下」會讓已經裁好的範圍飄到別的地方。
+   * delta 是順時針角度（90 的倍數）。
+   */
+  function rotateRect(rect, delta) {
+    if (!rect) return null;
+    let r = { ...rect };
+    let times = ((Math.round(delta / 90) % 4) + 4) % 4;
+    while (times--) r = { x: 1 - r.y - r.h, y: r.x, w: r.h, h: r.w };
+    return r;
+  }
+
+  function flipRect(rect, axis) {
+    if (!rect) return null;
+    return axis === 'h'
+      ? { ...rect, x: 1 - rect.x - rect.w }
+      : { ...rect, y: 1 - rect.y - rect.h };
   }
 
   /** 在指定方框內畫圖：contain 等比縮入（可能留白）、cover 裁切填滿 */
@@ -718,6 +775,94 @@
     return (files, onProgress) => batch(action, files, perFile, onProgress);
   }
 
+  // ══════════════════════════════════════════════
+  //  圖片 → PDF
+  // ══════════════════════════════════════════════
+
+  const PDF_PAGES = { A4: 'A4', A5: 'A5', LETTER: 'LETTER' };
+
+  /**
+   * 取得可以塞進 PDF 的 JPEG 位元組。
+   *
+   * 能原樣沿用就沿用 —— PDF 的 /DCTDecode 吃的就是 JPEG 原始位元組，
+   * 手機拍的照片多半可以完全不解碼、不重新編碼地放進去，畫質一點都不掉。
+   * 只有在格式不合（漸進式 / CMYK / PNG）或需要縮小時才重新編碼。
+   */
+  async function jpegBytesFor(source, opts = {}) {
+    const maxDimension = opts.maxDimension || 0;
+    const quality = opts.quality == null ? 88 : opts.quality;
+
+    if (source instanceof Blob && window.SMPDFWriter) {
+      const raw = new Uint8Array(await source.arrayBuffer());
+      const info = window.SMPDFWriter.readJpeg(raw);
+      if (info && info.embeddable) {
+        const longest = Math.max(info.width, info.height);
+        if (!maxDimension || longest <= maxDimension) return { bytes: raw, reused: true };
+      }
+    }
+
+    let src = source instanceof Blob ? await decode(source) : source;
+    let w = src.width;
+    let h = src.height;
+    if (maxDimension && Math.max(w, h) > maxDimension) {
+      const ratio = maxDimension / Math.max(w, h);
+      w = Math.max(1, Math.round(w * ratio));
+      h = Math.max(1, Math.round(h * ratio));
+    }
+    // JPEG 沒有透明度，先鋪白底免得透明區變黑
+    const out = newCanvas(w, h);
+    fill(out.ctx, w, h, '#ffffff');
+    drawScaled(out.ctx, src, 0, 0, w, h);
+    const blob = await toBlob(out.canvas, 'JPG', quality);
+    return { bytes: new Uint8Array(await blob.arrayBuffer()), reused: false };
+  }
+
+  /**
+   * 多張圖 → 一份多頁 PDF。
+   *
+   * @param {Array<Blob|HTMLCanvasElement>} sources
+   * @param {{pageSize, landscape, margin, quality, maxDimension}} opts
+   *        pageSize 'fit' 代表頁面貼合照片比例（不留白邊）
+   */
+  async function imagesToPdf(sources, opts = {}, onProgress) {
+    if (!window.SMPDFWriter) throw new Error('缺少 PDF 模組');
+    if (!sources || !sources.length) throw new Error('沒有可以轉換的圖片');
+
+    const fitPage = String(opts.pageSize || 'A4').toLowerCase() === 'fit';
+    const doc = window.SMPDFWriter.create({
+      size: fitPage ? 'A4' : opts.pageSize || 'A4',
+      landscape: !!opts.landscape,
+    });
+    const margin = fitPage ? 0 : (opts.margin == null ? 28 : opts.margin);
+    let reusedCount = 0;
+
+    for (let i = 0; i < sources.length; i++) {
+      if (onProgress) onProgress(Math.round((i / sources.length) * 95), `處理第 ${i + 1}/${sources.length} 張`);
+      const { bytes, reused } = await jpegBytesFor(sources[i], opts);
+      if (reused) reusedCount++;
+      const img = doc.useImage(bytes);
+
+      if (fitPage) {
+        doc.addPage({ width: img.width, height: img.height });
+        doc.drawImage(img, 0, 0, img.width, img.height);
+        continue;
+      }
+
+      doc.addPage();
+      const boxW = doc.width - margin * 2;
+      const boxH = doc.height - margin * 2;
+      // 等比縮入頁面，置中；只縮不放，小圖不會被拉糊
+      const scale = Math.min(boxW / img.width, boxH / img.height, 1);
+      const w = img.width * scale;
+      const h = img.height * scale;
+      doc.drawImage(img, margin + (boxW - w) / 2, margin + (boxH - h) / 2, w, h);
+    }
+
+    if (onProgress) onProgress(98, '組合 PDF');
+    const blob = await doc.toBlob({ title: opts.title || '' });
+    return { blob, pages: sources.length, reused: reusedCount };
+  }
+
   window.SMImageLocal = {
     available,
     runner,
@@ -728,8 +873,15 @@
     composeToCanvas,
     drawCell,
     cropToAspect,
+    cropToRect,
+    centeredRect,
+    rotateRect,
+    flipRect,
     composeToBlob,
     previewInto,
+    jpegBytesFor,
+    imagesToPdf,
+    PDF_PAGES,
     // 轉換三合一
     transform,
     supportsOutput,
