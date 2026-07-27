@@ -161,15 +161,41 @@ def test_local_engine_rejects_formats_canvas_cannot_encode():
     assert "BMP" not in mime_block and "GIF" not in mime_block
 
 
-def test_offline_ui_only_offers_local_actions():
-    """離線版的圖片工具只能列出本地做得到的操作，浮水印必須被濾掉。"""
-    for name in ("mobile.jsx", "desktop.jsx"):
-        source = (JS / name).read_text(encoding="utf-8")
-        assert "offlineOnly ? allActions.filter(a => a.local)" in source, f"{name} 沒有依離線模式過濾操作"
-        watermark = [ln for ln in source.splitlines() if "'watermark'" in ln and "id:" in ln]
-        assert watermark, f"{name} 找不到浮水印選項"
-        assert all("local:true" not in ln for ln in watermark), \
-            f"{name} 把浮水印標成本地可用，但 Canvas 版並未實作"
+def test_offline_app_is_the_studio_shell():
+    """離線版不共用完整版的導覽殼，直接進 Studio（編輯 + 轉換）。"""
+    boot = (JS / "boot.jsx").read_text(encoding="utf-8")
+    assert "offlineOnly" in boot and "window.Studio" in boot, "boot.jsx 沒有把離線版導向 Studio"
+
+    studio = (JS / "studio.jsx").read_text(encoding="utf-8")
+    for symbol in ("function Studio(", "function StudioEditor(", "function StudioConvert("):
+        assert symbol in studio, f"studio.jsx 少了 {symbol}"
+
+
+def test_studio_only_uses_the_local_engine():
+    """Studio 是離線版的全部介面，不能出現任何後端呼叫。"""
+    source = _strip_comments((JS / "studio.jsx").read_text(encoding="utf-8"))
+    assert "SMImageLocal" in source, "studio.jsx 應該走本地引擎"
+    for forbidden in ("fetch(", "window.API.img", "window.API.pdf", "window.API.docConvert"):
+        assert forbidden not in source, f"studio.jsx 不該用到 {forbidden}"
+
+
+def test_studio_offers_only_canvas_supported_formats():
+    """Canvas 編不出 BMP / GIF，介面就不該讓使用者選。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    formats = re.search(r"STUDIO_FORMATS = \[([^\]]*)\]", source).group(1)
+    assert "BMP" not in formats and "GIF" not in formats, formats
+    for fmt in ("JPG", "PNG", "WebP"):
+        assert fmt in formats, f"少了 {fmt}"
+
+
+def test_editor_shares_one_layout_source():
+    """即時預覽與匯出必須走同一套版面計算，否則會「看到的跟存出來的不一樣」。"""
+    source = (JS / "image-local.js").read_text(encoding="utf-8")
+    assert "function layoutBoxes(" in source
+    for fn in ("function merge(", "function composeToCanvas(", "function previewInto("):
+        body_start = source.index(fn)
+        body = source[body_start:body_start + 1800]
+        assert "layoutBoxes(" in body, f"{fn} 沒有共用 layoutBoxes()"
 
 
 def test_offline_build_makes_no_backend_calls_on_startup():

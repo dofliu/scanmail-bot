@@ -253,25 +253,95 @@
   }
 
   // ══════════════════════════════════════════════
-  //  拼接
+  //  版面計算（拼接與編輯器共用）
   // ══════════════════════════════════════════════
 
   /**
-   * 把多張圖拼成一張。版面規則對齊後端 merge_images()：
+   * 算出每張圖在拼接畫布上的位置與尺寸。
+   * 這是拼接的唯一版面來源 —— 編輯器的即時預覽與最後匯出都走這裡，
+   * 才不會出現「預覽跟存出來的不一樣」。
+   *
+   * 規則對齊後端 merge_images()：
    *   vertical   — normalize 時全部等比縮到「最小寬度」，畫布寬取最大寬
    *   horizontal — normalize 時全部等比縮到「最小高度」，畫布高取最大高
-   *   grid       — 格子大小取所有圖的最大寬高，normalize 只把超出格子的縮小
+   *   grid       — 格子取所有圖的最大寬高，normalize 只把超出格子的縮小
    */
-  async function merge(files, opts = {}) {
-    if (!files || !files.length) throw new Error('至少需要一張圖片');
-
+  function layoutBoxes(sizes, opts = {}) {
     const direction = (opts.direction || 'vertical').toLowerCase();
     const gap = Math.max(0, Math.round(opts.gap || 0));
     const align = opts.align || 'center';
-    const format = opts.format || 'JPG';
-    const bg = opts.bgColor || '#ffffff';
     const normalize = opts.normalize !== false;
+    const n = sizes.length;
 
+    if (direction === 'horizontal') {
+      let s = sizes;
+      if (normalize) {
+        const targetH = Math.min(...sizes.map((v) => v.h));
+        s = sizes.map((v) => ({ w: Math.max(1, Math.round(v.w * targetH / v.h)), h: targetH }));
+      }
+      const height = Math.max(...s.map((v) => v.h));
+      const width = s.reduce((a, v) => a + v.w, 0) + gap * (n - 1);
+      let x = 0;
+      const boxes = s.map((v) => {
+        const y = align === 'start' ? 0 : align === 'end' ? height - v.h : Math.floor((height - v.h) / 2);
+        const box = { x, y, w: v.w, h: v.h };
+        x += v.w + gap;
+        return box;
+      });
+      return { width, height, boxes };
+    }
+
+    if (direction === 'grid') {
+      const cols = opts.columns && opts.columns > 0
+        ? Math.round(opts.columns)
+        : Math.max(1, Math.round(Math.sqrt(n)));
+      const rows = Math.ceil(n / cols);
+      const cellW = Math.max(...sizes.map((v) => v.w));
+      const cellH = Math.max(...sizes.map((v) => v.h));
+      const s = normalize
+        ? sizes.map((v) => {
+            const ratio = Math.min(cellW / v.w, cellH / v.h, 1);
+            return ratio < 1
+              ? { w: Math.max(1, Math.round(v.w * ratio)), h: Math.max(1, Math.round(v.h * ratio)) }
+              : v;
+          })
+        : sizes;
+      const width = cols * cellW + (cols - 1) * gap;
+      const height = rows * cellH + (rows - 1) * gap;
+      const boxes = s.map((v, i) => ({
+        x: (i % cols) * (cellW + gap) + Math.floor((cellW - v.w) / 2),
+        y: Math.floor(i / cols) * (cellH + gap) + Math.floor((cellH - v.h) / 2),
+        w: v.w,
+        h: v.h,
+      }));
+      return { width, height, boxes };
+    }
+
+    let s = sizes;
+    if (normalize) {
+      const targetW = Math.min(...sizes.map((v) => v.w));
+      s = sizes.map((v) => ({ w: targetW, h: Math.max(1, Math.round(v.h * targetW / v.w)) }));
+    }
+    const width = Math.max(...s.map((v) => v.w));
+    const height = s.reduce((a, v) => a + v.h, 0) + gap * (n - 1);
+    let y = 0;
+    const boxes = s.map((v) => {
+      const x = align === 'start' ? 0 : align === 'end' ? width - v.w : Math.floor((width - v.w) / 2);
+      const box = { x, y, w: v.w, h: v.h };
+      y += v.h + gap;
+      return box;
+    });
+    return { width, height, boxes };
+  }
+
+  // ══════════════════════════════════════════════
+  //  拼接
+  // ══════════════════════════════════════════════
+
+  async function merge(files, opts = {}) {
+    if (!files || !files.length) throw new Error('至少需要一張圖片');
+
+    const format = opts.format || 'JPG';
     const bitmaps = [];
     for (const f of files) {
       try {
@@ -282,71 +352,13 @@
     }
     if (!bitmaps.length) throw new Error('沒有可用的圖片');
 
-    // 每張圖在畫布上的目標尺寸
-    let sizes = bitmaps.map((b) => ({ w: b.width, h: b.height }));
-    let out;
-
-    if (direction === 'horizontal') {
-      if (normalize) {
-        const targetH = Math.min(...sizes.map((s) => s.h));
-        sizes = sizes.map((s) => ({ w: Math.max(1, Math.round(s.w * targetH / s.h)), h: targetH }));
-      }
-      const maxH = Math.max(...sizes.map((s) => s.h));
-      const totalW = sizes.reduce((a, s) => a + s.w, 0) + gap * (sizes.length - 1);
-      out = newCanvas(totalW, maxH);
-      fill(out.ctx, totalW, maxH, bg);
-      let x = 0;
-      sizes.forEach((s, i) => {
-        const y = align === 'start' ? 0 : align === 'end' ? maxH - s.h : Math.floor((maxH - s.h) / 2);
-        drawScaled(out.ctx, bitmaps[i], x, y, s.w, s.h);
-        x += s.w + gap;
-      });
-    } else if (direction === 'grid') {
-      const n = sizes.length;
-      const cols = opts.columns && opts.columns > 0
-        ? Math.round(opts.columns)
-        : Math.max(1, Math.round(Math.sqrt(n)));
-      const rows = Math.ceil(n / cols);
-      // 格子尺寸用「原始」最大寬高，normalize 只負責把超出格子的縮進去
-      const cellW = Math.max(...sizes.map((s) => s.w));
-      const cellH = Math.max(...sizes.map((s) => s.h));
-      if (normalize) {
-        sizes = sizes.map((s) => {
-          const ratio = Math.min(cellW / s.w, cellH / s.h, 1);
-          return ratio < 1
-            ? { w: Math.max(1, Math.round(s.w * ratio)), h: Math.max(1, Math.round(s.h * ratio)) }
-            : s;
-        });
-      }
-      const canvasW = cols * cellW + (cols - 1) * gap;
-      const canvasH = rows * cellH + (rows - 1) * gap;
-      out = newCanvas(canvasW, canvasH);
-      fill(out.ctx, canvasW, canvasH, bg);
-      sizes.forEach((s, i) => {
-        const r = Math.floor(i / cols);
-        const c = i % cols;
-        const x = c * (cellW + gap) + Math.floor((cellW - s.w) / 2);
-        const y = r * (cellH + gap) + Math.floor((cellH - s.h) / 2);
-        drawScaled(out.ctx, bitmaps[i], x, y, s.w, s.h);
-      });
-    } else {
-      if (normalize) {
-        const targetW = Math.min(...sizes.map((s) => s.w));
-        sizes = sizes.map((s) => ({ w: targetW, h: Math.max(1, Math.round(s.h * targetW / s.w)) }));
-      }
-      const maxW = Math.max(...sizes.map((s) => s.w));
-      const totalH = sizes.reduce((a, s) => a + s.h, 0) + gap * (sizes.length - 1);
-      out = newCanvas(maxW, totalH);
-      fill(out.ctx, maxW, totalH, bg);
-      let y = 0;
-      sizes.forEach((s, i) => {
-        const x = align === 'start' ? 0 : align === 'end' ? maxW - s.w : Math.floor((maxW - s.w) / 2);
-        drawScaled(out.ctx, bitmaps[i], x, y, s.w, s.h);
-        y += s.h + gap;
-      });
-    }
-
+    const sizes = bitmaps.map((b) => ({ w: b.width, h: b.height }));
+    const { width, height, boxes } = layoutBoxes(sizes, opts);
+    const out = newCanvas(width, height);
+    fill(out.ctx, width, height, opts.bgColor);
+    boxes.forEach((b, i) => drawScaled(out.ctx, bitmaps[i], b.x, b.y, b.w, b.h));
     bitmaps.forEach((b) => b.close && b.close());
+
     return {
       blob: await toBlob(out.canvas, format, opts.quality == null ? 90 : opts.quality),
       filename: renameTo('merged', format),
@@ -354,10 +366,165 @@
   }
 
   // ══════════════════════════════════════════════
+  //  編輯器：可即時預覽的變形 + 拼接
+  // ══════════════════════════════════════════════
+
+  // 預覽用的縮圖上限。原圖動輒 4000px，每按一次旋轉都重畫全解析度會卡；
+  // 預覽走縮圖、只有匯出時才用原圖。
+  const PREVIEW_MAX = 1400;
+
+  /**
+   * 讀進一張圖並附上預設的變形狀態。
+   * bitmap 是原圖（匯出用），preview 是縮圖（即時預覽用）。
+   */
+  async function loadItem(file) {
+    const bitmap = await decode(file);
+    let preview = bitmap;
+    const longest = Math.max(bitmap.width, bitmap.height);
+    if (longest > PREVIEW_MAX) {
+      const ratio = PREVIEW_MAX / longest;
+      const pw = Math.max(1, Math.round(bitmap.width * ratio));
+      const ph = Math.max(1, Math.round(bitmap.height * ratio));
+      const tmp = newCanvas(pw, ph);
+      drawScaled(tmp.ctx, bitmap, 0, 0, pw, ph);
+      preview = tmp.canvas;
+    }
+    return {
+      name: (file && file.name) || 'image',
+      type: (file && file.type) || '',
+      bitmap,
+      preview,
+      rotate: 0,
+      flipH: false,
+      flipV: false,
+      scale: 1,
+    };
+  }
+
+  /** 套用單張的旋轉 / 翻轉 / 縮放，回傳一張新的 canvas */
+  function renderItem(item, { usePreview = false } = {}) {
+    const base = usePreview ? item.preview : item.bitmap;
+    const scale = item.scale == null ? 1 : item.scale;
+
+    let src = base;
+    if (scale !== 1) {
+      const sw = Math.max(1, Math.round(base.width * scale));
+      const sh = Math.max(1, Math.round(base.height * scale));
+      const tmp = newCanvas(sw, sh);
+      drawScaled(tmp.ctx, base, 0, 0, sw, sh);
+      src = tmp.canvas;
+    }
+
+    const rotate = (((Math.round(item.rotate || 0) % 360) + 360) % 360);
+    const swap = rotate === 90 || rotate === 270;
+    const w = swap ? src.height : src.width;
+    const h = swap ? src.width : src.height;
+
+    const out = newCanvas(w, h);
+    out.ctx.translate(w / 2, h / 2);
+    out.ctx.rotate((rotate * Math.PI) / 180);
+    out.ctx.scale(item.flipH ? -1 : 1, item.flipV ? -1 : 1);
+    out.ctx.drawImage(src, -src.width / 2, -src.height / 2);
+    return out.canvas;
+  }
+
+  /** 把一組已編輯的項目排版成一張 canvas */
+  function composeToCanvas(items, opts = {}, renderOpts = {}) {
+    if (!items || !items.length) throw new Error('至少需要一張圖片');
+    const rendered = items.map((it) => renderItem(it, renderOpts));
+    const sizes = rendered.map((c) => ({ w: c.width, h: c.height }));
+    const { width, height, boxes } = layoutBoxes(sizes, opts);
+    const out = newCanvas(width, height);
+    // 單張時不鋪底色，才不會把透明背景蓋掉；多張拼接一定要有底色
+    if (items.length > 1 || needsOpaqueBackground(opts.format || 'JPG')) {
+      fill(out.ctx, width, height, opts.bgColor);
+    }
+    boxes.forEach((b, i) => drawScaled(out.ctx, rendered[i], b.x, b.y, b.w, b.h));
+    return out.canvas;
+  }
+
+  /** 匯出：用原圖重算一次，輸出檔案 */
+  async function composeToBlob(items, opts = {}) {
+    const format = opts.format || 'JPG';
+    const canvas = composeToCanvas(items, { ...opts, format }, { usePreview: false });
+    const base = items.length === 1 ? String(items[0].name || 'image').replace(/\.[^.]+$/, '') : 'merged';
+    return {
+      blob: await toBlob(canvas, format, opts.quality == null ? 92 : opts.quality),
+      filename: renameTo(base, format),
+    };
+  }
+
+  /** 即時預覽：用縮圖排版後畫進畫面上的 canvas，回傳每張圖的實際顯示位置 */
+  function previewInto(targetCanvas, items, opts = {}, maxSize = 1024) {
+    const composed = composeToCanvas(items, opts, { usePreview: true });
+    const ratio = Math.min(maxSize / composed.width, maxSize / composed.height, 1);
+    const w = Math.max(1, Math.round(composed.width * ratio));
+    const h = Math.max(1, Math.round(composed.height * ratio));
+    targetCanvas.width = w;
+    targetCanvas.height = h;
+    const ctx = targetCanvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(composed, 0, 0, w, h);
+
+    // 讓 UI 能算出點到哪一張
+    const rendered = items.map((it) => renderItem(it, { usePreview: true }));
+    const layout = layoutBoxes(rendered.map((c) => ({ w: c.width, h: c.height })), opts);
+    return {
+      width: w,
+      height: h,
+      scale: ratio,
+      boxes: layout.boxes.map((b) => ({
+        x: b.x * ratio, y: b.y * ratio, w: b.w * ratio, h: b.h * ratio,
+      })),
+    };
+  }
+
+  // ══════════════════════════════════════════════
+  //  轉換：縮放 + 壓縮 + 格式一次做完
+  // ══════════════════════════════════════════════
+
+  /**
+   * 把縮放、壓縮、轉檔合成單一步驟 —— 這三件事本來就是同一次重新編碼，
+   * 拆成三個功能只是逼使用者跑三趟、每跑一趟就多損失一次畫質。
+   *
+   * opts: { maxDimension, width, height, mode, format, quality, bgColor }
+   *   maxDimension > 0 → 限制長邊（只縮不放）
+   *   width/height + mode → 指定畫布尺寸（fit / cover / stretch）
+   *   兩者都沒給就維持原尺寸，只重新編碼
+   */
+  async function transform(file, opts = {}) {
+    const format = resolveFormat(file, opts.format || 'auto');
+    if (opts.width && opts.height && opts.mode) {
+      return resize(file, { ...opts, format });
+    }
+
+    const maxDim = Math.max(0, Math.round(opts.maxDimension || 0));
+    const img = await decode(file);
+    let w = img.width;
+    let h = img.height;
+    if (maxDim > 0 && (w > maxDim || h > maxDim)) {
+      const ratio = Math.min(maxDim / w, maxDim / h);
+      w = Math.max(1, Math.round(w * ratio));
+      h = Math.max(1, Math.round(h * ratio));
+    }
+
+    const out = newCanvas(w, h);
+    if (needsOpaqueBackground(format)) fill(out.ctx, w, h, opts.bgColor || '#ffffff');
+    drawScaled(out.ctx, img, 0, 0, w, h);
+    img.close && img.close();
+    return {
+      blob: await toBlob(out.canvas, format, opts.quality == null ? 85 : opts.quality),
+      filename: renameTo(file.name, format),
+    };
+  }
+
+  // ══════════════════════════════════════════════
   //  批次
   // ══════════════════════════════════════════════
 
-  const OPS = { resize, convert, compress, rotate, flip };
+  const OPS = { resize, convert, compress, rotate, flip, transform };
 
   /**
    * 對多個檔案跑同一個操作，回傳結果陣列。
@@ -431,6 +598,15 @@
   window.SMImageLocal = {
     available,
     runner,
+    // 編輯器
+    loadItem,
+    renderItem,
+    layoutBoxes,
+    composeToCanvas,
+    composeToBlob,
+    previewInto,
+    // 轉換三合一
+    transform,
     supportsOutput,
     resize,
     convert,

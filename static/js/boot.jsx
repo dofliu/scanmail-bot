@@ -214,6 +214,12 @@ function PreviewStage(){
 }
 
 // ── Live 模式：依裝置直接渲染，並在視窗大小變化時重判 ──
+// ── 離線精簡版：手機優先的媒體工具，不分桌面/手機兩套殼 ──
+function OfflineApp(){
+  bUseEffect(() => { applyTweaks(window.TWEAKS); }, []);
+  return <window.Studio/>;
+}
+
 function LiveApp(){
   const [device, setDevice] = bUseState(window.APP_MODE.device);
 
@@ -237,5 +243,6 @@ function LiveApp(){
   return device === 'desktop' ? <window.DesktopShell/> : <window.MobileShell/>;
 }
 
-const Root = window.APP_MODE.isPreview ? PreviewStage : LiveApp;
+const Root = window.SM_CONFIG?.offlineOnly ? OfflineApp
+  : window.APP_MODE.isPreview ? PreviewStage : LiveApp;
 ReactDOM.createRoot(document.getElementById('root')).render(<Root/>);
