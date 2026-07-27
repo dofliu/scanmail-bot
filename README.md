@@ -209,12 +209,36 @@ python scripts/build_mobile.py --offline --sync
 cd mobile/android && ./gradlew assembleDebug
 ```
 
-介面只有兩頁：**編輯**與**轉換**，全部用 Canvas 在裝置上處理，照片不會離開手機。
+介面分三頁：**編輯**、**圖片**、**文件**，全部在裝置上處理，檔案不會離開手機。
 
 編輯頁的畫面上永遠只有畫布和一條工具列 —— 所有選項收在底部並依情境自動切換：
 沒選圖時是版面（2×2 / 2×3 / 3×3…）、圖框（圓角 / 白框 / 陰影 / 拍立得）、間距；
 點畫布上任一張圖就換成旋轉 / 翻轉 / 裁切 / 大小，按「完成」再切回來。
 細調項目才從下方推出面板，關掉立刻恢復滿版。
+
+圖片頁把縮放、壓縮、轉檔併成一次處理，只重新編碼一遍。
+
+文件頁做 PDF / Word / Markdown 的互轉，同樣不連後端：
+
+| 讀得進來 | 產得出去 |
+| --- | --- |
+| PDF、Word（.docx）、Markdown、純文字 | PDF、Word、Markdown、純文字、HTML |
+
+中間隔一層共用的文件模型，所以是「任意組合」而不是寫死的每一對轉換；
+標題階層、項目符號、編號清單、表格、引用、程式碼區塊都會保留。
+選好檔案就先看到解析後的排版預覽，確認沒讀歪再按轉換。
+
+三件實作上比較麻煩、值得知道的事：
+
+* **PDF 輸出的中文**：PDF 一定要把字型嵌進檔案，收檔案的人才看得到字。
+  App 內建一份裁過的 Noto Sans TC（Big5 全字集，4.6 MB，OFL 授權），
+  輸出時再依這份文件實際用到的字裁第二次 —— 所以產出的 PDF 通常只有幾十 KB，
+  而且附了 ToUnicode 對照表，文字可以複製、可以搜尋。
+* **PDF 讀取**：PDF 裡沒有「段落」這種東西，只有一堆帶座標的文字片段。
+  靠字級（比內文大就是標題）、行距（跳太多就是新段落）、行首符號還原結構。
+  掃描出來的圖片型 PDF 抽不到文字，會明確告訴你需要 OCR，而不是給一份空白檔。
+* **DOCX**：是一包 zip 裝 XML，用瀏覽器內建的 `CompressionStream` 自己拆包打包，
+  不必引入額外的函式庫。
 
 推上 GitHub 後，`.github/workflows/android.yml` 會自動建置兩份 debug APK
 （完整版與離線精簡版）放到 workflow 的 Artifacts；
@@ -305,11 +329,16 @@ scanmail-bot/
 ├── static/                         # 前端唯一來源（網頁版與 App 共用）
 │   ├── index.html                  #   HTML Shell
 │   ├── css/                        #   共用樣式
+│   ├── vendor/fonts/               #   PDF 內嵌用的中文字型子集（OFL）
 │   └── js/
 │       ├── config.js               #   執行環境設定（決定 API 位址 / 離線模式）
 │       ├── native.js               #   App 專用：存檔/分享、伺服器設定畫面
 │       ├── image-local.js          #   本地圖片引擎（Canvas，離線版靠它）
-│       ├── studio.jsx              #   離線版介面（編輯 / 轉換）
+│       ├── doc-local.js            #   本地文件轉檔（PDF/Word/Markdown 互轉）
+│       ├── zip-lite.js             #   ZIP 讀寫（DOCX 拆包/打包）
+│       ├── ttf-lite.js             #   TrueType 解析與子集化（PDF 內嵌字型）
+│       ├── pdf-write.js            #   PDF 產生器（含中文 CID 字型）
+│       ├── studio.jsx              #   離線版介面（編輯 / 圖片 / 文件）
 │       ├── api.js                  #   API 層
 │       ├── store.js                #   狀態管理
 │       └── *.jsx                   #   atoms / mobile / desktop / boot
@@ -322,6 +351,7 @@ scanmail-bot/
 │
 ├── scripts/
 │   ├── build_mobile.py             # static/ → App 前端
+│   ├── make_pdf_font.py            # 產生 PDF 內嵌用的中文字型子集
 │   ├── gen_logo.py                 # App 標誌（唯一來源）
 │   └── gen_android_icons.py        # 標誌 → Android 圖示與啟動畫面
 │
@@ -362,8 +392,14 @@ scanmail-bot/
 ## 開發
 
 ```bash
-# 執行測試
+# 後端與打包流程的測試
 python -m pytest tests/ -v
+
+# 裝置端引擎的測試（Canvas / zip / PDF 只有真的瀏覽器驗得出來）
+cd mobile && npm ci && npx playwright install chromium
+npm run test:image     # 圖片引擎
+npm run test:doc       # 文件轉檔：產出真的 PDF / DOCX 再讀回來比對
+npm run test:studio    # 離線版介面（需要先跑過 build_mobile.py --offline）
 
 # 開發模式啟動
 uvicorn main:app --reload

@@ -67,6 +67,11 @@ jobs:
           npx playwright install --with-deps chromium
           npm run test:image
 
+      # 文件轉檔同理：產出真的 zip / 真的 PDF，再讀回來比對
+      - name: Test document conversion engine
+        working-directory: mobile
+        run: npm run test:doc
+
       - name: Build web assets for the app
         env:
           SM_API_BASE: ${{ github.event.inputs.api_base }}

@@ -214,6 +214,67 @@ check('製作面板有格式與儲存',
   (await page.locator('.chip:has-text("WebP")').count()) === 1 &&
   (await page.locator('button:has-text("儲存")').count()) === 1, '製作面板不如預期');
 
+// ── 文件分頁 ────────────────────────────────────────────
+await page.locator('.chip:has-text("文件")').click();
+await page.waitForTimeout(300);
+check('文件分頁起始是選檔畫面',
+  (await page.locator('text=選擇文件開始').count()) === 1, '沒有出現文件選檔畫面');
+
+const MD = `# 會議紀錄
+
+第一次專案會議，出席五人。
+
+- 確認時程
+- 分配工作
+
+| 項目 | 負責 |
+| --- | --- |
+| 介面 | 小王 |
+`;
+await page.locator('input[type=file]').first().setInputFiles({
+  name: '會議紀錄.md', mimeType: 'text/markdown', buffer: Buffer.from(MD, 'utf-8'),
+});
+await page.waitForTimeout(600);
+
+check('文件解析後直接顯示排版預覽',
+  (await page.locator('text=第一次專案會議，出席五人。').count()) === 1 &&
+  (await page.locator('td:has-text("小王")').count()) === 1, '預覽沒有出現');
+
+labels = await barLabels();
+check('文件工具列是格式 / 頁面 / 換檔 / 轉換',
+  ['PDF', '頁面', '換檔', '清空', '轉換'].every((l) => labels.some((x) => x.includes(l))),
+  labels.join(','));
+
+await page.locator('button:has-text("頁面")').click();
+await page.waitForTimeout(300);
+check('頁面設定可以挑紙張與方向',
+  (await page.locator('.chip:has-text("A4")').count()) === 1 &&
+  (await page.locator('.chip:has-text("橫式")').count()) === 1, '沒有頁面設定');
+await page.locator('.pill:has-text("完成")').click();
+await page.waitForTimeout(200);
+
+await page.locator('button:has-text("轉換")').click();
+await page.waitForTimeout(2500);
+check('按轉換就產出 PDF，並且可以儲存',
+  (await page.locator('text=會議紀錄.pdf').count()) === 1 &&
+  (await page.locator('button:has-text("儲存")').count()) === 1,
+  await page.locator('.m-screen').innerText());
+
+await page.locator('button:has-text("PDF")').first().click();
+await page.waitForTimeout(300);
+const docTargets = await page.locator('.chip').allInnerTexts();
+check('格式面板列出五種輸出',
+  ['PDF', 'Word', 'Markdown', '純文字', '網頁'].every((l) => docTargets.some((t) => t.includes(l))),
+  docTargets.join(','));
+
+await page.locator('.chip:has-text("Word")').click();
+await page.waitForTimeout(300);
+await page.locator('button:has-text("轉換")').click();
+await page.waitForTimeout(1200);
+check('換成 Word 也轉得出來',
+  (await page.locator('text=會議紀錄.docx').count()) === 1,
+  await page.locator('.m-screen').innerText());
+
 const realErrors = pageErrors.filter((e) => !/favicon/i.test(e) && !/status of 404/.test(e));
 check('全程沒有 JS 錯誤', realErrors.length === 0, realErrors.join(' | '));
 

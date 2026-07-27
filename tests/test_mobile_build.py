@@ -246,6 +246,97 @@ def test_editor_shares_one_layout_source():
         assert "layoutBoxes(" in body, f"{fn} 沒有共用 layoutBoxes()"
 
 
+# ══════════════════════════════════════════════
+#  文件轉檔（PDF / Word / Markdown）
+# ══════════════════════════════════════════════
+
+PDF_FONT = STATIC / "vendor" / "fonts" / "NotoSansTC-Subset.ttf"
+
+
+def test_pdf_font_is_bundled():
+    """PDF 一定要內嵌字型，收檔案的人才看得到中文 —— 系統字型拿不到檔案。"""
+    assert PDF_FONT.exists(), "缺少 PDF 內嵌用的中文字型，請跑 scripts/make_pdf_font.py"
+    size = PDF_FONT.stat().st_size
+    # 太小代表裁過頭（大概只剩拉丁字母），太大代表沒裁
+    assert 2_000_000 < size < 8_000_000, f"字型大小不合理：{size} bytes"
+    assert (STATIC / "vendor" / "fonts" / "NotoSansTC-LICENSE.txt").exists(), \
+        "Noto Sans TC 是 OFL 授權，必須一併附上授權條款"
+
+
+def test_build_refuses_to_run_without_the_font():
+    """字型沒產出來就打包，App 會裝好之後才在輸出 PDF 時炸掉 —— 要在建置階段擋下來。"""
+    source = (ROOT / "scripts" / "build_mobile.py").read_text(encoding="utf-8")
+    assert "PDF_FONT" in source and "if not PDF_FONT.exists()" in source
+
+
+def test_doc_conversion_is_fully_local():
+    """文件轉檔不能偷偷打後端 —— 這幾支就是離線版的全部本事。"""
+    for name in ("doc-local.js", "zip-lite.js", "ttf-lite.js", "pdf-write.js"):
+        source = _strip_comments((JS / name).read_text(encoding="utf-8"))
+        assert "/api/" not in source, f"{name} 不該呼叫後端"
+        assert "window.API" not in source, f"{name} 不該依賴後端 API 層"
+    # 只有字型是靠 fetch 拿的，而且是本地檔案
+    doc = _strip_comments((JS / "doc-local.js").read_text(encoding="utf-8"))
+    fetches = re.findall(r"fetch\(([^)]*)\)", doc)
+    assert fetches == ["url || FONT_URL"], f"doc-local.js 有預期外的 fetch：{fetches}"
+
+
+def test_every_input_format_reaches_every_output_format():
+    """中間隔一層文件模型，所以格式之間是任意組合，不是寫死的每一對轉換。"""
+    source = (JS / "doc-local.js").read_text(encoding="utf-8")
+    for fn in ("function fromMarkdown(", "function fromDocx(", "async function fromPdf("):
+        assert fn in source, f"少了輸入端 {fn}"
+    for fn in ("function toMarkdown(", "async function toDocx(", "async function toPdf(",
+               "function toHtml(", "function toText("):
+        assert fn in source, f"少了輸出端 {fn}"
+    assert "INPUTS = ['md', 'docx', 'pdf', 'txt']" in source
+    assert "OUTPUTS = ['md', 'docx', 'pdf', 'txt', 'html']" in source
+
+
+def test_pdf_embeds_a_subset_not_the_whole_font():
+    """整份字型 4.6 MB，每產一個 PDF 都塞一份就沒得用了。"""
+    ttf = _strip_comments((JS / "ttf-lite.js").read_text(encoding="utf-8"))
+    assert "function subset(gidSet)" in ttf
+    assert "function closeOver(" in ttf, "複合字符要遞迴收齊，否則字會缺一塊"
+    writer = _strip_comments((JS / "pdf-write.js").read_text(encoding="utf-8"))
+    assert "font.ttf.subset(new Set(font.used.keys()))" in writer, "PDF 沒有只嵌入用到的字"
+    # 裁字型會重新編號，內文一定要跟著換算
+    assert "op.font.remap" in writer
+    assert "還沒子集化就要輸出內容" in (JS / "pdf-write.js").read_text(encoding="utf-8")
+
+
+def test_pdf_text_stays_selectable():
+    """沒有 ToUnicode，PDF 裡的中文複製出來會變亂碼。"""
+    writer = _strip_comments((JS / "pdf-write.js").read_text(encoding="utf-8"))
+    assert "function toUnicode(" in writer
+    assert "/ToUnicode" in writer
+    assert "/Encoding /Identity-H" in writer
+
+
+def test_docx_contains_the_parts_word_requires():
+    source = (JS / "doc-local.js").read_text(encoding="utf-8")
+    for part in ("[Content_Types].xml", "_rels/.rels", "word/document.xml",
+                 "word/styles.xml", "word/numbering.xml", "word/_rels/document.xml.rels"):
+        assert f"'{part}'" in source, f"DOCX 少了 {part}"
+    assert "w:tblGrid" in source, "少了 w:tblGrid，嚴謹的解析器會判定檔案無效"
+
+
+def test_docx_reader_handles_list_styles():
+    """Word 與 python-docx 的清單常常只寫在樣式上，段落本身沒有 w:numPr。"""
+    source = (JS / "doc-local.js").read_text(encoding="utf-8")
+    assert "function readStyles(" in source
+    assert "function resolveStyle(" in source, "樣式的 basedOn 要能往上追"
+
+
+def test_studio_has_a_document_tab():
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "function StudioDocs(" in source
+    assert "文件" in source
+    # 跟圖片編輯同一套規則：內容佔滿，選項收進工具列的面板
+    assert "StudioSheet title=\"轉成什麼格式\"" in source
+    assert "StudioSheet title=\"頁面設定\"" in source
+
+
 def test_offline_build_makes_no_backend_calls_on_startup():
     """store.init() 在離線版必須直接返回，否則一開 App 就會噴連線錯誤。"""
     source = (JS / "store.js").read_text(encoding="utf-8")
