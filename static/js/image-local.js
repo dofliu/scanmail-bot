@@ -787,6 +787,34 @@
     return canvas;
   }
 
+  /**
+   * 簽名 / 印章圖層。
+   *
+   * 位置與大小都存相對值（0–1，相對於整張成品），高度由簽名自己的長寬比推得
+   * —— 簽名被拉扁就不像本人的字了。
+   */
+  function drawSignatures(canvas, signatures) {
+    if (!signatures || !signatures.length) return canvas;
+    const sign = window.SMSignLite;
+    if (!sign) return canvas;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const W = canvas.width;
+    const H = canvas.height;
+
+    for (const s of signatures) {
+      if (!s || !s.sig) continue;
+      const w = Math.max(1, (s.w == null ? 0.3 : s.w) * W);
+      const h = w / (s.sig.aspect || 1);
+      sign.drawInto(ctx, s.sig, {
+        x: (s.x == null ? 0.5 : s.x) * W - w / 2,
+        y: (s.y == null ? 0.8 : s.y) * H - h / 2,
+        w, h,
+      }, { opacity: s.opacity, rotate: s.rotate, color: s.color });
+    }
+    return canvas;
+  }
+
   function composeToCanvas(items, opts = {}, renderOpts = {}) {
     if (!items || !items.length) throw new Error('至少需要一張圖片');
     const rendered = items.map((it) => renderItem(it, renderOpts));
@@ -800,8 +828,10 @@
     }
     const fillMode = opts.fill === 'cover' ? 'cover' : 'contain';
     boxes.forEach((b, i) => drawCell(out.ctx, rendered[i], b, opts.frame, fillMode));
-    // 文字疊在最上面，位置是相對整張成品而不是某一格
-    return drawTexts(out.canvas, opts.texts);
+    // 文字與簽名疊在最上面，位置是相對整張成品而不是某一格。
+    // 簽名畫在文字之上 —— 簽名是最後蓋的那一道。
+    drawTexts(out.canvas, opts.texts);
+    return drawSignatures(out.canvas, opts.signatures);
   }
 
   /** 匯出：用原圖重算一次，輸出檔案 */
@@ -1061,6 +1091,7 @@
     filterOf,
     applyRedactions,
     drawTexts,
+    drawSignatures,
     ADJUST_PRESETS,
     composeToBlob,
     previewInto,

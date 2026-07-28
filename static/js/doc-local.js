@@ -1009,6 +1009,37 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
   }
 
   /**
+   * 單獨畫一頁，畫大一點。
+   *
+   * 縮圖列用的 200px 縮圖擺簽名太模糊 —— 對不準簽名欄的橫線。
+   * 這裡只畫需要的那一頁，不必為了一頁等整份文件畫完。
+   *
+   * @returns {{url, width, height}} width/height 是「轉過向之後」看到的尺寸
+   */
+  async function pdfPageImage(buffer, index, opts = {}) {
+    const pdfjs = window.pdfjsLib;
+    if (!pdfjs) throw new Error('缺少 pdf.js，無法讀取 PDF');
+    const pdf = await pdfjs.getDocument({ data: pdfBytes(buffer) }).promise;
+    if (index < 0 || index >= pdf.numPages) throw new Error('沒有這一頁');
+    const page = await pdf.getPage(index + 1);
+    // rotation 疊在頁面自己的 /Rotate 上，跟縮圖列上看到的方向一致
+    const base = page.getViewport({ scale: 1, rotation: (page.rotate + (opts.rotate || 0)) % 360 });
+    const maxWidth = opts.maxWidth || 900;
+    const viewport = page.getViewport({
+      scale: Math.min(3, maxWidth / base.width),
+      rotation: (page.rotate + (opts.rotate || 0)) % 360,
+    });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(viewport.width));
+    canvas.height = Math.max(1, Math.round(viewport.height));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return { url: canvas.toDataURL('image/jpeg', 0.82), width: canvas.width, height: canvas.height };
+  }
+
+  /**
    * 頁面縮圖。逐頁回呼 —— 一份 30 頁的 PDF 全部畫完要好幾秒，
    * 畫好一張就先顯示一張，使用者不用對著空白畫面等。
    */
@@ -1084,7 +1115,7 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
       return !!(window.SMZip && window.SMZip.available && window.SMTTF && window.SMPDFWriter);
     },
     FORMATS, INPUTS, OUTPUTS, PAGE_OUTPUTS,
-    detect, parse, render, convert, loadFont, pdfToImages, pdfThumbnails,
+    detect, parse, render, convert, loadFont, pdfToImages, pdfThumbnails, pdfPageImage,
     fromMarkdown, toMarkdown, fromDocx, toDocx, fromPdf, toPdf, toHtml, toText,
     // 測試用
     _internals: { parseInline, wrapSpans, tokenize, joinText },

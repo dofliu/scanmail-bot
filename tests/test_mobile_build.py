@@ -258,8 +258,9 @@ def test_free_crop_is_a_full_screen_editor():
         assert handler in studio, f"裁切少了 {handler}，手機上拖不動"
     assert "touchAction: 'none'" in studio, "沒有擋掉捲動，手機上會邊拖邊捲"
     assert "setCropping(true)" in studio, "裁切沒有進入獨立畫面"
-    # 離開裁切後 canvas 是新的 DOM 元素，不重畫會停在瀏覽器預設的空白畫布
-    assert "[items, layout, frame, sel, cropping, redacting, text]" in studio
+    # 離開裁切後 canvas 是新的 DOM 元素，不重畫會停在瀏覽器預設的空白畫布。
+    # 每個全螢幕模式都要列進相依，簽名也一樣。
+    assert "[items, layout, frame, sel, cropping, redacting, signing, text, stamps, signatures]" in studio
 
 
 def test_images_convert_to_pdf_losslessly():
@@ -290,7 +291,8 @@ def test_pdf_buffer_is_copied_before_handing_to_pdfjs():
     """pdf.js 會接管傳進去的緩衝區，同一份檔案想抽文字又轉圖片就會炸。"""
     source = _strip_comments((JS / "doc-local.js").read_text(encoding="utf-8"))
     assert "function pdfBytes(" in source
-    assert source.count("getDocument({ data: pdfBytes(") == 3
+    # pdfToImages / pdfThumbnails / pdfPageImage / parse —— 每一條路都要走 pdfBytes
+    assert source.count("getDocument({ data: pdfBytes(") == 4
     assert "getDocument({ data: new Uint8Array(" not in source
 
 
@@ -439,9 +441,11 @@ def test_text_layer_scales_with_the_canvas():
     assert "t.tile" in source, "少了平鋪浮水印"
     # 描邊是白字壓白底時唯一看得見的辦法
     assert "strokeText(" in source
-    # 文字疊在成品最上層，不是疊在某一格上
+    # 文字疊在成品最上層，不是疊在某一格上；簽名再疊在文字之上
     compose = source[source.index("function composeToCanvas("):]
-    assert "return drawTexts(out.canvas, opts.texts)" in compose[:1400]
+    assert "drawTexts(out.canvas, opts.texts)" in compose[:1400]
+    assert compose.index("drawTexts(out.canvas") < compose.index("drawSignatures(out.canvas"), \
+        "簽名要蓋在文字上面 —— 簽名是最後蓋的那一道"
 
 
 def test_studio_exposes_the_new_editing_tools():
@@ -464,6 +468,72 @@ def test_studio_has_a_pages_tab():
         assert f"label=\"{label}\"" in source, f"頁面工具列少了 {label}"
     # 分頁名稱不能撞名，不然使用者跟測試都會分不清
     assert "label={target === 'images' ? '畫質' : '紙張'}" in source
+
+
+def test_signatures_stay_vector_where_they_can():
+    """手繪簽名存的是筆畫的點，不是像素 —— 放大不糊、蓋進 PDF 才是向量。"""
+    source = _strip_comments((JS / "sign-lite.js").read_text(encoding="utf-8"))
+    assert "function fromStrokes(" in source
+    assert "function simplify(" in source, "沒有簡化，一枚簽名就會塞爆 localStorage"
+    # PDF 沒有二次貝茲運算子，得換算成三次 —— 兩邊畫的必須是同一條線
+    assert "quadraticCurveTo(" in source, "canvas 端沒有走曲線，筆跡會有稜角"
+    assert "(2 / 3)" in source, "PDF 端沒有把二次貝茲換算成三次"
+    assert "function walk(" in source, \
+        "曲線邏輯要只有一份，canvas 與 PDF 各寫一套遲早會不一樣"
+    # 手繪的那條路要輸出真正的路徑運算子（移動 / 曲線 / 描邊），
+    # 不是偷偷畫成點陣圖再貼上去
+    ops = source[source.index("function pdfOps("):]
+    assert "if (sig.kind === 'image')" in ops, "點陣簽名要走影像那條路"
+    assert "} m`" in ops and "} c`" in ops, "沒有輸出路徑運算子"
+    assert "dotted ? 'f' : 'S'" in ops, "沒有描邊，路徑畫不出來"
+
+
+def test_signature_stamps_land_where_the_user_put_them():
+    """/Rotate 是檢視器轉的，內容串流的座標不會跟著轉 —— 沒補償就會蓋錯位置。"""
+    source = _strip_comments((JS / "pdf-lite.js").read_text(encoding="utf-8"))
+    assert "function displayMatrix(" in source
+    for angle in ("0:", "90:", "180:", "270:"):
+        assert angle in source, f"少了 {angle} 的變換"
+    assert "async function applyStamps(" in source
+    # MediaBox 的原點不一定是 (0, 0)
+    assert "Math.min(box[0], box[2])" in source, "沒有處理 MediaBox 原點的位移"
+    # 原本的內容可能留下改過的座標系，不包起來簽名會跑掉
+    assert "streamOf('q\\n')" in source, "沒有把原本的內容包在 q…Q 裡"
+    # Resources 常被好幾頁共用，直接改會改到別頁
+    assert "new Map(asDict(resolveNew(copied.get('Resources'))))" in source
+
+
+def test_signature_images_keep_their_transparency():
+    """印章是不規則形狀，沒有 SMask 的話白底會把底下的字整個蓋掉。"""
+    source = _strip_comments((JS / "pdf-lite.js").read_text(encoding="utf-8"))
+    assert "async function addAlphaImage(" in source
+    assert "'SMask'" in source, "沒有軟遮罩，透明就沒了"
+    assert "'DeviceGray'" in source and "'DeviceRGB'" in source
+    # 壓不動時要還能輸出，只是檔案大一點
+    assert "if (packed) dict.set('Filter'" in source, "沒有 CompressionStream 時要能退回未壓縮"
+
+    engine = _strip_comments((JS / "sign-lite.js").read_text(encoding="utf-8"))
+    assert "function fromImage(" in engine
+    # 用亮度當透明度：紅色關防的紅留得住，太淡的原子筆也能整個換成墨色
+    assert "0.299" in engine, "沒有算亮度"
+    assert "mode === 'ink'" in engine
+
+
+def test_studio_wires_signatures_into_both_images_and_pdfs():
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    for name in ("function SignaturePad(", "function SignaturePlacer(", "function SignatureSheet("):
+        assert name in source, f"少了 {name}"
+    # 兩個分頁共用同一個簽名庫
+    assert source.count("<SignaturePad") == 2, "編輯與頁面分頁都要能手寫簽名"
+    assert source.count("<SignaturePlacer") == 2, "編輯與頁面分頁都要能擺放簽名"
+    assert 'label="簽名"' in source
+    # 存的是 id，簽名被刪掉時不該留下壞掉的圖層
+    assert source.count("signatures.find((x) => x.id === s.sigId)") == 2
+    # 擺放的背景不能含簽名，否則會看到兩份
+    assert "{ ...composeOpts, signatures: null }" in source
+    # PDF 頁面單獨畫大一點才對得準簽名欄的橫線
+    assert "SMDocLocal.pdfPageImage(" in source
+    assert "doc.bytes.slice()" in source, "沒有複製緩衝區，pdf.js 會把解析器腳下的位元組抽掉"
 
 
 def test_studio_has_a_document_tab():
