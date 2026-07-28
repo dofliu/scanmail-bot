@@ -185,6 +185,108 @@ check('間距面板也能選底色',
 await page.locator('.pill:has-text("完成")').click();
 await page.waitForTimeout(300);
 
+// ── 拼貼裡的觸控取景與交換 ──────────────────────────────
+// 這一段刻意排在裁切之前 —— 它只動 fit 與順序，不會留下裁切框之類的殘留
+{
+  const cv = await page.locator('canvas').boundingBox();
+  // 三張圖在 3×2 格狀版面（cover）裡：左 / 中 / 右
+  const cellCenter = (i) => ({
+    x: cv.x + cv.width * (i / 3 + 1 / 6),
+    y: cv.y + cv.height / 2,
+  });
+
+  // 先確認「點一下」還是選取，不會因為手指微晃就把圖推歪
+  await page.mouse.move(cellCenter(0).x, cellCenter(0).y);
+  await page.mouse.down();
+  await page.mouse.move(cellCenter(0).x + 2, cellCenter(0).y + 1);
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  check('輕微晃動仍算點選，不會誤判成拖曳',
+    (await barLabels()).some((x) => x.includes('裁切')) &&
+    (await page.locator('button:has-text("重置取景")').first().isDisabled()),
+    (await barLabels()).join(','));
+
+  // 拖曳選中的那張 → 取景改變（重置取景會從停用變成可按）
+  await page.mouse.move(cellCenter(0).x, cellCenter(0).y);
+  await page.mouse.down();
+  await page.mouse.move(cellCenter(0).x - 30, cellCenter(0).y, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(400);
+  check('拖曳選中的圖會改變格子內的取景',
+    !(await page.locator('button:has-text("重置取景")').first().isDisabled()),
+    '重置取景仍是停用的 —— 表示 fit 沒有被改到');
+
+  await page.locator('button:has-text("重置取景")').click();
+  await page.waitForTimeout(350);
+  check('重置取景把取景還原',
+    (await page.locator('button:has-text("重置取景")').first().isDisabled()),
+    '重置後仍可按，表示 fit 沒清掉');
+
+  // 兩指捏合 —— Playwright 的 mouse 只有一個指標，所以直接派合成的 PointerEvent
+  await page.mouse.click(cellCenter(1).x, cellCenter(1).y);
+  await page.waitForTimeout(350);
+  await page.evaluate(() => {
+    const canvas = document.querySelector('canvas');
+    const r = canvas.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const send = (type, id, x, y) => canvas.dispatchEvent(new PointerEvent(type, {
+      pointerId: id, clientX: x, clientY: y, bubbles: true, cancelable: true, pointerType: 'touch',
+    }));
+    send('pointerdown', 11, cx - 20, cy);
+    send('pointerdown', 12, cx + 20, cy);
+    // 兩指往外撐開一倍 → 放大
+    for (let s = 1; s <= 5; s++) {
+      send('pointermove', 11, cx - 20 - s * 8, cy);
+      send('pointermove', 12, cx + 20 + s * 8, cy);
+    }
+    send('pointerup', 11, cx - 60, cy);
+    send('pointerup', 12, cx + 60, cy);
+  });
+  await page.waitForTimeout(450);
+  check('兩指撐開會放大格子裡的圖',
+    !(await page.locator('button:has-text("重置取景")').first().isDisabled()),
+    '重置取景仍是停用的 —— 表示捏合沒有改到 zoom');
+  await page.locator('button:has-text("重置取景")').click();
+  await page.waitForTimeout(300);
+  await page.locator('button:has-text("完成")').last().click();
+  await page.waitForTimeout(300);
+  await page.mouse.click(cellCenter(0).x, cellCenter(0).y);
+  await page.waitForTimeout(350);
+
+  // 交換：點「交換」後再點另一張，兩張位置對調
+  const thumbSrc = () => page.evaluate(() =>
+    Array.from(document.querySelectorAll('.m-screen img')).slice(0, 3).map((im) => im.src));
+  const before = await thumbSrc();
+  await page.locator('button:has-text("交換")').click();
+  await page.waitForTimeout(300);
+  check('交換模式會提示要點哪裡',
+    /點另一張圖跟第 1 張交換位置/.test(await page.locator('.m-screen').innerText()),
+    await page.locator('.m-screen').innerText());
+
+  await page.mouse.click(cellCenter(2).x, cellCenter(2).y);
+  await page.waitForTimeout(450);
+  const after = await thumbSrc();
+  check('點第二張 → 兩張位置對調',
+    after[0] === before[2] && after[2] === before[0] && after[1] === before[1],
+    `${before.map((s) => s.slice(-6))} → ${after.map((s) => s.slice(-6))}`);
+  check('交換完就離開交換模式，提示消失',
+    !/點另一張圖跟第/.test(await page.locator('.m-screen').innerText()),
+    await page.locator('.m-screen').innerText());
+
+  // 換回來，後面的測試才拿到原本的順序
+  await page.locator('button:has-text("交換")').click();
+  await page.waitForTimeout(250);
+  await page.mouse.click(cellCenter(0).x, cellCenter(0).y);
+  await page.waitForTimeout(450);
+  check('再交換一次就換回原本的順序',
+    JSON.stringify(await thumbSrc()) === JSON.stringify(before),
+    `${(await thumbSrc()).map((s) => s.slice(-6))} vs ${before.map((s) => s.slice(-6))}`);
+
+  await page.locator('button:has-text("完成")').last().click();
+  await page.waitForTimeout(300);
+}
+
 // ── 自由裁切 ────────────────────────────────────────────
 const box2 = await page.locator('canvas').boundingBox();
 await page.mouse.click(box2.x + box2.width * 0.15, box2.y + box2.height * 0.5);

@@ -17,6 +17,6 @@ outputs:
   - mobile_app
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "91 API endpoints, 8 tool categories, 272 pytest + 254 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "v3.14.0 — on-device document edge detection and perspective correction. The offline app previously only had free-form cropping; the actual scanning half lived in the backend OpenCV pipeline. Ported as gradient-directed Hough line detection (documents have straight edges, and lines are voted on by the whole edge so an occluded corner does not matter) plus the backend v5 scoring verbatim: convexity, per-edge gradient support, weakest-edge multiplicative gating. Correction runs a WebGL fragment shader, with output dimensions from Zhang-He aspect-ratio recovery so a skewed A4 does not come out squashed. Below 0.45 confidence it says so instead of cropping blind; 22 detection tests against synthetic ground-truth shots"
+key_metrics: "91 API endpoints, 8 tool categories, 275 pytest + 273 browser tests, web + Android + offline-only APK from one frontend"
+recent_changes: "v3.15.0 — direct touch control for collages. Select an image and drag to reposition it inside its cell, pinch to zoom, or hit swap and tap another image to trade places. Framing is stored as relative values (zoom factor plus a 0-1 focal point) so what you compose on the thumbnail is what the full-resolution export produces, and the focal point is clamped to the range that actually moves so dragging stops cleanly at the edge instead of accumulating dead travel. Images with untouched framing still take the original draw path, so existing collage output is unchanged"
 
