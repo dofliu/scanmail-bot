@@ -213,7 +213,123 @@ check('批次回報進度且以 100 收尾', runner.sawProgress, '沒有收到�
 check('拼接只產生一個結果', runner.mergeSingle === 1, String(runner.mergeSingle));
 check('不支援的輸出格式 → runner 回傳 null', runner.unsupportedFormat === null, String(runner.unsupportedFormat));
 check('未知操作 → runner 回傳 null', runner.unknownAction === null, String(runner.unknownAction));
-check('浮水印做不到 → runner 回傳 null', runner.watermark === null, String(runner.watermark));
+// 離線版自己有文字浮水印（composeToBlob 的 texts），但後端那支浮水印工具
+// 還吃圖片浮水印、位移、透明度…等參數，runner 不假裝做得到
+check('後端的浮水印工具 → runner 回傳 null，讓它走後端',
+  runner.watermark === null, String(runner.watermark));
+
+// ── 調整 / 打碼 / 文字 ──────────────────────────────────
+const layers = await page.evaluate(async () => {
+  const L = window.SMImageLocal;
+  const mk = () => {
+    const c = document.createElement('canvas');
+    c.width = 400; c.height = 200;
+    const x = c.getContext('2d');
+    x.fillStyle = '#c0392b'; x.fillRect(0, 0, 200, 200);
+    x.fillStyle = '#2980b9'; x.fillRect(200, 0, 200, 200);
+    return c;
+  };
+  const px = (cv, x, y) => {
+    const d = cv.getContext('2d').getImageData(x, y, 1, 1).data;
+    return [d[0], d[1], d[2]];
+  };
+  const blob = await new Promise((r) => mk().toBlob(r, 'image/png'));
+  const item = await L.loadItem(new File([blob], 'a.png', { type: 'image/png' }));
+
+  const out = {};
+  out.filterString = L.filterOf({ brightness: 1.2, grayscale: 1 });
+  out.noAdjust = L.filterOf(null);
+
+  // 黑白濾鏡：紅藍兩半都該變成灰（三個通道相同）
+  const mono = L.renderItem({ ...item, adjust: { grayscale: 1 } });
+  const g = px(mono, 100, 100);
+  out.grayscale = g[0] === g[1] && g[1] === g[2];
+
+  // 打碼：塗黑那一塊要真的變黑，框外不能受影響
+  const redacted = L.renderItem({
+    ...item, redactions: [{ x: 0.25, y: 0.25, w: 0.5, h: 0.5, style: 'fill' }],
+  });
+  out.redactInside = px(redacted, 200, 100);
+  out.redactOutside = px(redacted, 20, 100);
+
+  // 旋轉之後打碼位置仍然正確 —— 這裡曾經因為畫布沒還原座標而整個位移出去
+  const rotated = L.renderItem({
+    ...item, rotate: 90, redactions: [{ x: 0, y: 0, w: 1, h: 0.5, style: 'fill' }],
+  });
+  out.rotatedSize = [rotated.width, rotated.height];
+  out.rotatedTop = px(rotated, 100, 40);
+  out.rotatedBottom = px(rotated, 100, 300);
+
+  // 文字不是實心色塊，逐點比對會踩到字與字之間的空隙 ——
+  // 所以改成數「某個區域裡有幾個像素被改掉」
+  const region = (cv, x, y, w, h) => cv.getContext('2d').getImageData(x, y, w, h).data;
+  const changed = (a, b, x, y, w, h) => {
+    const pa = region(a, x, y, w, h);
+    const pb = region(b, x, y, w, h);
+    let n = 0;
+    for (let i = 0; i < pa.length; i += 4) {
+      if (pa[i] !== pb[i] || pa[i + 1] !== pb[i + 1] || pa[i + 2] !== pb[i + 2]) n++;
+    }
+    return n;
+  };
+
+  const plain = L.composeToCanvas([item], {});
+
+  // 馬賽克要真的改掉像素（純色區塊看不出來，所以先畫幾條白線進去）
+  const striped = document.createElement('canvas');
+  striped.width = 400; striped.height = 200;
+  const sx = striped.getContext('2d');
+  sx.drawImage(item.bitmap, 0, 0);
+  sx.fillStyle = '#ffffff';
+  for (let y = 0; y < 200; y += 6) sx.fillRect(0, y, 400, 2);
+  const beforeMosaic = document.createElement('canvas');
+  beforeMosaic.width = 400; beforeMosaic.height = 200;
+  beforeMosaic.getContext('2d').drawImage(striped, 0, 0);
+  L.applyRedactions(striped, [{ x: 0.4, y: 0.3, w: 0.2, h: 0.4, style: 'mosaic', cells: 3 }]);
+  out.mosaicChanged = changed(beforeMosaic, striped, 160, 60, 80, 80);
+  out.mosaicLeftAlone = changed(beforeMosaic, striped, 0, 60, 80, 80);
+
+  // 文字：畫在正中央，中央那塊要有一堆像素被改掉
+  const titled = L.composeToCanvas([item], {
+    texts: [{ text: '機密', x: 0.5, y: 0.5, size: 0.6, color: '#00ff00', stroke: 0 }],
+  });
+  out.textCenter = changed(plain, titled, 140, 40, 120, 120);
+  out.textCorner = changed(plain, titled, 0, 0, 40, 40);
+
+  // 平鋪浮水印：四個象限都要有痕跡，才叫「蓋滿整張」
+  const tiled = L.composeToCanvas([item], {
+    texts: [{ text: '樣本', tile: true, size: 0.12, color: '#00ff00', opacity: 1, stroke: 0, gap: 0.02 }],
+  });
+  out.tiledQuadrants = [[0, 0], [200, 0], [0, 100], [200, 100]]
+    .map(([x, y]) => changed(plain, tiled, x, y, 200, 100))
+    .filter((n) => n > 50).length;
+
+  // 空字串不該畫出任何東西
+  const empty = L.composeToCanvas([item], { texts: [{ text: '   ' }] });
+  out.emptyChanged = changed(plain, empty, 0, 0, 400, 200);
+  return out;
+});
+
+check('色彩調整轉成 CSS filter 字串',
+  layers.filterString === 'brightness(1.2) grayscale(1)' && layers.noAdjust === 'none',
+  `${layers.filterString} / ${layers.noAdjust}`);
+check('黑白濾鏡真的把顏色抽掉', layers.grayscale, JSON.stringify(layers));
+check('打碼把框內塗掉、框外不動',
+  layers.redactInside.join() === '0,0,0' && layers.redactOutside.join() === '192,57,43',
+  JSON.stringify([layers.redactInside, layers.redactOutside]));
+check('旋轉後打碼仍然落在正確位置',
+  layers.rotatedSize.join() === '200,400' &&
+  layers.rotatedTop.join() === '0,0,0' && layers.rotatedBottom.join() !== '0,0,0',
+  JSON.stringify([layers.rotatedSize, layers.rotatedTop, layers.rotatedBottom]));
+check('馬賽克改掉框內的像素、框外不動',
+  layers.mosaicChanged > 500 && layers.mosaicLeftAlone === 0,
+  `框內改了 ${layers.mosaicChanged} 點、框外改了 ${layers.mosaicLeftAlone} 點`);
+check('文字疊在指定位置，沒有畫到別處',
+  layers.textCenter > 500 && layers.textCorner === 0,
+  `中央 ${layers.textCenter} 點、角落 ${layers.textCorner} 點`);
+check('平鋪浮水印四個象限都蓋到',
+  layers.tiledQuadrants === 4, `只蓋到 ${layers.tiledQuadrants} 個象限`);
+check('空白文字不會留下痕跡', layers.emptyChanged === 0, `改了 ${layers.emptyChanged} 點`);
 
 await browser.close();
 

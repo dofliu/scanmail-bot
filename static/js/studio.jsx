@@ -54,6 +54,24 @@ const STUDIO_PDF_PAGES = [
 
 const STUDIO_SWATCHES = ['#ffffff', '#000000', '#f6f4ec', '#2d6b52', '#b25a4a', '#41729f'];
 
+const STUDIO_REDACT_STYLES = [
+  { id: 'mosaic', label: '馬賽克' },
+  { id: 'blur',   label: '模糊' },
+  { id: 'fill',   label: '塗黑' },
+];
+
+// 文字的位置用九宮格挑，不用拖的 —— 手機上拖字很難對齊，按一下就定位快多了
+const STUDIO_TEXT_SPOTS = [
+  { x: 0.06, y: 0.10, align: 'left' },   { x: 0.5, y: 0.10, align: 'center' },   { x: 0.94, y: 0.10, align: 'right' },
+  { x: 0.06, y: 0.50, align: 'left' },   { x: 0.5, y: 0.50, align: 'center' },   { x: 0.94, y: 0.50, align: 'right' },
+  { x: 0.06, y: 0.90, align: 'left' },   { x: 0.5, y: 0.90, align: 'center' },   { x: 0.94, y: 0.90, align: 'right' },
+];
+
+const STUDIO_TEXT_DEFAULT = {
+  text: '', size: 0.07, color: '#ffffff', strokeColor: '#000000',
+  stroke: 0.08, opacity: 1, spot: 7, tile: false, rotate: -30, gap: 0.12,
+};
+
 function studioBytes(n) {
   return window.API ? window.API.formatBytes(n) : `${n} B`;
 }
@@ -325,6 +343,126 @@ function StudioCropper({ item, onApply, onCancel }) {
   );
 }
 
+/**
+ * 打碼。
+ *
+ * 畫布上直接顯示「打完碼的樣子」而不是外框預覽 —— 遮得夠不夠一眼就知道，
+ * 不用存檔出來才發現還看得到。已經打好的框另外用虛線標出來，點一下可以拿掉。
+ *
+ * 三種樣式都是直接改像素，不是蓋一層可以移除的東西。
+ */
+function StudioRedactor({ item, onApply, onCancel }) {
+  const canvasRef = stUseRef(null);
+  const dragRef = stUseRef(null);
+  const [boxes, setBoxes] = stUseState(() => item.redactions || []);
+  const [style, setStyle] = stUseState('mosaic');
+  const [draft, setDraft] = stUseState(null);
+
+  stUseEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const shown = window.SMImageLocal.renderItem({ ...item, redactions: boxes }, { usePreview: true });
+    canvas.width = shown.width;
+    canvas.height = shown.height;
+    canvas.getContext('2d').drawImage(shown, 0, 0);
+  }, [item, boxes]);
+
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const posOf = (e) => {
+    const box = canvasRef.current.getBoundingClientRect();
+    return { x: clamp((e.clientX - box.left) / box.width), y: clamp((e.clientY - box.top) / box.height) };
+  };
+
+  const onDown = (e) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const p = posOf(e);
+    const hit = boxes.findIndex((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h);
+    dragRef.current = { start: p, hit, moved: false };
+  };
+
+  const onMove = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.preventDefault();
+    const p = posOf(e);
+    const w = Math.abs(p.x - drag.start.x);
+    const h = Math.abs(p.y - drag.start.y);
+    if (w < 0.02 && h < 0.02) return;
+    drag.moved = true;
+    setDraft({ x: Math.min(p.x, drag.start.x), y: Math.min(p.y, drag.start.y), w, h });
+  };
+
+  const onUp = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag) return;
+    if (drag.moved && draft) {
+      setBoxes((prev) => [...prev, { ...draft, style }]);
+    } else if (drag.hit >= 0) {
+      // 沒有拖曳、又點在已經打好的框上 → 拿掉那一塊
+      setBoxes((prev) => prev.filter((_, i) => i !== drag.hit));
+    }
+    setDraft(null);
+  };
+
+  const outline = (b, dashed) => ({
+    position: 'absolute',
+    left: `${b.x * 100}%`, top: `${b.y * 100}%`,
+    width: `${b.w * 100}%`, height: `${b.h * 100}%`,
+    border: dashed ? '1.5px dashed rgba(255,255,255,0.9)' : '1.5px solid var(--mint-3)',
+    boxShadow: '0 0 0 1px rgba(0,0,0,0.45)',
+    pointerEvents: 'none', boxSizing: 'border-box',
+  });
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '14px', background: 'var(--paper-2)', overflow: 'hidden',
+      }}>
+        <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', touchAction: 'none' }}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+          <canvas ref={canvasRef}
+            style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', userSelect: 'none' }}/>
+          {boxes.map((b, i) => <div key={i} style={outline(b, true)}/>)}
+          {draft && <div style={outline(draft, false)}/>}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 12px 4px', flexShrink: 0 }}>
+        <div className="row" style={{ gap: '6px', alignItems: 'center' }}>
+          {STUDIO_REDACT_STYLES.map((r) => (
+            <button key={r.id} className={`chip ${style === r.id ? 'on' : ''}`}
+              style={{ flexShrink: 0 }} onClick={() => setStyle(r.id)}>{r.label}</button>
+          ))}
+          <span style={{ fontSize: '11px', color: 'var(--ink-3)', marginLeft: 'auto' }}>
+            {boxes.length ? `已遮 ${boxes.length} 塊 · 點一下可移除` : '在要遮的地方拖一個框'}
+          </span>
+        </div>
+      </div>
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
+          <BarBtn ic="✕" label="取消" onClick={onCancel}/>
+          <BarBtn ic="⟲" label="復原" disabled={!boxes.length}
+            onClick={() => setBoxes((prev) => prev.slice(0, -1))}/>
+          <BarBtn ic="🗑" label="全清" disabled={!boxes.length} onClick={() => setBoxes([])}/>
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="✓" label="套用" accent onClick={() => onApply(boxes)}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 編輯 / 拼接 ───────────────────────────────────────────────
 function StudioEditor() {
   const [items, setItems] = stUseState([]);
@@ -332,6 +470,8 @@ function StudioEditor() {
   const [sheet, setSheet] = stUseState(null);  // layout | frame | gap | size | crop | export
   const [busy, setBusy] = stUseState('');
   const [cropping, setCropping] = stUseState(false);
+  const [redacting, setRedacting] = stUseState(false);
+  const [text, setText] = stUseState(STUDIO_TEXT_DEFAULT);
   const [layout, setLayout] = stUseState({
     preset: 'vertical', direction: 'vertical', columns: 0, fill: 'contain',
     gap: 0, bgColor: '#ffffff', normalize: true,
@@ -345,7 +485,10 @@ function StudioEditor() {
 
   const multi = items.length > 1;
   const current = sel >= 0 ? items[sel] : null;
-  const composeOpts = { ...layout, frame };
+  const textLayer = text.text.trim()
+    ? [{ ...text, ...(text.tile ? {} : STUDIO_TEXT_SPOTS[text.spot]) }]
+    : null;
+  const composeOpts = { ...layout, frame, texts: textLayer };
 
   // 任何狀態變動就重畫預覽。用縮圖算，所以按一下就看得到，不會卡。
   stUseEffect(() => {
@@ -369,9 +512,9 @@ function StudioEditor() {
     } catch (e) {
       console.error('[Studio] 預覽失敗', e);
     }
-    // cropping 也要列進來 —— 離開裁切模式後 canvas 是新的 DOM 元素，
+    // cropping / redacting 也要列進來 —— 離開全螢幕編輯器後 canvas 是新的 DOM 元素，
     // 不重畫就會停在瀏覽器給的預設 300×150 空白畫布。
-  }, [items, layout, frame, sel, cropping]);
+  }, [items, layout, frame, sel, cropping, redacting, text]);
 
   const addFiles = async (files) => {
     if (!files || !files.length) return;
@@ -550,12 +693,112 @@ function StudioEditor() {
       </StudioSheet>
     ),
 
-    size: current && (
-      <StudioSheet title="大小" onClose={() => setSheet(null)}>
-        <div className="field-label">{Math.round(current.scale * 100)}%</div>
+    adjust: current && (
+      <StudioSheet title="調整" onClose={() => setSheet(null)}>
+        <div className="field-label">濾鏡</div>
+        <div className="row" style={{ gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+          {window.SMImageLocal.ADJUST_PRESETS.map((p) => (
+            <button key={p.id} className={`chip ${(current.preset || 'none') === p.id ? 'on' : ''}`}
+              onClick={() => patch({ preset: p.id, adjust: p.adjust ? { ...p.adjust } : null })}>
+              {p.label}
+            </button>
+          ))}
+        </div>
+        {[
+          { key: 'brightness', label: '亮度', min: 40, max: 180 },
+          { key: 'contrast',   label: '對比', min: 40, max: 220 },
+          { key: 'saturate',   label: '飽和', min: 0,  max: 220 },
+        ].map((f) => {
+          const value = Math.round(((current.adjust || {})[f.key] == null ? 1 : current.adjust[f.key]) * 100);
+          return (
+            <div key={f.key}>
+              <div className="field-label">{f.label} {value}%</div>
+              <input type="range" className="slider" min={f.min} max={f.max} value={value}
+                onChange={(e) => patch({
+                  preset: 'custom',
+                  adjust: { ...(current.adjust || {}), [f.key]: +e.target.value / 100 },
+                })}
+                style={{ marginBottom: '10px' }}/>
+            </div>
+          );
+        })}
+        <div className="field-label">大小 {Math.round(current.scale * 100)}%</div>
         <input type="range" className="slider" min="20" max="200"
           value={Math.round(current.scale * 100)}
           onChange={(e) => patch({ scale: +e.target.value / 100 })}/>
+      </StudioSheet>
+    ),
+
+    text: (
+      <StudioSheet title={text.tile ? '浮水印' : '文字'} onClose={() => setSheet(null)}>
+        <textarea className="input" rows="2" placeholder="要疊上去的文字（可換行）"
+          value={text.text} onChange={(e) => setText({ ...text, text: e.target.value })}
+          style={{ width: '100%', marginBottom: '10px', resize: 'vertical' }}/>
+
+        <label className="row" style={{ alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '10px' }}>
+          <input type="checkbox" checked={text.tile}
+            onChange={(e) => setText({
+              ...text,
+              tile: e.target.checked,
+              // 浮水印要淡才不會壓過內容；一般文字則該是實心的
+              opacity: e.target.checked
+                ? (text.opacity === 1 ? 0.35 : text.opacity)
+                : (text.opacity === 0.35 ? 1 : text.opacity),
+            })}/>
+          平鋪成浮水印（蓋滿整張，防止被盜用）
+        </label>
+
+        {!text.tile && (
+          <>
+            <div className="field-label">位置</div>
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(3, 34px)', gap: '4px', marginBottom: '12px',
+            }}>
+              {STUDIO_TEXT_SPOTS.map((_, i) => (
+                <button key={i} onClick={() => setText({ ...text, spot: i })}
+                  style={{
+                    height: '26px', borderRadius: '6px',
+                    border: text.spot === i ? '1.5px solid var(--mint-3)' : '1.25px solid var(--line-soft)',
+                    background: text.spot === i ? 'var(--mint-wash)' : 'transparent',
+                  }}/>
+              ))}
+            </div>
+          </>
+        )}
+        {text.tile && (
+          <>
+            <div className="field-label">角度 {text.rotate}°</div>
+            <input type="range" className="slider" min="-90" max="90" step="5" value={text.rotate}
+              onChange={(e) => setText({ ...text, rotate: +e.target.value })}
+              style={{ marginBottom: '10px' }}/>
+          </>
+        )}
+
+        <div className="field-label">字級 {Math.round(text.size * 100)}%</div>
+        <input type="range" className="slider" min="2" max="20" value={Math.round(text.size * 100)}
+          onChange={(e) => setText({ ...text, size: +e.target.value / 100 })}
+          style={{ marginBottom: '10px' }}/>
+
+        <div className="field-label">濃度 {Math.round(text.opacity * 100)}%</div>
+        <input type="range" className="slider" min="5" max="100" value={Math.round(text.opacity * 100)}
+          onChange={(e) => setText({ ...text, opacity: +e.target.value / 100 })}
+          style={{ marginBottom: '10px' }}/>
+
+        <div className="field-label">文字顏色</div>
+        <div style={{ marginBottom: '10px' }}>
+          <ColorRow value={text.color} onChange={(c) => setText({ ...text, color: c })}/>
+        </div>
+
+        <div className="field-label">外框 {Math.round(text.stroke * 100)}%（壓在淺色底上才看得見）</div>
+        <input type="range" className="slider" min="0" max="20" value={Math.round(text.stroke * 100)}
+          onChange={(e) => setText({ ...text, stroke: +e.target.value / 100 })}
+          style={{ marginBottom: '10px' }}/>
+        {text.stroke > 0 && <ColorRow value={text.strokeColor} onChange={(c) => setText({ ...text, strokeColor: c })}/>}
+
+        {!!text.text.trim() && (
+          <button className="btn" style={{ width: '100%', marginTop: '12px' }}
+            onClick={() => setText(STUDIO_TEXT_DEFAULT)}>移除文字</button>
+        )}
       </StudioSheet>
     ),
 
@@ -598,6 +841,14 @@ function StudioEditor() {
       <StudioCropper item={current}
         onCancel={() => setCropping(false)}
         onApply={(rect) => { patch({ cropRect: rect }); setCropping(false); }}/>
+    );
+  }
+
+  if (redacting && current) {
+    return (
+      <StudioRedactor item={current}
+        onCancel={() => setRedacting(false)}
+        onApply={(boxes) => { patch({ redactions: boxes }); setRedacting(false); }}/>
     );
   }
 
@@ -645,8 +896,9 @@ function StudioEditor() {
               <BarBtn ic="⇋" label="水平" on={current.flipH} onClick={() => flip('h')}/>
               <BarBtn ic="⇅" label="垂直" on={current.flipV} onClick={() => flip('v')}/>
               <BarBtn ic="⛶" label="裁切" onClick={() => { setSheet(null); setCropping(true); }}/>
-              <BarBtn ic="⤢" label="大小" on={sheet === 'size'}
-                onClick={() => setSheet(sheet === 'size' ? null : 'size')}/>
+              <BarBtn ic="▩" label="打碼" onClick={() => { setSheet(null); setRedacting(true); }}/>
+              <BarBtn ic="🎚" label="調整" on={sheet === 'adjust'}
+                onClick={() => setSheet(sheet === 'adjust' ? null : 'adjust')}/>
               <BarBtn ic="🗑" label="刪除" onClick={remove}/>
             </>
           ) : (
@@ -657,6 +909,8 @@ function StudioEditor() {
                 onClick={() => setSheet(sheet === 'frame' ? null : 'frame')}/>
               <BarBtn ic="↔" label="間距" on={sheet === 'gap'}
                 onClick={() => setSheet(sheet === 'gap' ? null : 'gap')}/>
+              <BarBtn ic="Ｔ" label="文字" on={sheet === 'text'}
+                onClick={() => setSheet(sheet === 'text' ? null : 'text')}/>
               <input ref={addRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
                 onChange={(e) => { addFiles(Array.from(e.target.files)); e.target.value = ''; }}/>
               <BarBtn ic="＋" label="加圖" onClick={() => addRef.current?.click()}/>
@@ -1323,7 +1577,9 @@ function Studio() {
 }
 
 Object.assign(window, {
-  Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages, StudioCropper, DocPreview,
+  Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages,
+  StudioCropper, StudioRedactor, DocPreview,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,
+  STUDIO_REDACT_STYLES, STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT,
 });

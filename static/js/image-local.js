@@ -418,6 +418,8 @@
       flipV: false,
       scale: 1,
       cropRect: null,
+      adjust: null,
+      redactions: [],
     };
   }
 
@@ -495,11 +497,104 @@
     const h = swap ? src.width : src.height;
 
     const out = newCanvas(w, h);
+    // 這一段的位移 / 旋轉只給這次繪製用；沒有 restore 的話，
+    // 後面拿同一個 context 畫遮罩會整個跟著位移出去。
+    out.ctx.save();
     out.ctx.translate(w / 2, h / 2);
     out.ctx.rotate((rotate * Math.PI) / 180);
     out.ctx.scale(item.flipH ? -1 : 1, item.flipV ? -1 : 1);
+    // 調色交給瀏覽器的 filter —— 走的是 GPU，比自己逐像素算快得多
+    out.ctx.filter = filterOf(item.adjust);
     out.ctx.drawImage(src, -src.width / 2, -src.height / 2);
-    return cropToRect(out.canvas, item.cropRect);
+    out.ctx.restore();
+
+    const cropped = cropToRect(out.canvas, item.cropRect);
+    // 打碼排在裁切之後：使用者是在「看到的畫面」上框的
+    return applyRedactions(cropped, item.redactions);
+  }
+
+  /**
+   * 色彩調整 → CSS filter 字串。
+   * 值都用「1 = 原樣」的倍率，跟 CSS 的慣例一致。
+   */
+  function filterOf(adjust) {
+    if (!adjust) return 'none';
+    const parts = [];
+    const num = (v, base) => (v == null ? base : v);
+    if (num(adjust.brightness, 1) !== 1) parts.push(`brightness(${adjust.brightness})`);
+    if (num(adjust.contrast, 1) !== 1) parts.push(`contrast(${adjust.contrast})`);
+    if (num(adjust.saturate, 1) !== 1) parts.push(`saturate(${adjust.saturate})`);
+    if (adjust.grayscale) parts.push(`grayscale(${adjust.grayscale})`);
+    if (adjust.sepia) parts.push(`sepia(${adjust.sepia})`);
+    if (adjust.blur) parts.push(`blur(${adjust.blur}px)`);
+    if (adjust.hue) parts.push(`hue-rotate(${adjust.hue}deg)`);
+    return parts.length ? parts.join(' ') : 'none';
+  }
+
+  /**
+   * 打碼。分享文件截圖前把個資遮掉 —— 這件事本來就不該把圖傳上網才做得到。
+   *
+   * 三種都是「不可逆」的：直接把像素改掉，不是蓋一層可以移除的東西。
+   * 區域用 0–1 的相對座標，所以縮圖預覽與原圖匯出會落在同一個位置。
+   */
+  function applyRedactions(canvas, redactions) {
+    if (!redactions || !redactions.length) return canvas;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.filter = 'none';
+    const W = canvas.width;
+    const H = canvas.height;
+
+    for (const r of redactions) {
+      const x = Math.max(0, Math.round(r.x * W));
+      const y = Math.max(0, Math.round(r.y * H));
+      const w = Math.min(W - x, Math.round(r.w * W));
+      const h = Math.min(H - y, Math.round(r.h * H));
+      if (w < 1 || h < 1) continue;
+
+      if (r.style === 'fill') {
+        ctx.save();
+        ctx.filter = 'none';
+        ctx.fillStyle = r.color || '#000000';
+        ctx.fillRect(x, y, w, h);
+        ctx.restore();
+        continue;
+      }
+
+      if (r.style === 'blur') {
+        // 模糊會往外吃周邊像素，只取選區的話邊緣會透出半透明。
+        // 解法是連周邊一起取樣，模糊完再裁回中心。
+        const pad = Math.max(4, Math.round(Math.min(w, h) / 4));
+        const sx = Math.max(0, x - pad);
+        const sy = Math.max(0, y - pad);
+        const sw = Math.min(W - sx, w + pad * 2);
+        const sh = Math.min(H - sy, h + pad * 2);
+        const tmp = newCanvas(sw, sh);
+        tmp.ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh);
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, w, h);
+        ctx.clip();
+        ctx.filter = `blur(${Math.max(3, Math.round(Math.min(w, h) / 8))}px)`;
+        ctx.drawImage(tmp.canvas, sx, sy, sw, sh);
+        ctx.restore();
+        continue;
+      }
+
+      // 馬賽克：縮到很小再放大回來，關掉平滑才會是方格而不是糊成一片
+      const cells = Math.max(3, Math.round(r.cells || 12));
+      const tw = Math.max(1, Math.min(cells, w));
+      const th = Math.max(1, Math.round((tw * h) / w) || 1);
+      const small = newCanvas(tw, th);
+      small.ctx.imageSmoothingEnabled = false;
+      small.ctx.drawImage(canvas, x, y, w, h, 0, 0, tw, th);
+      ctx.save();
+      ctx.filter = 'none';
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(small.canvas, 0, 0, tw, th, x, y, w, h);
+      ctx.restore();
+    }
+    return canvas;
   }
 
   /**
@@ -607,6 +702,91 @@
   }
 
   /** 把一組已編輯的項目排版成一張 canvas */
+  /**
+   * 濾鏡預設。「文件」那組是掃描紙本用的 —— 泛黃的紙拉成乾淨的黑白，
+   * 比原樣拍出來好認很多，也小很多。
+   */
+  const ADJUST_PRESETS = [
+    { id: 'none',  label: '原圖', adjust: null },
+    { id: 'vivid', label: '鮮豔', adjust: { saturate: 1.35, contrast: 1.12 } },
+    { id: 'soft',  label: '柔和', adjust: { saturate: 0.85, brightness: 1.06, contrast: 0.94 } },
+    { id: 'mono',  label: '黑白', adjust: { grayscale: 1, contrast: 1.08 } },
+    { id: 'retro', label: '復古', adjust: { sepia: 0.45, saturate: 0.9, contrast: 1.05 } },
+    { id: 'cool',  label: '冷色', adjust: { hue: -12, saturate: 1.1 } },
+    { id: 'warm',  label: '暖色', adjust: { hue: 12, saturate: 1.08, brightness: 1.03 } },
+    { id: 'paper', label: '紙本', adjust: { grayscale: 1, contrast: 1.7, brightness: 1.18 } },
+  ];
+
+  /**
+   * 文字圖層 / 平鋪浮水印。
+   *
+   * 字型直接用系統的 —— 畫在 canvas 上不必像 PDF 那樣把字型嵌進檔案，
+   * 所以中文不用額外成本。
+   *
+   * 位置與字級都用相對值（0–1、相對於短邊），縮圖預覽和原圖匯出才會長得一樣。
+   */
+  function drawTexts(canvas, texts) {
+    if (!texts || !texts.length) return canvas;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const W = canvas.width;
+    const H = canvas.height;
+    const unit = Math.min(W, H);
+
+    for (const t of texts) {
+      const lines = String(t.text == null ? '' : t.text).split('\n');
+      if (!lines.join('').trim()) continue;
+
+      const px = Math.max(8, Math.round((t.size == null ? 0.07 : t.size) * unit));
+      const lead = px * 1.25;
+      ctx.save();
+      ctx.filter = 'none';
+      ctx.globalAlpha = t.opacity == null ? 1 : Math.max(0.02, Math.min(1, t.opacity));
+      ctx.font = `${t.weight || 700} ${px}px "Noto Sans TC","PingFang TC","Microsoft JhengHei",sans-serif`;
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+      ctx.miterLimit = 2;
+
+      // 描邊讓文字在任何底色上都看得見 —— 白字壓在白紙上就是看不到
+      const strokeWidth = t.stroke ? px * t.stroke : 0;
+      const paint = (str, x, y) => {
+        if (strokeWidth > 0) {
+          ctx.lineWidth = strokeWidth;
+          ctx.strokeStyle = t.strokeColor || '#000000';
+          ctx.strokeText(str, x, y);
+        }
+        ctx.fillStyle = t.color || '#ffffff';
+        ctx.fillText(str, x, y);
+      };
+      const block = (cx, cy, align) => {
+        ctx.textAlign = align;
+        const top = cy - ((lines.length - 1) * lead) / 2;
+        lines.forEach((line, i) => paint(line, cx, top + i * lead));
+      };
+
+      if (t.tile) {
+        // 平鋪浮水印：旋轉整個座標系，畫滿到對角線長度，四邊都不會缺角
+        const widest = Math.max(...lines.map((l) => ctx.measureText(l).width), px);
+        const gapX = widest + unit * (t.gap == null ? 0.12 : t.gap);
+        const gapY = lead * lines.length + unit * (t.gap == null ? 0.12 : t.gap);
+        const reach = Math.hypot(W, H) / 2 + Math.max(gapX, gapY);
+        ctx.translate(W / 2, H / 2);
+        ctx.rotate(((t.rotate == null ? -30 : t.rotate) * Math.PI) / 180);
+        for (let y = -reach; y <= reach; y += gapY) {
+          for (let x = -reach; x <= reach; x += gapX) block(x, y, 'center');
+        }
+      } else {
+        const x = (t.x == null ? 0.5 : t.x) * W;
+        const y = (t.y == null ? 0.9 : t.y) * H;
+        ctx.translate(x, y);
+        if (t.rotate) ctx.rotate((t.rotate * Math.PI) / 180);
+        block(0, 0, t.align || 'center');
+      }
+      ctx.restore();
+    }
+    return canvas;
+  }
+
   function composeToCanvas(items, opts = {}, renderOpts = {}) {
     if (!items || !items.length) throw new Error('至少需要一張圖片');
     const rendered = items.map((it) => renderItem(it, renderOpts));
@@ -620,7 +800,8 @@
     }
     const fillMode = opts.fill === 'cover' ? 'cover' : 'contain';
     boxes.forEach((b, i) => drawCell(out.ctx, rendered[i], b, opts.frame, fillMode));
-    return out.canvas;
+    // 文字疊在最上面，位置是相對整張成品而不是某一格
+    return drawTexts(out.canvas, opts.texts);
   }
 
   /** 匯出：用原圖重算一次，輸出檔案 */
@@ -877,6 +1058,10 @@
     centeredRect,
     rotateRect,
     flipRect,
+    filterOf,
+    applyRedactions,
+    drawTexts,
+    ADJUST_PRESETS,
     composeToBlob,
     previewInto,
     jpegBytesFor,

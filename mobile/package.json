@@ -1,6 +1,6 @@
 {
   "name": "scanmail-plus-mobile",
-  "version": "3.11.0",
+  "version": "3.12.0",
   "private": true,
   "description": "ScanMail+ Android App — Capacitor 外殼；前端來自專案根目錄的 static/",
   "license": "MIT",

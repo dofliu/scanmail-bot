@@ -193,9 +193,9 @@ def test_toolbar_is_contextual():
     source = (JS / "studio.jsx").read_text(encoding="utf-8")
     # 以 current（= 有選到圖）決定工具列內容
     assert "{current ? (" in source, "工具列沒有依選取狀態切換"
-    for label in ("左轉", "右轉", "裁切", "大小", "完成"):
+    for label in ("左轉", "右轉", "裁切", "打碼", "調整", "完成"):
         assert f'label="{label}"' in source, f"圖片工具列少了 {label}"
-    for label in ("版面", "圖框", "間距", "加圖", "製作"):
+    for label in ("版面", "圖框", "間距", "文字", "加圖", "製作"):
         assert f'label="{label}"' in source, f"拼貼工具列少了 {label}"
 
 
@@ -233,7 +233,7 @@ def test_engine_supports_crop_and_frames():
     for fn in ("function cropToRect(", "function drawCell(", "function roundedPath("):
         assert fn in source, f"引擎少了 {fn}"
     # 裁切要在變形階段生效，才會影響版面計算
-    assert "return cropToRect(out.canvas, item.cropRect)" in source, "renderItem 沒有套用裁切"
+    assert "cropToRect(out.canvas, item.cropRect)" in source, "renderItem 沒有套用裁切"
 
 
 def test_crop_happens_after_rotation():
@@ -259,7 +259,7 @@ def test_free_crop_is_a_full_screen_editor():
     assert "touchAction: 'none'" in studio, "沒有擋掉捲動，手機上會邊拖邊捲"
     assert "setCropping(true)" in studio, "裁切沒有進入獨立畫面"
     # 離開裁切後 canvas 是新的 DOM 元素，不重畫會停在瀏覽器預設的空白畫布
-    assert "[items, layout, frame, sel, cropping]" in studio
+    assert "[items, layout, frame, sel, cropping, redacting, text]" in studio
 
 
 def test_images_convert_to_pdf_losslessly():
@@ -415,6 +415,45 @@ def test_page_copy_does_not_drag_in_other_pages():
     source = _strip_comments((JS / "pdf-lite.js").read_text(encoding="utf-8"))
     assert "isName(dict.get('Type'), 'Page') && !included.get(doc).has(target)" in source
     assert "if (k === 'Parent') continue" in source, "頁面樹要自己重建，不能沿用來源的 Parent"
+
+
+def test_redaction_actually_destroys_pixels():
+    """打碼要真的把像素改掉 —— 蓋一層可以移除的東西等於沒遮。"""
+    source = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    assert "function applyRedactions(" in source
+    for style in ("'fill'", "'blur'"):
+        assert style in source, f"打碼少了 {style} 樣式"
+    assert "imageSmoothingEnabled = false" in source, "馬賽克要關掉平滑才會是方格"
+    # renderItem 的位移沒還原的話，遮罩會整個飄走
+    assert "out.ctx.save()" in source and "out.ctx.restore()" in source
+    body = source[source.index("function applyRedactions("):]
+    assert "ctx.setTransform(1, 0, 0, 1, 0, 0)" in body[:600], \
+        "applyRedactions 沒有把座標系歸零，換個呼叫端就會畫錯位置"
+
+
+def test_text_layer_scales_with_the_canvas():
+    """位置與字級都要用相對值，不然縮圖預覽跟原圖匯出會長得不一樣。"""
+    source = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    assert "function drawTexts(" in source
+    assert "const unit = Math.min(W, H)" in source
+    assert "t.tile" in source, "少了平鋪浮水印"
+    # 描邊是白字壓白底時唯一看得見的辦法
+    assert "strokeText(" in source
+    # 文字疊在成品最上層，不是疊在某一格上
+    compose = source[source.index("function composeToCanvas("):]
+    assert "return drawTexts(out.canvas, opts.texts)" in compose[:1400]
+
+
+def test_studio_exposes_the_new_editing_tools():
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "function StudioRedactor(" in source
+    for label in ("打碼", "調整", "文字"):
+        assert f'label="{label}"' in source, f"工具列少了 {label}"
+    # 「大小」併進「調整」了，工具列才不會擠爆
+    assert 'label="大小"' not in source
+    assert "StudioSheet title=\"調整\"" in source
+    # 濾鏡預設由引擎提供，介面不要自己再抄一份
+    assert "window.SMImageLocal.ADJUST_PRESETS" in source
 
 
 def test_studio_has_a_pages_tab():
