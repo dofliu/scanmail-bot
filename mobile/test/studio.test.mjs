@@ -313,6 +313,94 @@ check('移除文字之後面板回到空的',
 await page.locator('.pill:has-text("完成")').click();
 await page.waitForTimeout(200);
 
+// ── 簽名 / 印章 ──────────────────────────────────────────
+await page.evaluate(() => localStorage.removeItem('sm.signatures'));
+await page.locator('button:has-text("簽名")').click();
+await page.waitForTimeout(300);
+check('簽名面板一開始是空的，並提供手寫與匯入兩條路',
+  /還沒有簽名/.test(await page.locator('.m-screen').innerText()) &&
+  (await page.locator('button:has-text("手寫")').count()) === 1 &&
+  (await page.locator('button:has-text("匯入圖片")').count()) === 1,
+  await page.locator('.m-screen').innerText());
+
+await page.locator('button:has-text("手寫")').click();
+await page.waitForTimeout(300);
+check('簽名板出現，還沒畫時不能存',
+  /在這裡簽名/.test(await page.locator('.m-screen').innerText()) &&
+  await page.locator('button:has-text("存起來")').isDisabled(),
+  await page.locator('.m-screen').innerText());
+
+// 在簽名板上畫一筆
+const pad = await page.locator('canvas').last().boundingBox();
+await page.mouse.move(pad.x + pad.width * 0.25, pad.y + pad.height * 0.6);
+await page.mouse.down();
+for (let i = 1; i <= 12; i++) {
+  await page.mouse.move(
+    pad.x + pad.width * (0.25 + 0.5 * (i / 12)),
+    pad.y + pad.height * (0.6 - 0.25 * Math.sin((i / 12) * Math.PI))
+  );
+}
+await page.mouse.up();
+await page.waitForTimeout(300);
+check('畫下去之後才能存起來',
+  !(await page.locator('button:has-text("存起來")').isDisabled()), '存起來仍然是停用的');
+
+await page.locator('button:has-text("存起來")').click();
+await page.waitForTimeout(700);
+check('存完直接進到擺放畫面',
+  (await page.locator('button:has-text("套用")').count()) === 1 &&
+  (await page.locator('button:has-text("取消")').count()) === 1,
+  await page.locator('.m-screen').innerText());
+check('簽名真的存進裝置裡',
+  await page.evaluate(() => JSON.parse(localStorage.getItem('sm.signatures') || '[]').length) === 1,
+  'localStorage 沒有簽名');
+
+// 擺放畫面：從下方挑一枚放上去，再拖到左上角
+await page.locator('.m-screen img').last().click();
+await page.waitForTimeout(300);
+check('挑一枚就放到頁面上，並出現大小 / 濃度細調',
+  (await page.locator('input[type=range]').count()) === 2,
+  `滑桿數 ${await page.locator('input[type=range]').count()}`);
+
+const stampBefore = await page.locator('.m-screen img').last().boundingBox();
+await page.mouse.move(stampBefore.x + stampBefore.width / 2, stampBefore.y + stampBefore.height / 2);
+await page.mouse.down();
+await page.mouse.move(stampBefore.x - 40, stampBefore.y - 40, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(300);
+const stampAfter = await page.locator('.m-screen img').last().boundingBox();
+check('簽名拖得動', Math.abs(stampAfter.x - stampBefore.x) > 10,
+  `${Math.round(stampBefore.x)} → ${Math.round(stampAfter.x)}`);
+// 拖完還要維持選取，不然每拖一次細調就消失一次
+check('拖完之後還是選取狀態',
+  (await page.locator('input[type=range]').count()) === 2,
+  `滑桿數 ${await page.locator('input[type=range]').count()}`);
+
+await page.locator('button:has-text("套用")').click();
+await page.waitForTimeout(600);
+// BarBtn 的「使用中」是靠底色，不是 class —— 所以看的是算出來的背景
+const signBtnLit = await page.evaluate(() => {
+  const btn = Array.from(document.querySelectorAll('button')).find((b) => b.innerText.includes('簽名'));
+  if (!btn) return null;
+  const bg = getComputedStyle(btn).backgroundColor;
+  return { bg, transparent: /rgba\(0, 0, 0, 0\)|transparent/.test(bg) };
+});
+check('套用後回到編輯畫面，簽名鈕標成使用中',
+  (await barLabels()).some((x) => x.includes('版面')) && signBtnLit && !signBtnLit.transparent,
+  JSON.stringify(signBtnLit));
+
+// 畫布上真的多了墨 —— 面板關掉、預覽重畫過才算數
+const signedInk = await page.evaluate(() => {
+  const c = document.querySelector('canvas');
+  const { data } = c.getContext('2d').getImageData(0, 0, c.width, c.height);
+  let dark = 0;
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i] < 120 && data[i + 1] < 120 && data[i + 2] < 120) dark++;
+  }
+  return dark;
+});
+check('成品預覽上看得到簽名', signedInk > 50, `深色像素 ${signedInk}`);
+
 // ── 輸出 ────────────────────────────────────────────────
 // 上面的文字面板已經回到拼貼模式了，直接開製作
 await page.locator('button:has-text("製作")').click();
@@ -450,8 +538,18 @@ await cells().nth(3).click();
 await page.waitForTimeout(300);
 labels = await barLabels();
 check('點某一頁就換成該頁的操作',
-  ['左轉', '右轉', '前移', '後移', '刪除', '完成'].every((l) => labels.some((x) => x.includes(l))),
+  ['左轉', '右轉', '簽名', '前移', '後移', '刪除', '完成'].every((l) => labels.some((x) => x.includes(l))),
   labels.join(','));
+
+// PDF 也能蓋章，用的是同一個簽名庫（上面手寫存的那一枚還在）
+await page.locator('button:has-text("簽名")').click();
+await page.waitForTimeout(300);
+check('PDF 頁面也能開簽名庫，而且看得到剛才存的簽名',
+  (await page.locator('button:has-text("手寫")').count()) === 1 &&
+  !/還沒有簽名/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+await page.locator('.pill:has-text("完成")').click();
+await page.waitForTimeout(250);
 
 await page.locator('button:has-text("前移")').click();
 await page.waitForTimeout(300);

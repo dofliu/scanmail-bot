@@ -79,6 +79,11 @@ jobs:
           pip install pikepdf
           npm run test:pages
 
+      # 簽名 / 印章：蓋完之後把頁面畫出來數墨點，確認落在該落的位置
+      - name: Test signatures and stamps
+        working-directory: mobile
+        run: npm run test:sign
+
       - name: Build web assets for the app
         env:
           SM_API_BASE: ${{ github.event.inputs.api_base }}

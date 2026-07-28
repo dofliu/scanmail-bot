@@ -37,6 +37,8 @@
 
   const isName = (v, n) => v instanceof PdfName && (n === undefined || v.name === n);
   const isDict = (v) => v instanceof Map;
+  /** 給 `new Map(...)` 用：不是字典就當空的，省得每次都要三元判斷 */
+  const asDict = (v) => (isDict(v) ? v : []);
 
   // ── 位元組層的小工具 ────────────────────────────────────
 
@@ -656,11 +658,55 @@
     out.push('null');
   }
 
+  async function deflate(bytes) {
+    if (typeof CompressionStream === 'undefined') return null;
+    const out = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate'));
+    return new Uint8Array(await new Response(out).arrayBuffer());
+  }
+
+  /**
+   * 把「畫面座標」換成「PDF 使用者座標」的變換矩陣。
+   *
+   * 畫面座標＝使用者在螢幕上看到的那一面：左上角原點、y 往下、已經轉過向。
+   * PDF 使用者座標＝左下角原點、y 往上、而且是**沒轉向前**的那一面 ——
+   * /Rotate 是交給檢視器轉的，內容串流裡的座標不會跟著轉。
+   *
+   * 所以蓋章的內容前面要先套這個矩陣，使用者在轉過向的縮圖上點哪裡就蓋在哪裡。
+   *
+   * @param {number} rotate  最終方向（0/90/180/270，已含使用者按的轉向）
+   * @param {number} w  轉向前的頁寬（pt）
+   * @param {number} h  轉向前的頁高（pt）
+   * @param {number} mx MediaBox 的左下角 x（不一定是 0）
+   * @param {number} my MediaBox 的左下角 y
+   * @returns {{matrix: number[], width: number, height: number}}
+   *          width/height 是轉向後、使用者看到的尺寸
+   */
+  function displayMatrix(rotate, w, h, mx = 0, my = 0) {
+    const r = ((Math.round(rotate / 90) * 90) % 360 + 360) % 360;
+    // [a b c d e f]：px = a·dx + c·dy + e，py = b·dx + d·dy + f
+    const M = {
+      0: [1, 0, 0, -1, 0, h],
+      90: [0, 1, 1, 0, 0, 0],
+      180: [-1, 0, 0, 1, w, 0],
+      270: [0, -1, -1, 0, w, h],
+    }[r];
+    const swap = r === 90 || r === 270;
+    return {
+      matrix: [M[0], M[1], M[2], M[3], M[4] + mx, M[5] + my],
+      width: swap ? h : w,
+      height: swap ? w : h,
+    };
+  }
+
   /**
    * 把挑好的頁面組成一份新的 PDF。
    *
-   * @param {Array<{doc: PdfDoc, page: number, rotate?: number}>} picks
-   *        rotate 是相對角度（90 的倍數），會疊加到頁面原本的方向上
+   * @param {Array<{doc: PdfDoc, page: number, rotate?: number, stamps?: Array}>} picks
+   *        rotate 是相對角度（90 的倍數），會疊加到頁面原本的方向上。
+   *        stamps 是蓋在這一頁上的簽名 / 印章：
+   *          { sig, x, y, w, opacity?, rotate? }
+   *        x/y/w 是相對值（0–1，相對於「使用者看到的那一面」的寬高），
+   *        高度由 sig.aspect 推得 —— 簽名不該被拉扁。
    */
   async function compose(picks, meta = {}) {
     if (!picks || !picks.length) throw new Error('沒有選到任何頁面');
@@ -712,6 +758,138 @@
       return value;
     }
 
+    const resolveNew = (v) => (v instanceof PdfRef ? objects[v.num - 1] : v);
+    /** 同一份簽名蓋在很多頁上時，影像本體只存一份 */
+    const imageCache = new Map();
+
+    /** 建一個帶 alpha 的影像 XObject（RGB 本體 + SMask 灰階遮罩） */
+    async function addAlphaImage(rgba, width, height) {
+      const n = width * height;
+      const rgb = new Uint8Array(n * 3);
+      const alpha = new Uint8Array(n);
+      for (let i = 0, j = 0; i < n; i++) {
+        rgb[j++] = rgba[i * 4];
+        rgb[j++] = rgba[i * 4 + 1];
+        rgb[j++] = rgba[i * 4 + 2];
+        alpha[i] = rgba[i * 4 + 3];
+      }
+
+      const stream = async (data, space) => {
+        const packed = await deflate(data);
+        const dict = new Map();
+        dict.set('Type', new PdfName('XObject'));
+        dict.set('Subtype', new PdfName('Image'));
+        dict.set('Width', width);
+        dict.set('Height', height);
+        dict.set('ColorSpace', new PdfName(space));
+        dict.set('BitsPerComponent', 8);
+        if (packed) dict.set('Filter', new PdfName('FlateDecode'));
+        const raw = packed || data;
+        dict.set('Length', raw.length);
+        return { dict, raw };
+      };
+
+      const mask = await stream(alpha, 'DeviceGray');
+      const maskRef = add(new PdfStream(mask.dict, mask.raw));
+      const body = await stream(rgb, 'DeviceRGB');
+      body.dict.set('SMask', maskRef);
+      return add(new PdfStream(body.dict, body.raw));
+    }
+
+    /** 把簽名蓋到已經複製好的頁面上 */
+    async function applyStamps(copied, doc, page, rotate, stamps) {
+      const sign = window.SMSignLite;
+      if (!sign) throw new Error('缺少 sign-lite.js，無法蓋章');
+
+      const box = (doc.get(page, 'MediaBox') || [0, 0, 612, 792]).map((v) => Number(doc.resolve(v)) || 0);
+      const mx = Math.min(box[0], box[2]);
+      const my = Math.min(box[1], box[3]);
+      const pw = Math.abs(box[2] - box[0]) || 612;
+      const ph = Math.abs(box[3] - box[1]) || 792;
+      const view = displayMatrix(rotate, pw, ph, mx, my);
+
+      // Resources 可能被好幾頁共用，所以一律複製一份再改，不然會改到別頁
+      const res = new Map(asDict(resolveNew(copied.get('Resources'))));
+      const xobjects = new Map(asDict(resolveNew(res.get('XObject'))));
+      const gstates = new Map(asDict(resolveNew(res.get('ExtGState'))));
+
+      let seq = 0;
+      const unique = (prefix) => {
+        let name;
+        do { name = `${prefix}${seq++}`; } while (xobjects.has(name) || gstates.has(name));
+        return name;
+      };
+
+      // 點陣簽名的影像先建好 —— 壓縮是非同步的，而 pdfOps 是同步的
+      for (const stamp of stamps) {
+        const sig = stamp.sig;
+        if (!sig || sig.kind !== 'image') continue;
+        const key = sig.id || sig;
+        if (imageCache.has(key)) continue;
+        await sign.hydrate(sig);
+        const px = sign.pixels(sig);
+        imageCache.set(key, await addAlphaImage(px.rgba, px.width, px.height));
+      }
+
+      const useImage = (sig) => {
+        const ref = imageCache.get(sig.id || sig);
+        if (!ref) throw new Error('內部錯誤：簽名影像還沒建立');
+        const name = unique('SMsX');
+        xobjects.set(name, ref);
+        return name;
+      };
+      const useAlpha = (value) => {
+        const gs = new Map();
+        gs.set('Type', new PdfName('ExtGState'));
+        gs.set('ca', Math.round(value * 1000) / 1000);
+        gs.set('CA', Math.round(value * 1000) / 1000);
+        const name = unique('SMsG');
+        gstates.set(name, add(gs));
+        return name;
+      };
+
+      const chunks = [];
+      for (const stamp of stamps) {
+        const sig = stamp.sig;
+        if (!sig) continue;
+        const w = Math.max(1e-4, stamp.w == null ? 0.25 : stamp.w) * view.width;
+        const h = w / (sig.aspect || 1);
+        const target = {
+          x: (stamp.x == null ? 0.5 : stamp.x) * view.width - w / 2,
+          y: (stamp.y == null ? 0.5 : stamp.y) * view.height - h / 2,
+          w, h,
+        };
+        chunks.push(sign.pdfOps(sig, target, {
+          opacity: stamp.opacity, rotate: stamp.rotate, color: stamp.color, useImage, useAlpha,
+        }));
+      }
+
+      const body = chunks.filter(Boolean).join('\n');
+      if (!body) return;
+
+      if (xobjects.size) res.set('XObject', xobjects);
+      if (gstates.size) res.set('ExtGState', gstates);
+      copied.set('Resources', res);
+
+      // 原本的內容包在 q…Q 裡 —— 它可能留下改過的座標系或顏色，
+      // 不還原的話簽名會跑到奇怪的地方
+      const m = view.matrix.map(fmtNum).join(' ');
+      const before = streamOf('q\n');
+      const after = streamOf(`Q\nq\n${m} cm\n${body}\nQ\n`);
+
+      const contents = copied.get('Contents');
+      const resolved = resolveNew(contents);
+      const existing = Array.isArray(resolved) ? resolved : contents == null ? [] : [contents];
+      copied.set('Contents', [add(before), ...existing, add(after)]);
+    }
+
+    function streamOf(text) {
+      const raw = enc.encode(text);
+      const dict = new Map();
+      dict.set('Length', raw.length);
+      return new PdfStream(dict, raw);
+    }
+
     const kids = [];
     for (const pick of picks) {
       const doc = pick.doc;
@@ -729,6 +907,9 @@
       else copied.delete('Rotate');
 
       if (!copied.has('MediaBox')) copied.set('MediaBox', [0, 0, 612, 792]);
+      if (pick.stamps && pick.stamps.length) {
+        await applyStamps(copied, doc, page, rotate, pick.stamps);
+      }
       kids.push(add(copied));
     }
 
@@ -800,6 +981,6 @@
     compose,
     PdfName, PdfRef, PdfString, PdfStream,
     // 測試用
-    _internals: { Lexer, unpredict, inflate },
+    _internals: { Lexer, unpredict, inflate, displayMatrix },
   };
 })();

@@ -3,7 +3,7 @@ name_zh: 文件掃描郵件平台
 category: personal_tools
 progress: 100
 status: production
-last_updated: "2026-07-26"
+last_updated: "2026-07-28"
 next_milestone: "Android app rollout — signed release build & device testing"
 technologies:
   - Python
@@ -17,6 +17,6 @@ outputs:
   - mobile_app
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "91 API endpoints, 8 tool categories, 240 pytest + 57 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "v3.8.0 — canvas-first UI: every option moved into a contextual bottom toolbar that swaps between collage and per-image modes, detail panels slide up on demand; grid presets (2x2..4x4) with uniform cover cells, six frame styles, crop ratios; 57 browser tests"
+key_metrics: "91 API endpoints, 8 tool categories, 268 pytest + 225 browser tests, web + Android + offline-only APK from one frontend"
+recent_changes: "v3.13.0 — signatures and stamps: sign once with a finger, then drop it onto images or PDF pages on-device. Hand-drawn signatures are stored as strokes, not pixels, so stamping a PDF emits vector paths (a few KB, sharp at any zoom); imported photos of signatures or red chops get their white background keyed out and stamp via an image XObject with an SMask. Placement compensates for /Rotate — the viewer rotates the page but the content stream does not — verified by rendering the stamped page and counting ink per quadrant; 45 signature tests"
 

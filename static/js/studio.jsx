@@ -8,7 +8,10 @@
  *
  *   這樣一次只露出當下用得到的東西，圖片能佔掉絕大部分螢幕。
  */
-const { useState: stUseState, useRef: stUseRef, useEffect: stUseEffect, useCallback: stUseCallback } = React;
+const {
+  useState: stUseState, useRef: stUseRef, useEffect: stUseEffect,
+  useCallback: stUseCallback, useMemo: stUseMemo,
+} = React;
 
 const STUDIO_FORMATS = ['JPG', 'PNG', 'WebP'];
 
@@ -71,6 +74,10 @@ const STUDIO_TEXT_DEFAULT = {
   text: '', size: 0.07, color: '#ffffff', strokeColor: '#000000',
   stroke: 0.08, opacity: 1, spot: 7, tile: false, rotate: -30, gap: 0.12,
 };
+
+// 簽名的墨色。深藍排第一 —— 實體簽名筆多半是藍的，跟印刷的黑字分得開，
+// 一眼就看得出是後來簽上去的。紅色是給關防用的。
+const STUDIO_SIGN_INKS = ['#1a2b4a', '#111111', '#1f5f3f', '#b23b3b'];
 
 function studioBytes(n) {
   return window.API ? window.API.formatBytes(n) : `${n} B`;
@@ -463,6 +470,414 @@ function StudioRedactor({ item, onApply, onCancel }) {
   );
 }
 
+// ─── 簽名 / 印章 ───────────────────────────────────────────────
+
+/**
+ * 讀出存好的簽名，順便把點陣簽名的圖片先載進來 ——
+ * drawInto 是同步的，沒先載好就會畫出一片空白。
+ */
+function useSignatures() {
+  const [items, setItems] = stUseState([]);
+
+  const reload = stUseCallback(async (next) => {
+    const list = next || window.SMSignLite.list();
+    await Promise.all(list.map((s) => window.SMSignLite.hydrate(s).catch(() => s)));
+    setItems(list);
+    return list;
+  }, []);
+
+  stUseEffect(() => { reload(); }, [reload]);
+  return [items, reload];
+}
+
+/** 手寫簽名板 */
+function SignaturePad({ onDone, onCancel }) {
+  const canvasRef = stUseRef(null);
+  const strokesRef = stUseRef([]);
+  const drawingRef = stUseRef(null);
+  const [ink, setInk] = stUseState(STUDIO_SIGN_INKS[0]);
+  const [weight, setWeight] = stUseState(1);
+  const [empty, setEmpty] = stUseState(true);
+
+  // 畫布的像素尺寸要跟版面尺寸一致，不然筆跡會跟手指對不上
+  const fit = stUseCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    canvas.width = Math.max(1, Math.round(rect.width * dpr));
+    canvas.height = Math.max(1, Math.round(rect.height * dpr));
+    repaint();
+  }, []);
+
+  const repaint = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const lw = Math.max(1.5, canvas.width * 0.006 * weight);
+    ctx.strokeStyle = ink;
+    ctx.fillStyle = ink;
+    ctx.lineWidth = lw;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (const stroke of strokesRef.current) {
+      if (stroke.length === 1) {
+        ctx.beginPath();
+        ctx.arc(stroke[0].x, stroke[0].y, lw / 2, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+      ctx.beginPath();
+      ctx.moveTo(stroke[0].x, stroke[0].y);
+      for (let i = 1; i < stroke.length - 1; i++) {
+        const mid = { x: (stroke[i].x + stroke[i + 1].x) / 2, y: (stroke[i].y + stroke[i + 1].y) / 2 };
+        ctx.quadraticCurveTo(stroke[i].x, stroke[i].y, mid.x, mid.y);
+      }
+      const last = stroke[stroke.length - 1];
+      ctx.lineTo(last.x, last.y);
+      ctx.stroke();
+    }
+  };
+
+  stUseEffect(() => {
+    fit();
+    window.addEventListener('resize', fit);
+    return () => window.removeEventListener('resize', fit);
+  }, [fit]);
+  stUseEffect(repaint, [ink, weight]);
+
+  const posOf = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  };
+
+  const onDown = (e) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drawingRef.current = [posOf(e)];
+    strokesRef.current = [...strokesRef.current, drawingRef.current];
+    setEmpty(false);
+    repaint();
+  };
+
+  const onMove = (e) => {
+    if (!drawingRef.current) return;
+    e.preventDefault();
+    const p = posOf(e);
+    const stroke = drawingRef.current;
+    const last = stroke[stroke.length - 1];
+    // 太近的點不收 —— 手指停著不動時會塞進上百個幾乎重合的點
+    if (Math.hypot(p.x - last.x, p.y - last.y) < 1.2) return;
+    stroke.push(p);
+    repaint();
+  };
+
+  const onUp = () => { drawingRef.current = null; };
+
+  const clear = () => {
+    strokesRef.current = [];
+    drawingRef.current = null;
+    setEmpty(true);
+    repaint();
+  };
+
+  const done = () => {
+    try {
+      const canvas = canvasRef.current;
+      onDone(window.SMSignLite.fromStrokes(strokesRef.current, {
+        color: ink,
+        width: (canvas.width * 0.006 * weight) / Math.max(canvas.width, canvas.height),
+      }));
+    } catch (e) {
+      window.SMStore?.toast(e.message, 'err');
+    }
+  };
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{ flex: 1, minHeight: 0, padding: '14px', background: 'var(--paper-2)', display: 'flex' }}>
+        <div style={{
+          flex: 1, position: 'relative', background: '#fff', borderRadius: '10px',
+          border: '1.25px solid var(--line-soft)', overflow: 'hidden', touchAction: 'none',
+        }}>
+          {/* 簽名線 —— 有條線比較知道要寫多大、寫在哪 */}
+          <div style={{
+            position: 'absolute', left: '8%', right: '8%', bottom: '28%',
+            borderBottom: '1.5px dashed var(--line-soft)', pointerEvents: 'none',
+          }}/>
+          {empty && (
+            <div style={{
+              position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
+              justifyContent: 'center', color: 'var(--ink-3)', fontSize: '13px', pointerEvents: 'none',
+            }}>在這裡簽名</div>
+          )}
+          <canvas ref={canvasRef} style={{ display: 'block', width: '100%', height: '100%' }}
+            onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}/>
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 12px 4px', flexShrink: 0 }}>
+        <div className="row" style={{ gap: '8px', alignItems: 'center' }}>
+          {STUDIO_SIGN_INKS.map((c) => (
+            <button key={c} onClick={() => setInk(c)} aria-label={`墨色 ${c}`} style={{
+              width: '24px', height: '24px', borderRadius: '50%', background: c, flexShrink: 0,
+              border: ink === c ? '2.5px solid var(--mint-3)' : '1.25px solid var(--line-soft)',
+            }}/>
+          ))}
+          <span style={{ fontSize: '11px', color: 'var(--ink-3)', flexShrink: 0 }}>粗細</span>
+          <input type="range" min="0.5" max="2.5" step="0.1" value={weight} style={{ flex: 1, minWidth: '60px' }}
+            onChange={(e) => setWeight(parseFloat(e.target.value))}/>
+        </div>
+      </div>
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
+          <BarBtn ic="✕" label="取消" onClick={onCancel}/>
+          <BarBtn ic="🗑" label="清除" disabled={empty} onClick={clear}/>
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="✓" label="存起來" accent disabled={empty} onClick={done}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 擺放簽名 —— 把簽名疊在背景圖上拖到定位。
+ *
+ * 背景給的是一張圖（成品預覽 / PDF 頁面縮圖），簽名用 <img> 疊上去，
+ * 位置與大小都存相對值，所以在小小的預覽上擺好，輸出到原尺寸也對得上。
+ */
+function SignaturePlacer({ src, aspect, signatures, initial, onApply, onCancel }) {
+  const [stamps, setStamps] = stUseState(() => initial || []);
+  const [sel, setSel] = stUseState(() => (initial && initial.length ? 0 : -1));
+  const dragRef = stUseRef(null);
+  const wrapRef = stUseRef(null);
+
+  const previews = stUseMemo(() => {
+    const out = {};
+    for (const s of signatures) {
+      try { out[s.id] = window.SMSignLite.preview(s, 320); } catch (e) { /* 壞掉的就不顯示 */ }
+    }
+    return out;
+  }, [signatures]);
+
+  const byId = (id) => signatures.find((s) => s.id === id);
+  const current = sel >= 0 ? stamps[sel] : null;
+
+  const place = (sig) => {
+    setStamps((prev) => [...prev, { sigId: sig.id, x: 0.5, y: 0.75, w: 0.32, opacity: 1 }]);
+    setSel(stamps.length);
+  };
+
+  const patch = (changes) => setStamps((prev) => prev.map((s, i) => (i === sel ? { ...s, ...changes } : s)));
+
+  const onDown = (i) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = wrapRef.current.getBoundingClientRect();
+    setSel(i);
+    dragRef.current = {
+      i,
+      dx: stamps[i].x - (e.clientX - rect.left) / rect.width,
+      dy: stamps[i].y - (e.clientY - rect.top) / rect.height,
+    };
+  };
+
+  const onMove = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.preventDefault();
+    const rect = wrapRef.current.getBoundingClientRect();
+    const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width + drag.dx));
+    const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height + drag.dy));
+    setStamps((prev) => prev.map((s, i) => (i === drag.i ? { ...s, x, y } : s)));
+  };
+
+  const onUp = () => { dragRef.current = null; };
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '14px', background: 'var(--paper-2)', overflow: 'hidden',
+      }}>
+        <div ref={wrapRef} style={{
+          position: 'relative', maxWidth: '100%', maxHeight: '100%',
+          aspectRatio: String(aspect || 1), touchAction: 'none',
+          boxShadow: '0 1px 6px rgba(0,0,0,0.12)', background: '#fff',
+        }} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}
+          onClick={() => setSel(-1)}>
+          <img src={src} alt="" style={{ display: 'block', width: '100%', height: '100%', objectFit: 'contain' }}/>
+          {stamps.map((s, i) => {
+            const sig = byId(s.sigId);
+            if (!sig || !previews[s.sigId]) return null;
+            return (
+              <img key={i} src={previews[s.sigId]} alt="" draggable={false}
+                onPointerDown={onDown(i)}
+                // 沒擋掉的話 click 會冒泡到底圖，剛選好 / 剛拖完就馬上被取消選取
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute',
+                  left: `${s.x * 100}%`, top: `${s.y * 100}%`,
+                  width: `${s.w * 100}%`, aspectRatio: String(sig.aspect || 1),
+                  transform: `translate(-50%, -50%) rotate(${s.rotate || 0}deg)`,
+                  opacity: s.opacity == null ? 1 : s.opacity,
+                  outline: i === sel ? '1.5px dashed var(--mint-3)' : 'none',
+                  outlineOffset: '3px', cursor: 'move', touchAction: 'none',
+                }}/>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 選好的那一枚才有細調；沒選就是挑一枚放上去 */}
+      <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 12px 4px', flexShrink: 0 }}>
+        {current ? (
+          <>
+            <div className="row" style={{ gap: '8px', alignItems: 'center' }}>
+              <span style={{ fontSize: '11px', color: 'var(--ink-3)', width: '30px', flexShrink: 0 }}>大小</span>
+              <input type="range" min="0.06" max="0.9" step="0.01" value={current.w} style={{ flex: 1 }}
+                onChange={(e) => patch({ w: parseFloat(e.target.value) })}/>
+            </div>
+            <div className="row" style={{ gap: '8px', alignItems: 'center', marginTop: '2px' }}>
+              <span style={{ fontSize: '11px', color: 'var(--ink-3)', width: '30px', flexShrink: 0 }}>濃度</span>
+              <input type="range" min="0.15" max="1" step="0.05" value={current.opacity == null ? 1 : current.opacity}
+                style={{ flex: 1 }} onChange={(e) => patch({ opacity: parseFloat(e.target.value) })}/>
+            </div>
+          </>
+        ) : (
+          <div className="row" style={{ gap: '6px', overflowX: 'auto', alignItems: 'center' }}>
+            {signatures.length ? signatures.map((s) => (
+              <button key={s.id} onClick={() => place(s)} style={{
+                flexShrink: 0, height: '38px', padding: '3px 8px', borderRadius: '8px',
+                border: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+              }}>
+                <img src={previews[s.id]} alt={s.name || '簽名'} style={{ height: '100%', display: 'block' }}/>
+              </button>
+            )) : (
+              <span style={{ fontSize: '11px', color: 'var(--ink-3)' }}>還沒有簽名 —— 先回上一層建一個</span>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
+          <BarBtn ic="✕" label="取消" onClick={onCancel}/>
+          {current ? (
+            <>
+              <BarBtn ic="↺" label="左傾" onClick={() => patch({ rotate: (current.rotate || 0) - 5 })}/>
+              <BarBtn ic="↻" label="右傾" onClick={() => patch({ rotate: (current.rotate || 0) + 5 })}/>
+              <BarBtn ic="🗑" label="移除"
+                onClick={() => { setStamps((prev) => prev.filter((_, i) => i !== sel)); setSel(-1); }}/>
+              <BarBtn ic="＋" label="再加" onClick={() => setSel(-1)}/>
+            </>
+          ) : (
+            <BarBtn ic="🗑" label="全清" disabled={!stamps.length}
+              onClick={() => { setStamps([]); setSel(-1); }}/>
+          )}
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="✓" label="套用" accent onClick={() => onApply(stamps)}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 簽名庫：列出存好的簽名，也是新增 / 刪除的入口 */
+function SignatureSheet({ signatures, onReload, onClose, onPlace, onDraw }) {
+  const fileRef = stUseRef(null);
+  const [mode, setMode] = stUseState('keep');
+
+  const importImage = async (file) => {
+    if (!file) return;
+    try {
+      const img = await new Promise((resolve, reject) => {
+        const el = new Image();
+        el.onload = () => resolve(el);
+        el.onerror = () => reject(new Error('讀不到這張圖片'));
+        el.src = URL.createObjectURL(file);
+      });
+      const sig = window.SMSignLite.fromImage(img, { mode });
+      URL.revokeObjectURL(img.src);
+      const { items } = window.SMSignLite.save({ ...sig, name: file.name.replace(/\.[^.]+$/, '') });
+      await onReload(items);
+      window.SMStore?.toast('已加入簽名庫', 'ok');
+    } catch (e) {
+      window.SMStore?.toast(e.message, 'err');
+    }
+  };
+
+  return (
+    <StudioSheet title="簽名 / 印章" onClose={onClose}>
+      {signatures.length ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: '8px' }}>
+          {signatures.map((s) => (
+            <div key={s.id} style={{
+              position: 'relative', borderRadius: '10px', padding: '6px',
+              border: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+            }}>
+              <button onClick={() => onPlace(s)} style={{
+                display: 'block', width: '100%', height: '46px', background: 'transparent', border: 'none',
+              }}>
+                <img src={window.SMSignLite.preview(s, 300)} alt={s.name || '簽名'}
+                  style={{ maxWidth: '100%', maxHeight: '100%', display: 'block', margin: '0 auto' }}/>
+              </button>
+              <button aria-label="刪除" onClick={async () => onReload(window.SMSignLite.remove(s.id))}
+                style={{
+                  position: 'absolute', top: '-6px', right: '-6px', width: '20px', height: '20px',
+                  borderRadius: '50%', border: '1px solid var(--line-soft)', background: 'var(--paper)',
+                  fontSize: '11px', lineHeight: 1, color: 'var(--ink-3)',
+                }}>✕</button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={{ fontSize: '12px', color: 'var(--ink-3)', padding: '2px 0 8px' }}>
+          還沒有簽名。手寫一個，或拍一張紙上的簽名 / 關防匯入 —— 白底會自動去掉。
+        </div>
+      )}
+
+      <div className="row" style={{ gap: '6px', marginTop: '10px', alignItems: 'center' }}>
+        <button className="btn primary" style={{ flex: 1 }} onClick={onDraw}>✍️ 手寫</button>
+        <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }}
+          onChange={(e) => { importImage(e.target.files[0]); e.target.value = ''; }}/>
+        <button className="btn" style={{ flex: 1 }} onClick={() => fileRef.current?.click()}>🖼 匯入圖片</button>
+      </div>
+      <div className="row" style={{ gap: '6px', marginTop: '6px', alignItems: 'center' }}>
+        <span style={{ fontSize: '11px', color: 'var(--ink-3)', flexShrink: 0 }}>匯入時</span>
+        <button className={`chip ${mode === 'keep' ? 'on' : ''}`} onClick={() => setMode('keep')}>保留原色</button>
+        <button className={`chip ${mode === 'ink' ? 'on' : ''}`} onClick={() => setMode('ink')}>轉成墨色</button>
+      </div>
+      <div style={{ fontSize: '10.5px', color: 'var(--ink-3)', marginTop: '4px' }}>
+        紅色關防用「保留原色」；鉛筆或原子筆寫得太淡就用「轉成墨色」
+      </div>
+    </StudioSheet>
+  );
+}
+
 // ─── 編輯 / 拼接 ───────────────────────────────────────────────
 function StudioEditor() {
   const [items, setItems] = stUseState([]);
@@ -471,6 +886,10 @@ function StudioEditor() {
   const [busy, setBusy] = stUseState('');
   const [cropping, setCropping] = stUseState(false);
   const [redacting, setRedacting] = stUseState(false);
+  // null | { mode:'draw' } | { mode:'place', src, aspect }
+  const [signing, setSigning] = stUseState(null);
+  const [stamps, setStamps] = stUseState([]);
+  const [signatures, reloadSignatures] = useSignatures();
   const [text, setText] = stUseState(STUDIO_TEXT_DEFAULT);
   const [layout, setLayout] = stUseState({
     preset: 'vertical', direction: 'vertical', columns: 0, fill: 'contain',
@@ -488,7 +907,11 @@ function StudioEditor() {
   const textLayer = text.text.trim()
     ? [{ ...text, ...(text.tile ? {} : STUDIO_TEXT_SPOTS[text.spot]) }]
     : null;
-  const composeOpts = { ...layout, frame, texts: textLayer };
+  // 存的是簽名 id，畫的時候才對回簽名本體 —— 簽名被刪掉時不會留下壞掉的圖層
+  const signLayer = stamps
+    .map((s) => ({ ...s, sig: signatures.find((x) => x.id === s.sigId) }))
+    .filter((s) => s.sig);
+  const composeOpts = { ...layout, frame, texts: textLayer, signatures: signLayer };
 
   // 任何狀態變動就重畫預覽。用縮圖算，所以按一下就看得到，不會卡。
   stUseEffect(() => {
@@ -512,9 +935,9 @@ function StudioEditor() {
     } catch (e) {
       console.error('[Studio] 預覽失敗', e);
     }
-    // cropping / redacting 也要列進來 —— 離開全螢幕編輯器後 canvas 是新的 DOM 元素，
-    // 不重畫就會停在瀏覽器給的預設 300×150 空白畫布。
-  }, [items, layout, frame, sel, cropping, redacting, text]);
+    // cropping / redacting / signing 也要列進來 —— 離開全螢幕編輯器後 canvas 是新的
+    // DOM 元素，不重畫就會停在瀏覽器給的預設 300×150 空白畫布。
+  }, [items, layout, frame, sel, cropping, redacting, signing, text, stamps, signatures]);
 
   const addFiles = async (files) => {
     if (!files || !files.length) return;
@@ -563,6 +986,7 @@ function StudioEditor() {
     setItems([]);
     setSel(-1);
     setSheet(null);
+    setStamps([]);
   };
 
   /** 點畫布選圖 —— 直接點你要改的那張，比在清單裡找快 */
@@ -586,6 +1010,21 @@ function StudioEditor() {
       columns: preset.columns || 0,
       fill: preset.fill || 'contain',
     }));
+  };
+
+  /**
+   * 進入擺放畫面。背景用「不含簽名」的成品預覽 ——
+   * 簽名是疊在上面拖的，畫進背景裡就會看到兩份。
+   */
+  const openPlacer = () => {
+    try {
+      const bg = window.SMImageLocal.composeToCanvas(
+        items, { ...composeOpts, signatures: null }, { usePreview: true });
+      setSheet(null);
+      setSigning({ mode: 'place', src: bg.toDataURL('image/jpeg', 0.85), aspect: bg.width / bg.height });
+    } catch (e) {
+      window.SMStore?.toast('無法開啟擺放畫面：' + e.message, 'err');
+    }
   };
 
   const save = async () => {
@@ -834,6 +1273,12 @@ function StudioEditor() {
         </button>
       </StudioSheet>
     ),
+    sign: (
+      <SignatureSheet signatures={signatures} onReload={reloadSignatures}
+        onClose={() => setSheet(null)}
+        onDraw={() => { setSheet(null); setSigning({ mode: 'draw' }); }}
+        onPlace={openPlacer}/>
+    ),
   };
 
   if (cropping && current) {
@@ -849,6 +1294,32 @@ function StudioEditor() {
       <StudioRedactor item={current}
         onCancel={() => setRedacting(false)}
         onApply={(boxes) => { patch({ redactions: boxes }); setRedacting(false); }}/>
+    );
+  }
+
+  if (signing?.mode === 'draw') {
+    return (
+      <SignaturePad
+        onCancel={() => setSigning(null)}
+        onDone={async (sig) => {
+          try {
+            const { items: saved } = window.SMSignLite.save(sig);
+            await reloadSignatures(saved);
+            openPlacer();
+          } catch (e) {
+            window.SMStore?.toast(e.message, 'err');
+            setSigning(null);
+          }
+        }}/>
+    );
+  }
+
+  if (signing?.mode === 'place') {
+    return (
+      <SignaturePlacer src={signing.src} aspect={signing.aspect}
+        signatures={signatures} initial={stamps}
+        onCancel={() => setSigning(null)}
+        onApply={(next) => { setStamps(next); setSigning(null); }}/>
     );
   }
 
@@ -911,6 +1382,8 @@ function StudioEditor() {
                 onClick={() => setSheet(sheet === 'gap' ? null : 'gap')}/>
               <BarBtn ic="Ｔ" label="文字" on={sheet === 'text'}
                 onClick={() => setSheet(sheet === 'text' ? null : 'text')}/>
+              <BarBtn ic="✍" label="簽名" on={sheet === 'sign' || !!stamps.length}
+                onClick={() => setSheet(sheet === 'sign' ? null : 'sign')}/>
               <input ref={addRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
                 onChange={(e) => { addFiles(Array.from(e.target.files)); e.target.value = ''; }}/>
               <BarBtn ic="＋" label="加圖" onClick={() => addRef.current?.click()}/>
@@ -1354,6 +1827,10 @@ function StudioPages() {
   const [sel, setSel] = stUseState(-1);
   const [busy, setBusy] = stUseState(null);
   const [result, setResult] = stUseState(null);
+  const [sheet, setSheet] = stUseState(null);
+  // null | { mode:'draw' } | { mode:'place', src, aspect, at }
+  const [signing, setSigning] = stUseState(null);
+  const [signatures, reloadSignatures] = useSignatures();
   const pickRef = stUseRef(null);
 
   const add = stUseCallback(async (files) => {
@@ -1370,7 +1847,7 @@ function StudioPages() {
         setSources((prev) => [...prev, { name: file.name, doc }]);
         setPages((prev) => [
           ...prev,
-          ...doc.pages.map((_, i) => ({ src, page: i, rotate: 0 })),
+          ...doc.pages.map((_, i) => ({ src, page: i, rotate: 0, stamps: [] })),
         ]);
         setBusy({ percent: 40, message: `產生 ${file.name} 的縮圖…` });
         await window.SMDocLocal.pdfThumbnails(bytes.slice(), { maxWidth: 200 }, (i, url, total) => {
@@ -1405,19 +1882,48 @@ function StudioPages() {
     setResult(null);
   };
 
+  /**
+   * 進入擺放畫面。這一頁單獨畫大一點 ——
+   * 縮圖列的 200px 用來對準簽名欄的橫線太粗糙了。
+   */
+  const openPlacer = stUseCallback(async (at) => {
+    const target = pages[at];
+    if (!target) return;
+    setSheet(null);
+    setBusy({ percent: 30, message: '準備頁面…' });
+    try {
+      const doc = sources[target.src].doc;
+      // slice：pdf.js 會接管傳進去的緩衝區，直接給就會把解析器腳下的位元組抽掉
+      const img = await window.SMDocLocal.pdfPageImage(doc.bytes.slice(), target.page, {
+        rotate: target.rotate, maxWidth: 1000,
+      });
+      setSigning({ mode: 'place', src: img.url, aspect: img.width / img.height, at });
+    } catch (e) {
+      window.SMStore?.toast('讀取頁面失敗：' + e.message, 'err');
+    }
+    setBusy(null);
+  }, [pages, sources]);
+
   const save = stUseCallback(async () => {
     if (!pages.length) return;
     setBusy({ percent: 20, message: '組合 PDF…' });
     try {
-      const blob = await window.SMPDFLite.compose(
-        pages.map((p) => ({ doc: sources[p.src].doc, page: p.page, rotate: p.rotate })));
+      const blob = await window.SMPDFLite.compose(pages.map((p) => ({
+        doc: sources[p.src].doc,
+        page: p.page,
+        rotate: p.rotate,
+        // 存的是 id，輸出時才對回簽名本體 —— 中途把簽名刪掉不會產出破圖
+        stamps: (p.stamps || [])
+          .map((s) => ({ ...s, sig: signatures.find((x) => x.id === s.sigId) }))
+          .filter((s) => s.sig),
+      })));
       const stem = (sources[0]?.name || '文件').replace(/\.[^.]+$/, '');
       setResult({ blob, name: `${stem}-編輯後.pdf` });
     } catch (e) {
       window.SMStore?.toast('組合失敗：' + e.message, 'err');
     }
     setBusy(null);
-  }, [pages, sources]);
+  }, [pages, sources, signatures]);
 
   if (!pages.length && !busy) {
     return (
@@ -1433,6 +1939,36 @@ function StudioPages() {
   }
 
   const current = sel >= 0 ? pages[sel] : null;
+
+  if (signing?.mode === 'draw') {
+    return (
+      <SignaturePad
+        onCancel={() => setSigning(null)}
+        onDone={async (sig) => {
+          try {
+            const { items } = window.SMSignLite.save(sig);
+            await reloadSignatures(items);
+            openPlacer(sel);
+          } catch (e) {
+            window.SMStore?.toast(e.message, 'err');
+            setSigning(null);
+          }
+        }}/>
+    );
+  }
+
+  if (signing?.mode === 'place') {
+    return (
+      <SignaturePlacer src={signing.src} aspect={signing.aspect}
+        signatures={signatures} initial={pages[signing.at]?.stamps || []}
+        onCancel={() => setSigning(null)}
+        onApply={(stamps) => {
+          setPages((prev) => prev.map((p, i) => (i === signing.at ? { ...p, stamps } : p)));
+          setResult(null);
+          setSigning(null);
+        }}/>
+    );
+  }
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -1469,6 +2005,8 @@ function StudioPages() {
                 </div>
                 <span style={{ fontSize: '10px', color: on ? 'var(--mint-4)' : 'var(--ink-3)' }}>
                   {i + 1}{sources.length > 1 ? ` · ${String.fromCharCode(65 + p.src)}` : ''}
+                  {/* 蓋過章的頁面標一下 —— 三十頁的文件不標就找不到簽在哪 */}
+                  {p.stamps?.length ? ' ✍' : ''}
                 </span>
               </button>
             );
@@ -1500,6 +2038,13 @@ function StudioPages() {
         </div>
       )}
 
+      {sheet === 'sign' && current && (
+        <SignatureSheet signatures={signatures} onReload={reloadSignatures}
+          onClose={() => setSheet(null)}
+          onDraw={() => { setSheet(null); setSigning({ mode: 'draw' }); }}
+          onPlace={() => openPlacer(sel)}/>
+      )}
+
       <div className="row" style={{
         borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
         padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
@@ -1509,6 +2054,8 @@ function StudioPages() {
             <>
               <BarBtn ic="↺" label="左轉" onClick={() => patch({ rotate: current.rotate - 90 })}/>
               <BarBtn ic="↻" label="右轉" onClick={() => patch({ rotate: current.rotate + 90 })}/>
+              <BarBtn ic="✍" label="簽名" on={sheet === 'sign' || !!current.stamps?.length}
+                onClick={() => setSheet(sheet === 'sign' ? null : 'sign')}/>
               <BarBtn ic="←" label="前移" disabled={sel === 0} onClick={() => move(-1)}/>
               <BarBtn ic="→" label="後移" disabled={sel === pages.length - 1} onClick={() => move(1)}/>
               <BarBtn ic="🗑" label="刪除" onClick={remove}/>
@@ -1517,7 +2064,9 @@ function StudioPages() {
             <>
               <BarBtn ic="➕" label="加檔" onClick={() => pickRef.current?.click()}/>
               <BarBtn ic="🗑" label="清空"
-                onClick={() => { setSources([]); setPages([]); setThumbs({}); setSel(-1); setResult(null); }}/>
+                onClick={() => {
+                  setSources([]); setPages([]); setThumbs({}); setSel(-1); setResult(null); setSheet(null);
+                }}/>
             </>
           )}
         </div>
@@ -1579,7 +2128,8 @@ function Studio() {
 Object.assign(window, {
   Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages,
   StudioCropper, StudioRedactor, DocPreview,
+  SignaturePad, SignaturePlacer, SignatureSheet, useSignatures,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,
-  STUDIO_REDACT_STYLES, STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT,
+  STUDIO_REDACT_STYLES, STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT, STUDIO_SIGN_INKS,
 });
