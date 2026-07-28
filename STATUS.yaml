@@ -4,7 +4,7 @@ category: personal_tools
 progress: 100
 status: production
 last_updated: "2026-07-28"
-next_milestone: "Android app rollout — signed release build & device testing"
+next_milestone: "GitHub Release step so the APK is a one-tap install; then live viewfinder (camera preview with edge overlay + auto-shutter)"
 technologies:
   - Python
   - FastAPI

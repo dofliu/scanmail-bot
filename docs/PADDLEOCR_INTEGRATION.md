@@ -69,7 +69,7 @@ ScanMail+ 的設計合約要求 `FormField.bbox` 一律為 **PDF points** (1pt =
 
 ## 4. 實作藍圖
 
-將修改 [paddle_structure.py](file:///D:/Project_CodingSimulation/PersonalHelper/scanmail_bot/app/services/form_fill/backends/paddle_structure.py) 中的 `detect` 函數：
+將修改 [paddle_structure.py](../app/services/form_fill/backends/paddle_structure.py) 中的 `detect` 函數：
 
 ```python
 import io
@@ -150,7 +150,7 @@ def detect(
 
 ## 5. 系統熱機設計 (Warm-up)
 
-PaddleOCR 的模型檔在首次 instantiation 時會自動從網路上下載（約數十 MB）。為了避免使用者首次發送請求時發生 HTTP 逾時，應在 `main.py` 的 [lifespan](file:///D:/Project_CodingSimulation/PersonalHelper/scanmail_bot/main.py#L41-L54) 中加入熱機機制：
+PaddleOCR 的模型檔在首次 instantiation 時會自動從網路上下載（約數十 MB）。為了避免使用者首次發送請求時發生 HTTP 逾時，應在 `main.py` 的 [lifespan](../main.py) 中加入熱機機制：
 
 ```python
 # main.py 的 lifespan
@@ -175,6 +175,6 @@ async def lifespan(app: FastAPI):
 ## 6. 驗證與測試計畫
 
 ### 單元測試
-建立 [test_paddle_ocr.py](file:///D:/Project_CodingSimulation/PersonalHelper/scanmail_bot/tests/test_paddle_ocr.py) 測試：
+建立 [test_paddle_ocr.py](../tests/test_paddle_ocr.py) 測試：
 1.  **Mock 測試**: 當 `paddleocr` 未安裝時，驗證 `paddle_structure.is_available()` 正確回傳 `False`。
 2.  **整合測試**: 在安裝了 `paddleocr` 的測試環境中，傳入一張帶有 "姓名：____" 的測試圖片，驗證是否能偵測出欄位，且其 bbox 座標確實落在 PDF points 的合理範圍內。
