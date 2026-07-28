@@ -470,6 +470,161 @@ function StudioRedactor({ item, onApply, onCancel }) {
   );
 }
 
+// ─── 掃描：邊界偵測 + 透視校正 ──────────────────────────────────
+
+/**
+ * 拉正畫面。
+ *
+ * 進來就先自動偵測，抓到就直接把框放好，沒抓到（或信心不足）就退成一個
+ * 內縮的方框請使用者自己拉 —— **亂裁一通比不裁更糟**，使用者不會發現。
+ *
+ * 框畫在「原圖」上而不是旋轉之後的畫面：拉正是掃描流程的第一步，
+ * 這時多半還沒轉過；而且拉正會換掉原圖，把旋轉也一起烘進去只會更難懂。
+ */
+function StudioDeskew({ item, onApply, onCancel, onRevert }) {
+  const canvasRef = stUseRef(null);
+  const wrapRef = stUseRef(null);
+  const dragRef = stUseRef(null);
+  const [corners, setCorners] = stUseState(null);
+  const [info, setInfo] = stUseState({ busy: true });
+
+  // 偵測跑在縮圖上（480px 工作解析度），所以按下去就有結果
+  stUseEffect(() => {
+    let alive = true;
+    const src = item.preview;
+    const canvas = canvasRef.current;
+    if (canvas) {
+      canvas.width = src.width;
+      canvas.height = src.height;
+      canvas.getContext('2d').drawImage(src, 0, 0);
+    }
+    // 讓畫面先畫出來再算，不然點下去會愣住一下
+    const timer = setTimeout(() => {
+      if (!alive) return;
+      try {
+        const res = window.SMScanLite.detect(src);
+        const rel = res.corners.map((p) => ({
+          x: Math.max(0, Math.min(1, p.x / src.width)),
+          y: Math.max(0, Math.min(1, p.y / src.height)),
+        }));
+        setCorners(rel);
+        setInfo({ confidence: res.confidence, method: res.method });
+      } catch (e) {
+        setCorners([
+          { x: 0.06, y: 0.06 }, { x: 0.94, y: 0.06 },
+          { x: 0.94, y: 0.94 }, { x: 0.06, y: 0.94 },
+        ]);
+        setInfo({ confidence: 0, error: e.message });
+      }
+    }, 30);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [item]);
+
+  const posOf = (e) => {
+    const box = wrapRef.current.getBoundingClientRect();
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - box.left) / box.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - box.top) / box.height)),
+    };
+  };
+
+  const onDown = (e) => {
+    if (!corners) return;
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const p = posOf(e);
+    // 抓最近的角，但太遠就不算 —— 免得點空白處把框整個扯過去
+    let best = -1;
+    let bestD = Infinity;
+    corners.forEach((c, i) => {
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if (d < bestD) { bestD = d; best = i; }
+    });
+    dragRef.current = bestD < 0.18 ? best : null;
+    if (dragRef.current !== null) {
+      setCorners((prev) => prev.map((c, i) => (i === best ? p : c)));
+    }
+  };
+
+  const onMove = (e) => {
+    if (dragRef.current === null || dragRef.current === undefined) return;
+    e.preventDefault();
+    const p = posOf(e);
+    const i = dragRef.current;
+    setCorners((prev) => prev.map((c, j) => (j === i ? p : c)));
+  };
+
+  const onUp = () => { dragRef.current = null; };
+
+  const low = info.confidence != null && info.confidence < (window.SMScanLite?.MIN_CONFIDENCE ?? 0.45);
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '14px', background: 'var(--paper-2)', overflow: 'hidden',
+      }}>
+        <div ref={wrapRef} style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', touchAction: 'none' }}
+          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+          <canvas ref={canvasRef}
+            style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', userSelect: 'none' }}/>
+          {corners && (
+            <>
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{
+              position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none',
+            }}>
+              {/* 框外壓暗：外框加內框、evenodd 挖洞，比疊一層 clip-path 好懂也不會歪 */}
+              <path fillRule="evenodd" fill="rgba(0,0,0,0.45)"
+                d={`M0,0 H100 V100 H0 Z M${corners.map((c) => `${c.x * 100},${c.y * 100}`).join(' L')} Z`}/>
+              <polygon points={corners.map((c) => `${c.x * 100},${c.y * 100}`).join(' ')}
+                fill="none" stroke={low ? '#e0a33a' : '#4fc38a'} strokeWidth="2"
+                vectorEffect="non-scaling-stroke"/>
+            </svg>
+              {corners.map((c, i) => (
+                <div key={i} style={{
+                  position: 'absolute', left: `${c.x * 100}%`, top: `${c.y * 100}%`,
+                  width: '26px', height: '26px', marginLeft: '-13px', marginTop: '-13px',
+                  borderRadius: '50%', border: `2.5px solid ${low ? '#e0a33a' : '#4fc38a'}`,
+                  background: 'rgba(255,255,255,0.35)', pointerEvents: 'none',
+                }}/>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 14px 4px', flexShrink: 0 }}>
+        <div style={{ fontSize: '11.5px', color: low ? 'var(--warn, #b8862d)' : 'var(--ink-3)' }}>
+          {info.busy && !corners ? '偵測中…'
+            : info.error ? `偵測失敗：${info.error} —— 請自己拉四個角`
+            : low ? '⚠ 沒把握抓對 —— 請確認四個角，需要的話拖曳調整'
+            : '✓ 抓到文件邊界了，不對的話可以拖曳四個角'}
+        </div>
+      </div>
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
+          <BarBtn ic="✕" label="取消" onClick={onCancel}/>
+          <BarBtn ic="⛶" label="全選" onClick={() => setCorners([
+            { x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 },
+          ])}/>
+          {/* 拉正是破壞性的，所以一定要留一條回得去的路 */}
+          {item.original && <BarBtn ic="⟲" label="還原原圖" onClick={onRevert}/>}
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="✓" label="拉正" accent disabled={!corners} onClick={() => onApply(corners)}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── 簽名 / 印章 ───────────────────────────────────────────────
 
 /**
@@ -886,6 +1041,7 @@ function StudioEditor() {
   const [busy, setBusy] = stUseState('');
   const [cropping, setCropping] = stUseState(false);
   const [redacting, setRedacting] = stUseState(false);
+  const [deskewing, setDeskewing] = stUseState(false);
   // null | { mode:'draw' } | { mode:'place', src, aspect }
   const [signing, setSigning] = stUseState(null);
   const [stamps, setStamps] = stUseState([]);
@@ -935,9 +1091,9 @@ function StudioEditor() {
     } catch (e) {
       console.error('[Studio] 預覽失敗', e);
     }
-    // cropping / redacting / signing 也要列進來 —— 離開全螢幕編輯器後 canvas 是新的
-    // DOM 元素，不重畫就會停在瀏覽器給的預設 300×150 空白畫布。
-  }, [items, layout, frame, sel, cropping, redacting, signing, text, stamps, signatures]);
+    // cropping / redacting / deskewing / signing 也要列進來 —— 離開全螢幕編輯器後
+    // canvas 是新的 DOM 元素，不重畫就會停在瀏覽器給的預設 300×150 空白畫布。
+  }, [items, layout, frame, sel, cropping, redacting, deskewing, signing, text, stamps, signatures]);
 
   const addFiles = async (files) => {
     if (!files || !files.length) return;
@@ -1297,6 +1453,27 @@ function StudioEditor() {
     );
   }
 
+  if (deskewing && current) {
+    return (
+      <StudioDeskew item={current}
+        onCancel={() => setDeskewing(false)}
+        onRevert={() => {
+          setItems((prev) => prev.map((it, i) =>
+            (i === sel ? window.SMImageLocal.undoDeskew(it) : it)));
+          setDeskewing(false);
+        }}
+        onApply={(corners) => {
+          try {
+            setItems((prev) => prev.map((it, i) =>
+              (i === sel ? window.SMImageLocal.deskewItem(it, corners) : it)));
+          } catch (e) {
+            window.SMStore?.toast('拉正失敗：' + e.message, 'err');
+          }
+          setDeskewing(false);
+        }}/>
+    );
+  }
+
   if (signing?.mode === 'draw') {
     return (
       <SignaturePad
@@ -1366,6 +1543,8 @@ function StudioEditor() {
               <BarBtn ic="↻" label="右轉" onClick={() => rotate(90)}/>
               <BarBtn ic="⇋" label="水平" on={current.flipH} onClick={() => flip('h')}/>
               <BarBtn ic="⇅" label="垂直" on={current.flipV} onClick={() => flip('v')}/>
+              <BarBtn ic="⌗" label="拉正" on={!!current.original}
+                onClick={() => { setSheet(null); setDeskewing(true); }}/>
               <BarBtn ic="⛶" label="裁切" onClick={() => { setSheet(null); setCropping(true); }}/>
               <BarBtn ic="▩" label="打碼" onClick={() => { setSheet(null); setRedacting(true); }}/>
               <BarBtn ic="🎚" label="調整" on={sheet === 'adjust'}
@@ -2127,7 +2306,7 @@ function Studio() {
 
 Object.assign(window, {
   Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages,
-  StudioCropper, StudioRedactor, DocPreview,
+  StudioCropper, StudioRedactor, StudioDeskew, DocPreview,
   SignaturePad, SignaturePlacer, SignatureSheet, useSignatures,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,

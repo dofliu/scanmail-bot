@@ -274,6 +274,63 @@ check('選了濾鏡之後預覽會重畫',
 await page.locator('.pill:has-text("完成")').click();
 await page.waitForTimeout(200);
 
+// ── 拉正（邊界偵測 + 透視校正）──────────────────────────
+await page.locator('button:has-text("拉正")').click();
+await page.waitForTimeout(900);   // 等偵測跑完
+check('拉正畫面出現，四個角都可以拖',
+  (await page.locator('.m-screen svg polygon').count()) === 1 &&
+  /抓到文件邊界|沒把握|偵測失敗/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+// 這批測資是純色塊，本來就不該被當成文件 —— 要看到「沒把握」而不是硬給答案
+check('抓不到文件時老實說沒把握，而不是硬裁',
+  /沒把握/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+// 拉正畫面裡的畫布就是這一張的預覽，所以量它才是量到「這張圖本身」——
+// 編輯畫面的畫布是三張的拼貼，格狀版面下尺寸固定，換了圖也看不出來
+const beforeDeskew = await canvasSize();
+
+// 把左上角往內拖一大段，讓校正結果明顯不同於原圖
+const deskewBox = await page.locator('canvas').first().boundingBox();
+await page.mouse.move(deskewBox.x + deskewBox.width * 0.06, deskewBox.y + deskewBox.height * 0.06);
+await page.mouse.down();
+await page.mouse.move(deskewBox.x + deskewBox.width * 0.35, deskewBox.y + deskewBox.height * 0.3, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(250);
+
+await page.locator('button:has-text("拉正")').last().click();
+await page.waitForTimeout(700);
+// 拉正完仍停在這張圖上（還在編輯它），所以工具列是圖片操作而不是拼貼操作
+check('按下拉正後回到編輯畫面，並且還停在同一張圖上',
+  (await barLabels()).some((x) => x.includes('裁切')) &&
+  !(await barLabels()).some((x) => x.includes('版面')), (await barLabels()).join(','));
+
+await page.locator('button:has-text("拉正")').click();
+await page.waitForTimeout(900);
+const afterDeskew = await canvasSize();
+check('拉正真的換掉了這張圖（尺寸跟著校正後的四邊形變）',
+  JSON.stringify(afterDeskew) !== JSON.stringify(beforeDeskew),
+  `${JSON.stringify(beforeDeskew)} → ${JSON.stringify(afterDeskew)}`);
+
+// 拉正是破壞性的，所以一定要留一條回得去的路
+check('拉正過的圖會提供「還原原圖」',
+  (await page.locator('button:has-text("還原原圖")').count()) === 1,
+  (await barLabels()).join(','));
+await page.locator('button:has-text("還原原圖")').click();
+await page.waitForTimeout(500);
+// 還原後仍停在同一張圖上，所以直接再進拉正 —— 中途點畫布會選到別張
+await page.locator('button:has-text("拉正")').click();
+await page.waitForTimeout(900);
+check('還原之後回到原本的尺寸',
+  JSON.stringify(await canvasSize()) === JSON.stringify(beforeDeskew),
+  `${JSON.stringify(await canvasSize())} vs 原本 ${JSON.stringify(beforeDeskew)}`);
+check('還原之後就不再提供「還原原圖」',
+  (await page.locator('button:has-text("還原原圖")').count()) === 0,
+  (await barLabels()).join(','));
+await page.locator('button:has-text("取消")').click();
+await page.waitForTimeout(300);
+
 // ── 文字 / 浮水印 ───────────────────────────────────────
 await page.locator('button:has-text("完成")').last().click();
 await page.waitForTimeout(300);

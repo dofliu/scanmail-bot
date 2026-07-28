@@ -84,6 +84,11 @@ jobs:
         working-directory: mobile
         run: npm run test:sign
 
+      # 邊界偵測 / 透視校正：合成有標準答案的「拍紙本」影像，量角點誤差
+      - name: Test edge detection and perspective correction
+        working-directory: mobile
+        run: npm run test:scan
+
       - name: Build web assets for the app
         env:
           SM_API_BASE: ${{ github.event.inputs.api_base }}

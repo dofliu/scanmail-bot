@@ -423,6 +423,52 @@
     };
   }
 
+  /** 從一張畫布 / 點陣圖重建縮圖預覽 */
+  function previewOf(source) {
+    const longest = Math.max(source.width, source.height);
+    if (longest <= PREVIEW_MAX) return source;
+    const ratio = PREVIEW_MAX / longest;
+    const pw = Math.max(1, Math.round(source.width * ratio));
+    const ph = Math.max(1, Math.round(source.height * ratio));
+    const tmp = newCanvas(pw, ph);
+    drawScaled(tmp.ctx, source, 0, 0, pw, ph);
+    return tmp.canvas;
+  }
+
+  /**
+   * 透視校正：把四邊形拉正成矩形，換掉這一張的原圖。
+   *
+   * 這一步是**破壞性**的（跟旋轉 / 裁切那些即時套用的不一樣）——
+   * 拉正之後尺寸與內容都變了，原本存的裁切框座標也就沒有意義。
+   * 所以順手把 cropRect 清掉，並把舊的原圖收在 original 裡供「還原」。
+   *
+   * 角點收 0–1 的相對座標，跟這個檔案其他地方一致：在縮圖上框，
+   * 套用時用原圖重算，兩邊看到的是同一個結果。
+   */
+  function deskewItem(item, relCorners) {
+    const scan = window.SMScanLite;
+    if (!scan) throw new Error('缺少 scan-lite.js，無法拉正');
+    if (!relCorners || relCorners.length !== 4) throw new Error('需要四個角');
+    const base = item.bitmap;
+    const abs = relCorners.map((p) => ({ x: p.x * base.width, y: p.y * base.height }));
+    const corrected = scan.warp(base, abs);
+    return {
+      ...item,
+      bitmap: corrected,
+      preview: previewOf(corrected),
+      cropRect: null,
+      // 只留第一次的原圖 —— 拉正兩次的話「還原」該回到最初，不是回到上一次
+      original: item.original || { bitmap: item.bitmap, preview: item.preview },
+    };
+  }
+
+  /** 還原成拉正之前的樣子 */
+  function undoDeskew(item) {
+    if (!item.original) return item;
+    const { original, ...rest } = item;
+    return { ...rest, bitmap: original.bitmap, preview: original.preview, cropRect: null };
+  }
+
   /**
    * 依矩形裁切。rect 用 0–1 的相對座標，這樣不管拿的是原圖還是縮圖都通用。
    * rect 為空代表不裁。
@@ -1092,6 +1138,9 @@
     applyRedactions,
     drawTexts,
     drawSignatures,
+    deskewItem,
+    undoDeskew,
+    previewOf,
     ADJUST_PRESETS,
     composeToBlob,
     previewInto,
