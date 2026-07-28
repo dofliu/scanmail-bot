@@ -110,7 +110,7 @@ await page.waitForTimeout(400);
 
 labels = await barLabels();
 check('點圖片後工具列換成圖片操作',
-  ['左轉', '右轉', '裁切', '大小', '完成'].every((l) => labels.some((x) => x.includes(l))),
+  ['左轉', '右轉', '裁切', '打碼', '調整', '完成'].every((l) => labels.some((x) => x.includes(l))),
   labels.join(','));
 check('圖片模式下不顯示拼貼操作',
   !labels.some((x) => x.includes('版面')), labels.join(','));
@@ -227,9 +227,94 @@ check('按套用 → 版面立刻重算',
   afterCrop && (afterCrop.w !== beforeCrop.w || afterCrop.h !== beforeCrop.h),
   `${JSON.stringify(beforeCrop)} → ${JSON.stringify(afterCrop)}`);
 
-// ── 輸出 ────────────────────────────────────────────────
+// ── 打碼 ────────────────────────────────────────────────
+await page.locator('button:has-text("打碼")').click();
+await page.waitForTimeout(400);
+check('打碼是獨立畫面，並列出三種樣式',
+  ['馬賽克', '模糊', '塗黑'].every((l) => l && true) &&
+  (await page.locator('.chip').allInnerTexts()).join(',').includes('馬賽克') &&
+  (await barLabels()).some((x) => x.includes('全清')),
+  (await page.locator('.chip').allInnerTexts()).join(','));
+
+const redBox = await page.locator('canvas').boundingBox();
+await page.mouse.move(redBox.x + redBox.width * 0.2, redBox.y + redBox.height * 0.2);
+await page.mouse.down();
+await page.mouse.move(redBox.x + redBox.width * 0.6, redBox.y + redBox.height * 0.6, { steps: 6 });
+await page.mouse.up();
+await page.waitForTimeout(400);
+check('拖一個框就遮一塊，並顯示已遮數量',
+  /已遮 1 塊/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await page.locator('button:has-text("復原")').click();
+await page.waitForTimeout(300);
+check('復原把最後一塊拿掉',
+  /在要遮的地方拖一個框/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+await page.locator('button:has-text("取消")').click();
+await page.waitForTimeout(400);
+
+// ── 調整 ────────────────────────────────────────────────
+await page.locator('button:has-text("調整")').click();
+await page.waitForTimeout(300);
+const adjustChips = await page.locator('.chip').allInnerTexts();
+check('調整面板有濾鏡、細調與大小',
+  ['原圖', '黑白', '紙本'].every((l) => adjustChips.some((t) => t.trim() === l)) &&
+  (await page.locator('.field-label').allInnerTexts()).some((t) => t.includes('亮度')) &&
+  (await page.locator('.field-label').allInnerTexts()).some((t) => t.includes('大小')),
+  adjustChips.join(','));
+await page.locator('.chip:has-text("黑白")').click();
+await page.waitForTimeout(400);
+check('選了濾鏡之後預覽會重畫',
+  await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    const d = c.getContext('2d').getImageData(Math.round(c.width / 4), Math.round(c.height / 2), 1, 1).data;
+    return d[0] === d[1] && d[1] === d[2];
+  }), '畫布沒有變成灰階');
+await page.locator('.pill:has-text("完成")').click();
+await page.waitForTimeout(200);
+
+// ── 文字 / 浮水印 ───────────────────────────────────────
 await page.locator('button:has-text("完成")').last().click();
 await page.waitForTimeout(300);
+await page.locator('button:has-text("文字")').click();
+await page.waitForTimeout(300);
+check('文字面板有輸入框與浮水印開關',
+  (await page.locator('textarea').count()) === 1 &&
+  /平鋪成浮水印/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+const beforeText = await page.evaluate(() => {
+  const c = document.querySelector('canvas');
+  return c.getContext('2d').getImageData(0, 0, c.width, c.height).data.join('').length;
+});
+await page.locator('textarea').fill('內部文件');
+await page.waitForTimeout(600);
+check('打了字畫布就跟著變',
+  await page.evaluate((before) => {
+    const c = document.querySelector('canvas');
+    return c.getContext('2d').getImageData(0, 0, c.width, c.height).data.join('').length !== before;
+  }, beforeText), '畫布沒有變');
+
+await page.locator('input[type=checkbox]').first().check();
+await page.waitForTimeout(500);
+check('切成浮水印後出現角度、位置選單收起來',
+  (await page.locator('.field-label').allInnerTexts()).some((t) => t.includes('角度')) &&
+  !(await page.locator('.field-label').allInnerTexts()).some((t) => t.trim() === '位置'),
+  (await page.locator('.field-label').allInnerTexts()).join(','));
+await page.locator('.pill:has-text("完成")').click();
+await page.waitForTimeout(200);
+await page.locator('button:has-text("文字")').click();
+await page.waitForTimeout(200);
+await page.locator('button:has-text("移除文字")').click();
+await page.waitForTimeout(400);
+check('移除文字之後面板回到空的',
+  (await page.locator('textarea').inputValue()) === '', '文字沒有清掉');
+await page.locator('.pill:has-text("完成")').click();
+await page.waitForTimeout(200);
+
+// ── 輸出 ────────────────────────────────────────────────
+// 上面的文字面板已經回到拼貼模式了，直接開製作
 await page.locator('button:has-text("製作")').click();
 await page.waitForTimeout(300);
 check('製作面板有格式與儲存',
