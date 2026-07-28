@@ -259,8 +259,9 @@ def test_free_crop_is_a_full_screen_editor():
     assert "touchAction: 'none'" in studio, "沒有擋掉捲動，手機上會邊拖邊捲"
     assert "setCropping(true)" in studio, "裁切沒有進入獨立畫面"
     # 離開裁切後 canvas 是新的 DOM 元素，不重畫會停在瀏覽器預設的空白畫布。
-    # 每個全螢幕模式都要列進相依，簽名也一樣。
-    assert "[items, layout, frame, sel, cropping, redacting, signing, text, stamps, signatures]" in studio
+    # 每個全螢幕模式都要列進相依 —— 打碼、拉正、簽名都一樣。
+    assert ("[items, layout, frame, sel, cropping, redacting, deskewing, signing, "
+            "text, stamps, signatures]") in studio
 
 
 def test_images_convert_to_pdf_losslessly():
@@ -468,6 +469,73 @@ def test_studio_has_a_pages_tab():
         assert f"label=\"{label}\"" in source, f"頁面工具列少了 {label}"
     # 分頁名稱不能撞名，不然使用者跟測試都會分不清
     assert "label={target === 'images' ? '畫質' : '紙張'}" in source
+
+
+def test_edge_detection_ports_the_v5_scoring():
+    """評分的權重是後端 22 個案例的基準測試磨出來的，憑感覺重寫只會退步。"""
+    source = _strip_comments((JS / "scan-lite.js").read_text(encoding="utf-8"))
+    assert "function scoreQuad(" in source
+    # 凸性取代矩形度 —— v4 的矩形度會懲罰透視梯形，大角度拍攝時包圍盒反而贏
+    assert "isConvex(quad) ? 1 : 0.35" in source
+    assert "areaS * 0.35 + convexity * 0.25 + borderS * 0.2 + aspectS * 0.2" in source
+    assert "geo * 0.4 + content * 0.6" in source
+    # 最弱邊乘法門控：一條邊沒有影像證據就重罰，不管其他分數多高
+    assert "(0.55 + 0.45 * edgeMin)" in source
+    assert "function edgeSupport(" in source
+    assert "Math.max(1.6 * gIn, 25)" in source, "少了「邊上 vs 內側」的梯度比較"
+
+    # 硬性條件也要在：三條邊貼著畫面邊緣 = 整張照片被當成文件
+    assert "function isValidQuad(" in source
+    assert "touching >= 3" in source
+
+
+def test_edge_detection_stays_honest_when_it_fails():
+    """亂裁一通比不裁更糟 —— 使用者不會發現。"""
+    source = _strip_comments((JS / "scan-lite.js").read_text(encoding="utf-8"))
+    assert "MIN_CONFIDENCE = 0.45" in source, "信心門檻要跟後端一致"
+    assert "method: 'fallback'" in source, "找不到時要明講是退回來的框"
+    assert "confidence: 0," in source
+
+    ui = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "function StudioDeskew(" in ui
+    assert "沒把握" in ui, "低信心時要提醒使用者確認，不能默默裁下去"
+    assert "MIN_CONFIDENCE" in ui
+
+
+def test_perspective_correction_does_not_flip_or_stretch():
+    """兩個只有靠內容方向 / 真實比例才驗得出來的坑。"""
+    source = _strip_comments((JS / "scan-lite.js").read_text(encoding="utf-8"))
+    # UNPACK_FLIP_Y 是關的，貼圖 t=0 就是第一列 —— 再翻一次輸出就上下顛倒，
+    # 而且「線還是直的」，光看線直不直看不出來
+    assert "UNPACK_FLIP_Y_WEBGL, false" in source
+    assert "texture2D(u_img, uv)" in source, "多翻一次 y 的話輸出會上下顛倒"
+
+    # 一張 canvas 只能有一種 context：直接回傳 WebGL 畫布的話，
+    # 呼叫端的 getContext('2d') 會拿到 null，後面的合成整條斷掉
+    assert "out.getContext('2d').drawImage(gl, 0, 0)" in source
+
+    # 低階裝置拿不到 WebGL 時要有退路，而不是整個功能不能用
+    assert "function warp2D(" in source
+
+    # Zhang–He：不反推真實比例的話，斜拍的 A4 拉正後會系統性地被拉扁
+    assert "function recoverAspect(" in source
+    assert "0.75 * diag" in source, "一點透視時焦距不可觀測，要有假設焦距的退路"
+    assert "function outputSize(" in source
+
+
+def test_deskew_is_reversible():
+    """拉正是破壞性的（換掉原圖），所以一定要留一條回得去的路。"""
+    engine = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    assert "function deskewItem(" in engine
+    assert "function undoDeskew(" in engine
+    # 只留第一次的原圖 —— 拉正兩次的話「還原」該回到最初，不是回到上一次
+    assert "item.original || {" in engine
+    # 拉正之後尺寸與內容都變了，原本的裁切框座標沒有意義
+    assert "cropRect: null" in engine
+
+    ui = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert 'label="還原原圖"' in ui
+    assert "SMImageLocal.undoDeskew(" in ui
 
 
 def test_signatures_stay_vector_where_they_can():

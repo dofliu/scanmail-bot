@@ -17,6 +17,6 @@ outputs:
   - mobile_app
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "91 API endpoints, 8 tool categories, 268 pytest + 225 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "v3.13.0 — signatures and stamps: sign once with a finger, then drop it onto images or PDF pages on-device. Hand-drawn signatures are stored as strokes, not pixels, so stamping a PDF emits vector paths (a few KB, sharp at any zoom); imported photos of signatures or red chops get their white background keyed out and stamp via an image XObject with an SMask. Placement compensates for /Rotate — the viewer rotates the page but the content stream does not — verified by rendering the stamped page and counting ink per quadrant; 45 signature tests"
+key_metrics: "91 API endpoints, 8 tool categories, 272 pytest + 254 browser tests, web + Android + offline-only APK from one frontend"
+recent_changes: "v3.14.0 — on-device document edge detection and perspective correction. The offline app previously only had free-form cropping; the actual scanning half lived in the backend OpenCV pipeline. Ported as gradient-directed Hough line detection (documents have straight edges, and lines are voted on by the whole edge so an occluded corner does not matter) plus the backend v5 scoring verbatim: convexity, per-edge gradient support, weakest-edge multiplicative gating. Correction runs a WebGL fragment shader, with output dimensions from Zhang-He aspect-ratio recovery so a skewed A4 does not come out squashed. Below 0.45 confidence it says so instead of cropping blind; 22 detection tests against synthetic ground-truth shots"
 
