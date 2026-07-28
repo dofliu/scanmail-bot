@@ -471,6 +471,47 @@ def test_studio_has_a_pages_tab():
     assert "label={target === 'images' ? '畫質' : '紙張'}" in source
 
 
+def test_cell_framing_is_opt_in():
+    """沒動過取景的圖必須走原本那條路 —— 否則所有既有的拼貼輸出都會變。"""
+    source = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    assert "function isDefaultFit(" in source
+    body = source[source.index("function drawInBox("):]
+    assert "if (isDefaultFit(fit))" in body[:400], "沒有先擋掉預設情況，等於改寫既有行為"
+    # 取景是相對值（縮放倍率 + 0–1 對焦點），縮圖上調完、原圖匯出才會一致
+    assert "function fitBox(" in source
+    assert "function clampFit(" in source
+    # 圖片小於格子時「對焦點」沒有意義，硬記一個值會讓 UI 顯示錯的狀態
+    assert "if (!(drawLen > boxLen)) return 0.5;" in source
+
+
+def test_collage_gestures_do_not_fight_selection():
+    """點選與拖曳共用同一塊畫布，分不清楚的話每次點選都會把圖推歪。"""
+    ui = (JS / "studio.jsx").read_text(encoding="utf-8")
+    for handler in ("onCanvasDown", "onCanvasMove", "onCanvasUp"):
+        assert handler in ui, f"畫布少了 {handler}"
+    # 有位移門檻才分得出「點一下」與「拖曳」
+    assert "g.moved" in ui and "< 4) return" in ui
+    # 只有拖已經選中的那張才算移動
+    assert "g.index !== sel" in ui
+    # 兩指才有捏合，所以要同時追多個指標
+    assert "pointersRef" in ui and "'pinch'" in ui
+    # 不擋掉瀏覽器的預設手勢，拖曳與捏合會被當成捲動 / 縮放整頁
+    assert "touchAction: 'none'" in ui
+
+
+def test_collage_swap_needs_an_explicit_mode():
+    """點 A 再點 B 本來就是「改選 B」，沒有明確模式的話沒人猜得到會交換。"""
+    ui = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert 'label="交換"' in ui
+    assert "swapFrom" in ui
+    assert "[next[swapFrom], next[hit]] = [next[hit], next[swapFrom]]" in ui
+    # 畫布與縮圖列都要走同一條路，不然兩邊行為會不一致
+    assert "const pickIndex = (hit) =>" in ui
+    assert "onClick={() => pickIndex(" in ui
+    # 刪除會讓索引位移，留著交換模式就會換到別張
+    assert "const remove = () => {\n    const i = sel;\n    setSwapFrom(-1);" in ui
+
+
 def test_edge_detection_ports_the_v5_scoring():
     """評分的權重是後端 22 個案例的基準測試磨出來的，憑感覺重寫只會退步。"""
     source = _strip_comments((JS / "scan-lite.js").read_text(encoding="utf-8"))

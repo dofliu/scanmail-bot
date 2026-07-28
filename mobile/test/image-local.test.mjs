@@ -331,6 +331,94 @@ check('平鋪浮水印四個象限都蓋到',
   layers.tiledQuadrants === 4, `只蓋到 ${layers.tiledQuadrants} 個象限`);
 check('空白文字不會留下痕跡', layers.emptyChanged === 0, `改了 ${layers.emptyChanged} 點`);
 
+// ── 格子內的取景（縮放 + 對焦點）────────────────────────
+console.log('\n格子內取景');
+
+const framing = await page.evaluate(() => {
+  const L = window.SMImageLocal;
+  const box = { x: 0, y: 0, w: 100, h: 100 };
+
+  // 沒動過取景時，回傳的幾何要跟舊行為一致 —— 這是「不會有回歸」的保證
+  const coverDefault = L.fitBox(200, 100, box, 'cover', null);
+  const containDefault = L.fitBox(200, 100, { x: 0, y: 0, w: 200, h: 100 }, 'contain', null);
+
+  // cover + zoom=1：短邊剛好蓋滿，長邊溢出並置中
+  const zoomed = L.fitBox(200, 100, box, 'cover', { zoom: 2, x: 0.5, y: 0.5 });
+  // 對焦點往左 → 圖片往右移，但不能移到露出格子邊
+  const leftFocus = L.fitBox(200, 100, box, 'cover', { zoom: 1, x: 0, y: 0.5 });
+  const rightFocus = L.fitBox(200, 100, box, 'cover', { zoom: 1, x: 1, y: 0.5 });
+
+  // 夾住：對焦點超出可動範圍時要被拉回來，不然手指會累積空行程
+  const clampedFar = L.clampFit({ zoom: 1, x: 0, y: 0.5 }, box, { w: 200, h: 100 });
+  const clampedZoom = L.clampFit({ zoom: 99, x: 0.5, y: 0.5 }, box, { w: 200, h: 100 });
+  // 裝得下的方向沒有「對焦點」可言，一律回中心
+  const clampedFits = L.clampFit({ zoom: 1, x: 0.2, y: 0.1 }, box, { w: 80, h: 80 });
+
+  return {
+    coverDefault, containDefault, zoomed, leftFocus, rightFocus,
+    clampedFar, clampedZoom, clampedFits, maxZoom: L.MAX_ZOOM,
+    isDefault: [L.isDefaultFit(null), L.isDefaultFit({ zoom: 1, x: 0.5, y: 0.5 }),
+      L.isDefaultFit({ zoom: 1.5, x: 0.5, y: 0.5 }), L.isDefaultFit({ zoom: 1, x: 0.2, y: 0.5 })],
+  };
+});
+
+// cover：100×100 的格子放 200×100 的圖 → 放大到高度剛好，寬度變 200，左右各溢出 50
+check('cover 預設：短邊剛好蓋滿、長邊置中溢出',
+  framing.coverDefault.w === 200 && framing.coverDefault.h === 100 &&
+  framing.coverDefault.x === -50 && framing.coverDefault.y === 0,
+  JSON.stringify(framing.coverDefault));
+check('contain 預設：剛好填滿、不位移',
+  framing.containDefault.w === 200 && framing.containDefault.h === 100 &&
+  framing.containDefault.x === 0 && framing.containDefault.y === 0,
+  JSON.stringify(framing.containDefault));
+check('zoom 是相對「剛好填滿」的倍率', framing.zoomed.w === 400 && framing.zoomed.h === 200,
+  JSON.stringify(framing.zoomed));
+// 對焦點 0 = 看原圖最左邊 → 圖片要靠左對齊格子（x=0），而不是繼續往右跑
+check('對焦點往左 → 露出原圖左緣，且不會拖出白邊',
+  framing.leftFocus.x === 0, JSON.stringify(framing.leftFocus));
+check('對焦點往右 → 露出原圖右緣，且不會拖出白邊',
+  framing.rightFocus.x === -100, JSON.stringify(framing.rightFocus));
+
+check('對焦點會被夾回實際可動的範圍',
+  Math.abs(framing.clampedFar.x - 0.25) < 1e-6, JSON.stringify(framing.clampedFar));
+check('縮放有上限', framing.clampedZoom.zoom === framing.maxZoom && framing.maxZoom > 1,
+  JSON.stringify(framing.clampedZoom));
+check('裝得下的方向沒有對焦點，一律回中心',
+  framing.clampedFits.x === 0.5 && framing.clampedFits.y === 0.5,
+  JSON.stringify(framing.clampedFits));
+check('認得出「沒動過的取景」', JSON.stringify(framing.isDefault) === '[true,true,false,false]',
+  JSON.stringify(framing.isDefault));
+
+// 真的畫出來：動過取景之後，格子裡看到的內容要跟著換
+const framedPixels = await page.evaluate(() => {
+  // 左半紅、右半藍的來源圖
+  const src = document.createElement('canvas');
+  src.width = 200; src.height = 100;
+  const sc = src.getContext('2d');
+  sc.fillStyle = '#ff0000'; sc.fillRect(0, 0, 100, 100);
+  sc.fillStyle = '#0000ff'; sc.fillRect(100, 0, 100, 100);
+
+  const render = (fit) => {
+    const c = document.createElement('canvas');
+    c.width = 100; c.height = 100;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    window.SMImageLocal.drawCell(ctx, src, { x: 0, y: 0, w: 100, h: 100 }, {}, 'cover', fit);
+    const d = ctx.getImageData(50, 50, 1, 1).data;
+    return `${d[0]},${d[1]},${d[2]}`;
+  };
+  return {
+    // 預設置中 → 正中央剛好落在紅藍交界，取樣點偏右一格避開接縫
+    center: render(null),
+    left: render({ zoom: 1, x: 0.15, y: 0.5 }),
+    right: render({ zoom: 1, x: 0.85, y: 0.5 }),
+  };
+});
+
+check('對焦點移到左邊 → 格子裡看到的是原圖左半（紅）',
+  framedPixels.left.startsWith('255,'), framedPixels.left);
+check('對焦點移到右邊 → 格子裡看到的是原圖右半（藍）',
+  framedPixels.right.endsWith(',255'), framedPixels.right);
+
 await browser.close();
 
 const failed = results.filter((r) => !r.pass);

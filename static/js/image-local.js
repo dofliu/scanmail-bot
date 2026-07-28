@@ -420,6 +420,8 @@
       cropRect: null,
       adjust: null,
       redactions: [],
+      // 格子內的取景（縮放 + 對焦點）—— 拼貼時才用得到
+      fit: null,
     };
   }
 
@@ -663,13 +665,86 @@
   }
 
   /** 在指定方框內畫圖：contain 等比縮入（可能留白）、cover 裁切填滿 */
-  function drawInBox(ctx, src, box, mode) {
-    if (mode !== 'cover') {
-      drawScaled(ctx, src, box.x, box.y, box.w, box.h);
+  /** 沒有動過的取景 —— 剛好填滿、對齊中心 */
+  const DEFAULT_FIT = { zoom: 1, x: 0.5, y: 0.5 };
+
+  function isDefaultFit(fit) {
+    if (!fit) return true;
+    const z = fit.zoom == null ? 1 : fit.zoom;
+    const x = fit.x == null ? 0.5 : fit.x;
+    const y = fit.y == null ? 0.5 : fit.y;
+    return Math.abs(z - 1) < 1e-4 && Math.abs(x - 0.5) < 1e-4 && Math.abs(y - 0.5) < 1e-4;
+  }
+
+  /**
+   * 算出「這張圖要用多大、畫在哪」才能讓取景成立。
+   *
+   * fit.zoom 是相對於「剛好填滿格子」的倍率；fit.x / fit.y 是原圖上的
+   * 對焦點（0–1），那個點會被擺到格子正中央。
+   *
+   * 位置會被夾住，讓圖片至少蓋滿格子 —— 拖過頭跑出白邊比拖不動更難用。
+   */
+  function fitBox(srcW, srcH, box, mode, fit) {
+    const zoom = Math.max(1, (fit && fit.zoom) || 1);
+    const fx = fit && fit.x != null ? clamp01(fit.x) : 0.5;
+    const fy = fit && fit.y != null ? clamp01(fit.y) : 0.5;
+    const base = mode === 'cover'
+      ? Math.max(box.w / srcW, box.h / srcH)
+      : Math.min(box.w / srcW, box.h / srcH);
+    const scale = base * zoom;
+    const dw = srcW * scale;
+    const dh = srcH * scale;
+
+    const place = (boxPos, boxLen, drawLen, focal) => {
+      if (drawLen <= boxLen) return boxPos + (boxLen - drawLen) / 2;  // 裝得下就置中
+      const want = boxPos + boxLen / 2 - focal * drawLen;
+      return Math.min(boxPos, Math.max(boxPos + boxLen - drawLen, want));
+    };
+    return { x: place(box.x, box.w, dw, fx), y: place(box.y, box.h, dh, fy), w: dw, h: dh };
+  }
+
+  /** 縮放上限。再放大下去就是看馬賽克了，而且手指很容易一滑就飛掉 */
+  const MAX_ZOOM = 6;
+
+  /**
+   * 把取景參數夾回「有意義」的範圍。
+   *
+   * 對焦點若超過會讓圖片露出格子邊，`fitBox` 會把位置夾住 —— 但如果不同時
+   * 把對焦點本身也夾住，手指就會累積一堆「拖了卻不動」的空行程，
+   * 回拖時要先把那段還回來，感覺像卡住。
+   */
+  function clampFit(fit, box, draw) {
+    const zoom = Math.min(MAX_ZOOM, Math.max(1, (fit && fit.zoom) || 1));
+    const axis = (value, boxLen, drawLen) => {
+      if (!(drawLen > boxLen)) return 0.5;      // 裝得下 → 對焦點沒有意義
+      const half = boxLen / 2 / drawLen;
+      return Math.min(1 - half, Math.max(half, value == null ? 0.5 : value));
+    };
+    return {
+      zoom,
+      x: axis(fit && fit.x, box.w, draw.w),
+      y: axis(fit && fit.y, box.h, draw.h),
+    };
+  }
+
+  function drawInBox(ctx, src, box, mode, fit) {
+    // 沒動過取景就走原本的路，一個像素都不會變
+    if (isDefaultFit(fit)) {
+      if (mode !== 'cover') {
+        drawScaled(ctx, src, box.x, box.y, box.w, box.h);
+        return;
+      }
+      const cropped = cropToAspect(src, box.w / box.h);
+      drawScaled(ctx, cropped, box.x, box.y, box.w, box.h);
       return;
     }
-    const cropped = cropToAspect(src, box.w / box.h);
-    drawScaled(ctx, cropped, box.x, box.y, box.w, box.h);
+    const r = fitBox(src.width, src.height, box, mode, fit);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(box.x, box.y, box.w, box.h);
+    ctx.clip();
+    drawScaled(ctx, src, r.x, r.y, r.w, r.h);
+    ctx.restore();
   }
 
   function roundedPath(ctx, x, y, w, h, r) {
@@ -687,7 +762,7 @@
    * 畫一格（圖片 + 圖框）。
    * 圖框一律往方框「內」縮，不往外長 —— 否則會超出 layoutBoxes 算好的版面。
    */
-  function drawCell(ctx, src, box, frame = {}, fillMode = 'contain') {
+  function drawCell(ctx, src, box, frame = {}, fillMode = 'contain', fit = null) {
     const style = frame.style || 'none';
     const color = frame.color || '#ffffff';
     const unit = Math.min(box.w, box.h);
@@ -728,7 +803,7 @@
       ctx.clip();
     }
 
-    drawInBox(ctx, src, inner, fillMode);
+    drawInBox(ctx, src, inner, fillMode, fit);
     ctx.restore();
 
     // 細邊：畫在影像邊緣上
@@ -873,7 +948,7 @@
       fill(out.ctx, width, height, opts.bgColor);
     }
     const fillMode = opts.fill === 'cover' ? 'cover' : 'contain';
-    boxes.forEach((b, i) => drawCell(out.ctx, rendered[i], b, opts.frame, fillMode));
+    boxes.forEach((b, i) => drawCell(out.ctx, rendered[i], b, opts.frame, fillMode, items[i].fit));
     // 文字與簽名疊在最上面，位置是相對整張成品而不是某一格。
     // 簽名畫在文字之上 —— 簽名是最後蓋的那一道。
     drawTexts(out.canvas, opts.texts);
@@ -905,16 +980,22 @@
     ctx.clearRect(0, 0, w, h);
     ctx.drawImage(composed, 0, 0, w, h);
 
-    // 讓 UI 能算出點到哪一張
+    // 讓 UI 能算出點到哪一張。另外附上「圖片實際被畫成多大」——
+    // 手指拖幾個像素要換算成對焦點移動多少，需要這個數字。
     const rendered = items.map((it) => renderItem(it, { usePreview: true }));
     const layout = layoutBoxes(rendered.map((c) => ({ w: c.width, h: c.height })), opts);
+    const fillMode = opts.fill === 'cover' ? 'cover' : 'contain';
     return {
       width: w,
       height: h,
       scale: ratio,
-      boxes: layout.boxes.map((b) => ({
-        x: b.x * ratio, y: b.y * ratio, w: b.w * ratio, h: b.h * ratio,
-      })),
+      boxes: layout.boxes.map((b, i) => {
+        const drawn = fitBox(rendered[i].width, rendered[i].height, b, fillMode, items[i].fit);
+        return {
+          x: b.x * ratio, y: b.y * ratio, w: b.w * ratio, h: b.h * ratio,
+          draw: { x: drawn.x * ratio, y: drawn.y * ratio, w: drawn.w * ratio, h: drawn.h * ratio },
+        };
+      }),
     };
   }
 
@@ -1138,6 +1219,11 @@
     applyRedactions,
     drawTexts,
     drawSignatures,
+    fitBox,
+    clampFit,
+    isDefaultFit,
+    DEFAULT_FIT,
+    MAX_ZOOM,
     deskewItem,
     undoDeskew,
     previewOf,

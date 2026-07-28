@@ -1042,6 +1042,7 @@ function StudioEditor() {
   const [cropping, setCropping] = stUseState(false);
   const [redacting, setRedacting] = stUseState(false);
   const [deskewing, setDeskewing] = stUseState(false);
+  const [swapFrom, setSwapFrom] = stUseState(-1);   // 交換模式：等著點第二張
   // null | { mode:'draw' } | { mode:'place', src, aspect }
   const [signing, setSigning] = stUseState(null);
   const [stamps, setStamps] = stUseState([]);
@@ -1057,6 +1058,8 @@ function StudioEditor() {
   const canvasRef = stUseRef(null);
   const addRef = stUseRef(null);
   const boxesRef = stUseRef([]);
+  const pointersRef = stUseRef(new Map());   // 兩指捏合要同時追兩個指標
+  const gestureRef = stUseRef(null);
 
   const multi = items.length > 1;
   const current = sel >= 0 ? items[sel] : null;
@@ -1129,6 +1132,7 @@ function StudioEditor() {
 
   const remove = () => {
     const i = sel;
+    setSwapFrom(-1);
     setItems((prev) => {
       if (prev[i]?.url) URL.revokeObjectURL(prev[i].url);
       return prev.filter((_, j) => j !== i);
@@ -1143,17 +1147,125 @@ function StudioEditor() {
     setSel(-1);
     setSheet(null);
     setStamps([]);
+    setSwapFrom(-1);
   };
 
-  /** 點畫布選圖 —— 直接點你要改的那張，比在清單裡找快 */
-  const pickOnCanvas = (e) => {
+  /** 螢幕座標 → 預覽畫布座標 */
+  const canvasPos = (e) => {
     const canvas = canvasRef.current;
     const rect = canvas.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * canvas.width;
-    const y = ((e.clientY - rect.top) / rect.height) * canvas.height;
-    const hit = boxesRef.current.findIndex(
-      (b) => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h
-    );
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  };
+
+  const hitTest = (p) => boxesRef.current.findIndex(
+    (b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h);
+
+  /** 只改某一張的取景，並夾回有意義的範圍 */
+  const patchFit = (index, next) => {
+    const box = boxesRef.current[index];
+    if (!box) return;
+    setItems((prev) => prev.map((it, i) => (i === index
+      ? { ...it, fit: window.SMImageLocal.clampFit(next, box, box.draw) }
+      : it)));
+  };
+
+  /**
+   * 畫布上的手勢。
+   *
+   *   點一下       選這張（已經在交換模式就換位置）
+   *   單指拖曳     移動選中那張在格子裡的位置
+   *   兩指捏合     縮放選中那張
+   *
+   * 拖曳與點選靠「有沒有超過門檻」區分 —— 手指按下去多少會晃一下，
+   * 沒有門檻的話每次點選都會順便把圖推歪。
+   */
+  const onCanvasDown = (e) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    e.preventDefault();
+    // 合成事件（測試、某些輔助工具）沒有真的指標，捕捉會丟 NotFoundError ——
+    // 這只是為了拖出畫布邊界時還收得到事件，抓不到也不影響手勢本身
+    try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* 沒捕捉到就算了 */ }
+    const p = canvasPos(e);
+    const pts = pointersRef.current;
+    pts.set(e.pointerId, p);
+
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()];
+      const target = gestureRef.current?.index ?? sel;
+      gestureRef.current = {
+        mode: 'pinch', index: target,
+        startDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        startZoom: (items[target]?.fit?.zoom) || 1,
+      };
+      return;
+    }
+    gestureRef.current = { mode: 'tap', index: hitTest(p), start: p, moved: false };
+  };
+
+  const onCanvasMove = (e) => {
+    const g = gestureRef.current;
+    if (!g) return;
+    const pts = pointersRef.current;
+    if (!pts.has(e.pointerId)) return;
+    e.preventDefault();
+    const p = canvasPos(e);
+    const prev = pts.get(e.pointerId);
+    pts.set(e.pointerId, p);
+
+    if (g.mode === 'pinch') {
+      if (pts.size < 2 || g.index < 0) return;
+      const [a, b] = [...pts.values()];
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+      const cur = items[g.index]?.fit || {};
+      patchFit(g.index, { ...cur, zoom: g.startZoom * (dist / g.startDist) });
+      return;
+    }
+
+    // 只有拖「已經選中的那張」才算移動 —— 不然點旁邊的圖會把它推歪
+    if (g.index !== sel || g.index < 0) return;
+    if (!g.moved && Math.hypot(p.x - g.start.x, p.y - g.start.y) < 4) return;
+    g.moved = true;
+    const box = boxesRef.current[g.index];
+    const cur = items[g.index]?.fit || {};
+    if (!box || !box.draw) return;
+    patchFit(g.index, {
+      zoom: cur.zoom || 1,
+      x: (cur.x == null ? 0.5 : cur.x) - (p.x - prev.x) / box.draw.w,
+      y: (cur.y == null ? 0.5 : cur.y) - (p.y - prev.y) / box.draw.h,
+    });
+  };
+
+  const onCanvasUp = (e) => {
+    const pts = pointersRef.current;
+    pts.delete(e.pointerId);
+    const g = gestureRef.current;
+    if (pts.size === 0) gestureRef.current = null;
+    if (!g || g.mode !== 'tap' || g.moved) return;
+
+    pickIndex(g.index);
+  };
+
+  /**
+   * 點選一張圖（畫布或縮圖列都走這裡）。
+   * 交換模式下第二次點選不是換選取，而是把兩張的位置對調。
+   */
+  const pickIndex = (hit) => {
+    if (swapFrom >= 0) {
+      if (hit >= 0 && hit !== swapFrom) {
+        setItems((prev) => {
+          const next = [...prev];
+          [next[swapFrom], next[hit]] = [next[hit], next[swapFrom]];
+          return next;
+        });
+        setSel(hit);
+      }
+      setSwapFrom(-1);
+      return;
+    }
     setSel(hit >= 0 ? hit : -1);
     if (hit < 0) setSheet(null);
   };
@@ -1507,9 +1619,29 @@ function StudioEditor() {
         flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
         padding: '10px', background: 'var(--paper-2)',
       }}>
-        <canvas ref={canvasRef} onClick={pickOnCanvas}
-          style={{ maxWidth: '100%', maxHeight: '100%', display: 'block', cursor: 'pointer' }}/>
+        {/* touchAction:'none' 是必要的 —— 不擋掉的話瀏覽器會把拖曳與捏合
+            當成捲動 / 縮放整頁，手勢根本傳不到這裡 */}
+        <canvas ref={canvasRef}
+          onPointerDown={onCanvasDown} onPointerMove={onCanvasMove}
+          onPointerUp={onCanvasUp} onPointerCancel={onCanvasUp}
+          style={{
+            maxWidth: '100%', maxHeight: '100%', display: 'block',
+            cursor: swapFrom >= 0 ? 'copy' : current ? 'move' : 'pointer',
+            touchAction: 'none',
+          }}/>
       </div>
+
+      {(swapFrom >= 0 || (current && multi)) && (
+        <div style={{
+          padding: '5px 14px', fontSize: '11px', flexShrink: 0,
+          color: swapFrom >= 0 ? 'var(--mint-4)' : 'var(--ink-3)',
+          background: swapFrom >= 0 ? 'var(--mint-wash)' : 'transparent',
+        }}>
+          {swapFrom >= 0
+            ? `⇄ 點另一張圖跟第 ${swapFrom + 1} 張交換位置`
+            : '拖曳可移動位置，兩指捏合可縮放'}
+        </div>
+      )}
 
       {/* 縮圖列 —— 多張時才需要 */}
       {multi && (
@@ -1517,12 +1649,14 @@ function StudioEditor() {
           gap: '6px', overflowX: 'auto', padding: '6px 10px', flexShrink: 0,
           borderTop: '1px solid var(--line-soft)',
         }}>
+          {/* 縮圖列也吃交換 —— 小圖比在拼貼上點準得多 */}
           {items.map((it, i) => (
-            <img key={i} src={it.url} alt="" onClick={() => setSel(i === sel ? -1 : i)}
+            <img key={i} src={it.url} alt="" onClick={() => pickIndex(i === sel && swapFrom < 0 ? -1 : i)}
               style={{
                 width: '40px', height: '40px', objectFit: 'cover', borderRadius: '6px', flexShrink: 0,
-                border: i === sel ? '2px solid var(--mint-3)' : '2px solid transparent',
-                opacity: i === sel ? 1 : 0.6,
+                border: i === swapFrom ? '2px solid var(--mint-4)'
+                  : i === sel ? '2px solid var(--mint-3)' : '2px solid transparent',
+                opacity: i === sel || i === swapFrom ? 1 : 0.6,
               }}/>
           ))}
         </div>
@@ -1543,6 +1677,12 @@ function StudioEditor() {
               <BarBtn ic="↻" label="右轉" onClick={() => rotate(90)}/>
               <BarBtn ic="⇋" label="水平" on={current.flipH} onClick={() => flip('h')}/>
               <BarBtn ic="⇅" label="垂直" on={current.flipV} onClick={() => flip('v')}/>
+              {multi && (
+                <BarBtn ic="⇄" label="交換" on={swapFrom === sel}
+                  onClick={() => setSwapFrom(swapFrom === sel ? -1 : sel)}/>
+              )}
+              <BarBtn ic="⊹" label="重置取景" disabled={!current.fit}
+                onClick={() => patch({ fit: null })}/>
               <BarBtn ic="⌗" label="拉正" on={!!current.original}
                 onClick={() => { setSheet(null); setDeskewing(true); }}/>
               <BarBtn ic="⛶" label="裁切" onClick={() => { setSheet(null); setCropping(true); }}/>
@@ -1575,7 +1715,8 @@ function StudioEditor() {
           borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
         }}>
           {current ? (
-            <BarBtn ic="✓" label="完成" accent onClick={() => { setSel(-1); setSheet(null); }}/>
+            <BarBtn ic="✓" label="完成" accent
+              onClick={() => { setSel(-1); setSheet(null); setSwapFrom(-1); }}/>
           ) : (
             <BarBtn ic="💾" label="製作" accent on={sheet === 'export'}
               onClick={() => setSheet(sheet === 'export' ? null : 'export')}/>
