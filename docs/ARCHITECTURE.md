@@ -6,172 +6,110 @@
 
 ## 系統總覽
 
-ScanMail 是一個 Web-based 的文件掃描郵寄系統，採用前後端分離架構，前端為單頁應用（SPA），後端為 FastAPI REST API，以 SQLite 作為資料儲存。
+ScanMail+ 是一個文件掃描郵寄平台，另外整合了一整套媒體 / 文件工具。
+從 v3.5.0 起，**同一份前端**（`static/`）同時服務三個執行環境：
+
+| 執行環境 | 後端 | 說明 |
+|------|------|------|
+| 網頁版 | 需要 | FastAPI 直接送出 `static/`，同源呼叫 API |
+| Android App（完整版） | 需要 | Capacitor 外殼，前端打包進 APK，用絕對位址呼叫後端 |
+| Android App（離線精簡版） | **不需要** | 只保留在裝置上就做得完的工具，檔案不離開手機 |
+
+差別只在打包時的旗標（`SM_NATIVE` / `SM_OFFLINE`），不是三份程式碼。
 
 ```
-使用者（手機/桌機瀏覽器）
-        │
-        │  HTTP / REST API
-        ▼
-┌─────────────────────────────────────────┐
-│            FastAPI 應用程式               │
-│                                          │
-│  ┌──────────┐  ┌──────────┐  ┌────────┐ │
-│  │ 靜態檔案  │  │ API 路由  │  │Session │ │
-│  │ (SPA)    │  │ Endpoints │  │ 管理   │ │
-│  └──────────┘  └────┬─────┘  └────────┘ │
-│                     │                    │
-│         ┌───────────┼───────────┐        │
-│         ▼           ▼           ▼        │
-│  ┌──────────┐ ┌──────────┐ ┌─────────┐  │
-│  │ AI 辨識  │ │ 掃描處理  │ │郵件寄送 │  │
-│  │ (Gemini) │ │ (OpenCV) │ │ (SMTP)  │  │
-│  └──────────┘ └──────────┘ └─────────┘  │
-│         │                                │
-│         ▼                                │
-│  ┌──────────────────────────────────┐    │
-│  │    SQLite 資料庫                  │    │
-│  │  contacts│history│sender│session  │    │
-│  └──────────────────────────────────┘    │
-└─────────────────────────────────────────┘
-        │                    │
-        ▼                    ▼
-   Google Gemini        SMTP Server
-   Vision API           (Gmail/校內)
+                          static/  ← 唯一的前端來源
+                             │
+        ┌────────────────────┼────────────────────┐
+        ▼                    ▼                    ▼
+   瀏覽器（同源）       APK（完整版）        APK（離線精簡版）
+        │                    │                    │
+        └─────────┬──────────┘                    │
+                  ▼                               ▼
+    ┌─────────────────────────────┐   ┌──────────────────────────┐
+    │        FastAPI 後端          │   │   裝置端引擎（純 JS）      │
+    │                             │   │                          │
+    │  routers/  9 個路由模組      │   │  image-local  圖片 / 拼貼 │
+    │  services/ 12 個服務模組     │   │  scan-lite    邊界偵測    │
+    │  core/     session / 檔案 /  │   │  sign-lite    簽名 / 印章 │
+    │            背景任務 / 認證 / │   │  pdf-lite     PDF 物件層  │
+    │            速率限制          │   │  pdf-write    PDF 產生    │
+    │                             │   │  doc-local    文件轉檔    │
+    │  ┌───────┐┌───────┐┌──────┐ │   │  ttf-lite     字型子集化  │
+    │  │Gemini ││OpenCV ││ SMTP │ │   │  zip-lite     ZIP 讀寫    │
+    │  │Vision ││ 掃描  ││ 寄信 │ │   └──────────────────────────┘
+    │  └───────┘└───────┘└──────┘ │      約 5,800 行，不連任何後端
+    │            │                │
+    │            ▼                │
+    │      SQLite（7 張表）        │
+    └─────────────────────────────┘
 ```
+
+### 為什麼會有兩套引擎
+
+後端的重活是 Python：OpenCV 邊界偵測、Gemini Vision、影片處理、SMTP。
+這些跑不進手機。但「圖片編輯、文件轉檔、PDF 頁面操作」其實瀏覽器就做得完 ——
+於是這一部分另外寫了一套純 JS 的裝置端引擎。
+
+兩套刻意保持**語意對齊**而不是共用程式碼（語言不同，共用不了）：
+`image-local.js` 的版面與縮放規則對齊後端 `image_batch.py`，
+`scan-lite.js` 的評分公式照搬後端 `doc_scanner.py` v5。
+已知的差異都寫在各自檔案的註解裡。
 
 ---
 
 ## 模組架構
 
-### 1. 前端 (`static/index.html`)
+### 1. 前端 (`static/`)
 
-單一 HTML 檔案的 SPA，約 2,100 行，包含 HTML/CSS/JS。
+`index.html` 只剩約 100 行的外殼（載入模組、決定執行環境），介面在 React 模組裡。
 
-**核心元件：**
-- **4 步驟 Wizard UI** — 拍照 → 選收件人 → 預覽確認 → 寄送結果
-- **Camera API** — 使用 `navigator.mediaDevices.getUserMedia()` 存取攝影機
-- **掃描處理面板** — 拍照後自動顯示，提供 5 種濾鏡切換和原始/處理後對比預覽
-- **聯絡人管理** — 新增、選取、刪除聯絡人
-- **側邊面板** — 歷史紀錄、聯絡人列表、寄件人設定
+| 檔案 | 角色 |
+|------|------|
+| `boot.jsx` | 依執行環境與裝置決定要渲染哪一套殼 |
+| `desktop.jsx` / `mobile.jsx` | 完整版的桌面 / 手機介面 |
+| `studio.jsx` | **離線精簡版自己的介面**（編輯 / 圖片 / 文件 / 頁面四頁） |
+| `atoms.jsx` | 共用元件（相機、裁切編輯器、上傳區、進度條…） |
+| `store.js` | 狀態管理 |
+| `api.js` | 後端呼叫與下載（App 內走原生寫檔 + 系統分享） |
+| `config.js` | 執行環境設定層：網頁版同源、App 版用絕對位址 |
+| `native.js` | Capacitor 橋接（存檔、分享） |
 
-**狀態管理：**
-```javascript
-state = {
-    currentStep,         // 目前步驟 (1-4)
-    uploadedFile,        // 檔名
-    uploadedFileData,    // Blob 資料
-    imageUploaded,       // 是否已上傳到伺服器
-    scanProcessedUrl,    // 掃描處理後的 base64 圖片
-    selectedContact,     // 選中的收件人
-    analyzeResult,       // AI 辨識結果
-    contacts,            // 聯絡人列表
-    history,             // 寄送歷史
-    settings             // 寄件人設定
-}
-```
+裝置端引擎（不依賴後端，也不依賴 React）：
+
+| 檔案 | 行數 | 做什麼 |
+|------|------|------|
+| `image-local.js` | ~1250 | 縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 裁切 / 打碼 / 濾鏡 / 文字 / 格子取景 |
+| `scan-lite.js` | ~890 | 文件邊界偵測（梯度導向 Hough）+ 透視校正（WebGL） |
+| `sign-lite.js` | ~500 | 簽名模型（向量筆畫）、去白底匯入、PDF 路徑輸出 |
+| `pdf-lite.js` | ~990 | PDF 物件解析器：讀 xref / 展開物件串流 / 挑頁重組 / 蓋章 |
+| `pdf-write.js` | ~520 | PDF 產生器（Type0 內嵌字型、影像 XObject） |
+| `doc-local.js` | ~1120 | PDF / Word / Markdown 互轉，中間隔一層共用文件模型 |
+| `ttf-lite.js` | ~370 | TrueType 解析與子集化（只把用到的字寫進 PDF） |
+| `zip-lite.js` | ~210 | 用瀏覽器內建 CompressionStream 讀寫 zip（DOCX 就是 zip） |
 
 ### 2. 後端主程式 (`main.py`)
 
-FastAPI 應用，約 440 行。
+約 140 行的 App Factory —— 建立 FastAPI 實例、掛上各路由模組、設定 CORS 與靜態檔案、
+`lifespan` 內做熱機。版本號的唯一來源也在這裡（`version="x.y.z"`）。
 
-**Session 管理：**
-- 使用 in-memory dict `_sessions` 儲存每個使用者的操作狀態
-- `SessionData` 包含：`image_data`（目前圖片）、`image_original`（原始圖片）、`ai_result`（AI 結果）、`detected_corners`（邊界角點）
-- 使用者 ID 從 `X-User-Id` header 取得，預設為 `"default_user"`
+### 3. 路由 (`app/routers/`)
 
-**API 路由群組：**
-1. **圖片** — `POST /api/upload`
-2. **掃描** — `POST /api/scan/detect`、`/api/scan/process`、`/api/scan/filter`
-3. **AI** — `POST /api/analyze`
-4. **寄送** — `POST /api/send`
-5. **聯絡人** — `GET/POST/DELETE /api/contacts`
-6. **其他** — `/api/history`、`/api/stats`、`/api/settings`
+| 模組 | 負責 |
+|------|------|
+| `scanmail.py` | 掃描、AI 辨識、寄信、聯絡人、群組、模板、歷史 |
+| `image_tools.py` | 圖片批次處理 |
+| `pdf_tools.py` | PDF 合併 / 浮水印 / 加密 |
+| `doc_convert.py` | Word / Markdown / PDF 轉檔 |
+| `gif_tools.py` · `video_tools.py` | GIF 製作、影片處理 |
+| `batch_rename.py` | 批次改名 |
+| `form_tools.py` | 表單自動填寫 |
+| `auth.py` | 登入 / 使用者 |
 
-### 3. AI 文件辨識 (`app/services/ai_analyzer.py`)
+### 4. 共用基礎設施 (`app/core/`)
 
-**核心流程：**
-1. 收到圖片 bytes + 寄件人/收件人資訊
-2. 組合 System Prompt（文件辨識規則 + JSON 輸出格式）+ User Prompt
-3. 呼叫 Gemini Vision API（先試帶 `response_mime_type="application/json"`，失敗再試不帶）
-4. 多重策略解析 JSON（直接解析 → 去 markdown → regex 提取 → 修復截斷）
-5. 驗證必要欄位，回傳結構化結果
-
-**辨識輸出格式：**
-```json
-{
-    "doc_type": "official",
-    "doc_type_label": "公文",
-    "confidence": 0.98,
-    "subject": "[公文] 離岸風電審查會議改期通知 — 115年3月",
-    "body": "劉老師您好，檢附經濟部產業發展署之來函...",
-    "filename": "公文_離岸風電審查會議改期_20260324_2104.pdf",
-    "extracted_text_summary": "經濟部產業發展署函...",
-    "detected_language": "zh-TW",
-    "suggested_recipients": ["相關委員"]
-}
-```
-
-### 4. 文件掃描處理 (`app/services/doc_scanner.py`)
-
-**邊界偵測（4 種策略依序嘗試）：**
-1. **顏色分析** — HSV+LAB 色彩空間分離淺色紙張區域
-2. **Canny 邊緣偵測** — 多組閾值 + 膨脹/形態學閉合
-3. **自適應閾值** — Otsu 二值化 + 形態學
-4. **GrabCut** — 前景分離（假設文件在中央）
-
-**透視校正：**
-- 四點 Perspective Transform
-- 自動計算目標矩形尺寸
-- 雙三次插值（INTER_CUBIC）
-
-**影像增強濾鏡：**
-| 濾鏡 | 說明 | 核心演算法 |
-|------|------|-----------|
-| auto | 智慧增強 | 背景去除 + 輕度銳化 |
-| document | 文件模式 | 去陰影 + 自適應閾值（類似掃描器效果） |
-| enhance | 增強模式 | CLAHE + 去陰影 + 雙邊濾波 + 銳化（彩色） |
-| bw | 黑白模式 | 去陰影 + Otsu 二值化 |
-| original | 原圖 | 不處理 |
-
-**核心演算法 — 背景陰影去除：**
-```
-1. 轉灰階
-2. 大核高斯模糊估計背景光照 bg
-3. 光照歸一化: normalized = (gray / bg) * 200
-4. CLAHE 局部對比增強
-```
-
-### 5. 郵件寄送 (`app/services/email_sender.py`)
-
-**多策略 SMTP 連線：**
-依序嘗試不同的伺服器/port/認證組合，第一個成功的就使用。
-
-**郵件格式：**
-- MIME multipart/mixed
-- 正文：HTML + 純文字雙版本
-- HTML 包含：正文段落、分隔線、寄件人簽名檔
-- 附件：PDF 檔案
-
-### 6. 資料模型 (`app/models/`)
-
-**資料庫表結構：**
-
-```sql
--- 聯絡人
-contacts (id, user_id, name, email, department, title, created_at)
-
--- 寄送歷史
-send_history (id, user_id, recipient_email, recipient_name, subject,
-              body, doc_type, filename, ai_confidence, file_size, created_at)
-
--- 寄件人設定
-sender_profiles (id, user_id, name, email, title, department,
-                 organization, smtp_user, smtp_password_encrypted, updated_at)
-
--- Session（資料庫版，目前使用 in-memory）
-user_sessions (id, user_id, state, data_json, updated_at)
-```
+`sessions.py`（工作階段）、`file_manager.py`（暫存檔與路徑穿越防禦）、
+`tasks.py`（背景任務 + SSE 進度推送）、`auth.py`、`rate_limiter.py`。
 
 ---
 
@@ -203,6 +141,38 @@ POST /api/send            → image_to_pdf(Session.image_data)
      ▼
 [郵件送達收件者信箱]
 ```
+
+### 裝置端流程（離線精簡版，完全不連後端）
+
+一樣是「拍紙本 → 拉正 → 存成 PDF」，但每一步都在瀏覽器裡：
+
+```
+[選圖 / 拍照]
+     │
+     ▼
+loadItem()                 解碼成 ImageBitmap，另外做一份縮圖預覽
+     │                     （長邊 1400px —— 所有即時操作都用它，按一下就有反應）
+     ▼
+SMScanLite.detect()        梯度導向 Hough → 候選四邊形 → v5 評分挑最好的
+     │                     信心 < 0.45 就不自動裁，請使用者自己拉
+     ▼
+SMScanLite.warp()          WebGL 逐像素反推來源座標
+     │                     輸出尺寸用 Zhang–He 法反推真實寬高比
+     ▼
+renderItem()               旋轉 / 翻轉 / 濾鏡 / 裁切 / 打碼（每次狀態變動都重跑）
+     │
+     ▼
+composeToCanvas()          layoutBoxes() 算版面 → drawCell() 逐格繪製（含取景）
+     │                     → drawTexts() → drawSignatures()
+     ▼
+imagesToPdf()              JPEG 原始位元組直接嵌進 /DCTDecode，畫質完全不掉
+     │
+     ▼
+API.triggerDownload()      App 內走 Capacitor 寫檔 + 系統分享面板
+```
+
+**預覽與匯出共用同一套計算**（`layoutBoxes()` 是唯一的版面來源），差別只在
+`usePreview` 旗標決定拿縮圖還是原圖 —— 所以不會發生「看到的跟存出來的不一樣」。
 
 ---
 
@@ -246,3 +216,6 @@ POST /api/send            → image_to_pdf(Session.image_data)
 | Render | `deploy/render.yaml` | Render.com 一鍵部署 |
 | Railway | `deploy/railway.toml` | Railway 部署 |
 | 本地 | uvicorn | 開發用 |
+| Android APK | `scripts/build_mobile.py` + Gradle | 完整版需要後端；離線精簡版不需要 |
+
+Android 的建置流程、取得 APK 的方式、簽章與疑難排解見 **[ANDROID.md](ANDROID.md)**。
