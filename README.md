@@ -11,6 +11,8 @@
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系統架構、模組分工、資料流（含裝置端引擎） |
 | [docs/ANDROID.md](docs/ANDROID.md) | **App 製作流程**：建置、取得 APK、離線版功能詳解、簽章、疑難排解 |
 | [docs/TODO.md](docs/TODO.md) | 開發歷程（Phase 1–17）、**後續工作**、變更日誌 |
+| [docs/DAILY_ROUTINE.md](docs/DAILY_ROUTINE.md) | **每日自動開發**：每天 03:00 的排程怎麼選題、測試、收尾 |
+| [docs/ROUTINE_LOG.md](docs/ROUTINE_LOG.md) | 每次自動執行的紀錄（做了什麼、下一步） |
 | [docs/AUTO_FORM_FILL.md](docs/AUTO_FORM_FILL.md) | 表單自動填寫的分層設計 |
 | [docs/PADDLEOCR_INTEGRATION.md](docs/PADDLEOCR_INTEGRATION.md) | 離線 OCR backend 整合 |
 
