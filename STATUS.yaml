@@ -3,8 +3,8 @@ name_zh: 文件掃描郵件平台
 category: personal_tools
 progress: 100
 status: production
-last_updated: "2026-07-30"
-next_milestone: "GitHub Release step so the APK is a one-tap install; then live viewfinder (camera preview with edge overlay + auto-shutter)"
+last_updated: "2026-07-31"
+next_milestone: "Live viewfinder (camera preview with edge overlay + auto-shutter) or another 手邊小東西 from docs/TODO.md 後續工作"
 technologies:
   - Python
   - FastAPI
@@ -18,5 +18,5 @@ outputs:
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
 key_metrics: "91 API endpoints, 8 tool categories, 275 pytest + 273 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "Daily development routine (docs only, no code change). A scheduled Claude Code session wakes at 03:00 Taipei every day, picks the next small-and-complete item from docs/TODO.md 後續工作, implements it with tests, and opens a draft PR. Because each firing starts from a clean environment with no memory of the last one, the routine's closing contract is what keeps continuity: every run must update STATUS.yaml, the TODO.md changelog, and docs/ROUTINE_LOG.md (date / topic / branch / PR / result / next step). Rules live in docs/DAILY_ROUTINE.md so they are versioned and editable, not buried in the schedule. Previous change — v3.15.0 — direct touch control for collages. Select an image and drag to reposition it inside its cell, pinch to zoom, or hit swap and tap another image to trade places. Framing is stored as relative values (zoom factor plus a 0-1 focal point) so what you compose on the thumbnail is what the full-resolution export produces, and the focal point is clamped to the range that actually moves so dragging stops cleanly at the edge instead of accumulating dead travel. Images with untouched framing still take the original draw path, so existing collage output is unchanged"
+recent_changes: "GitHub Release step for one-tap APK install (CI/workflow only, app version unchanged at 3.15.0). Tagging android-v* now makes .github/workflows/android.yml create a GitHub Release with two ready-to-install .apk assets attached: scanmail-<tag>-full.apk (needs the backend) and scanmail-<tag>-offline.apk (device-only media tools). Uses the runner's built-in gh CLI (release create, or release upload --clobber if the tag's release already exists) rather than pulling in a marketplace action; added permissions: contents: write since the default token is read-only. Also fixed a pre-existing mislabeling bug: the tag-triggered assembleRelease ran right after the offline web-assets sync (done for the test:studio step), so the artifact named scanmail-release-apk actually packaged the offline build. The release stage now reruns build_mobile.py --sync and --offline --sync separately before each assembleRelease so both APKs match their names. Previous change — v3.15.0 — direct touch control for collages: select an image and drag to reposition it inside its cell, pinch to zoom, or hit swap and tap another image to trade places, with framing stored as relative values so thumbnail composition matches full-resolution export."
 

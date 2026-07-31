@@ -513,12 +513,24 @@ https://nightly.link/dofliu/scanmail-bot/workflows/android/main/scanmail-offline
 
 這個網址永遠指向 `main` 最新一次成功建置，適合當書籤。一樣是 zip，一樣要解壓縮。
 
-> **想要「點一下就安裝」的話還缺一步。** 目前打 `android-v*` 標籤只是再上傳一個 artifact，
-> **從頭到尾沒有建立過 GitHub Release**，所以 repo 裡沒有任何免登入、可直接點下去安裝的
-> `.apk` 連結。要補的話是在 workflow 加一個建立 Release 並附上 APK 的步驟 ——
-> Release asset 是直接下載，手機點下去就進安裝畫面。見「後續工作」。
+**D. 打 `android-v*` 標籤，從 GitHub Release 直接下載 `.apk`（推薦）**
 
-安裝時 Android 會因為是 debug 簽章而跳「不明來源」警告，允許即可。
+```
+https://github.com/dofliu/scanmail-bot/releases
+```
+
+打 tag 時 workflow 會建立一個 GitHub Release，附上兩個檔案：
+
+| 檔名 | 內容 |
+|------|------|
+| `scanmail-<tag>-full.apk` | 完整版（需要後端） |
+| `scanmail-<tag>-offline.apk` | 離線精簡版（裝置端媒體工具） |
+
+Release asset 是直接下載，**免登入、手機點連結就進安裝畫面**，不必解壓縮。
+
+安裝時 Android 會因為不是 Google Play 簽章而跳「不明來源」警告，允許即可
+（有設定 `ANDROID_KEYSTORE_BASE64` 等 secrets 的話是自己的 release 簽章；
+沒設的話是未簽章 APK，同樣會跳警告）。
 
 ---
 
@@ -624,7 +636,10 @@ cd mobile/android && ./gradlew assembleRelease
   | `test:scan` | 邊界偵測：合成有標準答案的影像，量角點誤差 |
   | `test:studio` | 離線版介面：情境工具列、手勢、各分頁流程 |
 
-* 打 `android-v*` 標籤 → 另外建置 release APK
+* 打 `android-v*` 標籤 → 另外分別建置完整版與離線版的 release APK，
+  並建立一個 **GitHub Release** 把兩份 `.apk` 附上去（免登入、點下去就能裝，
+  見上面「拿到 APK 的三種方式」的 D 項）。用 runner 內建的 `gh` CLI 建立 /
+  更新，重複打同一個 tag 會用 `--clobber` 蓋掉舊檔而不是失敗
 * 設定以下 repository secrets 後，release APK 會自動簽章：
   `ANDROID_KEYSTORE_BASE64`（`base64 -w0 scanmail-release.jks`）、
   `ANDROID_KEYSTORE_PASSWORD`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`

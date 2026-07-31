@@ -226,7 +226,6 @@
 
 | 項目 | 為什麼 | 規模 |
 |------|------|------|
-| **GitHub Release 步驟** | 現在打 `android-v*` 標籤只是再上傳一個 artifact，repo 裡沒有任何免登入、點下去就能裝的 `.apk`。手機要裝一次得先登入 GitHub、下載 zip、找檔案管理員解壓縮 | workflow 加一步 |
 | **取景跟著旋轉走** | 調好構圖後再按旋轉 / 拉正，對焦點還是原本的相對位置，畫面會跳一下。裁切框有處理（`rotateRect`），取景漏了 | 比照做一個 `rotateFit` |
 | **低信心時的重拍建議** | 現在只說「沒把握」，沒告訴使用者該怎麼補救（反光？過暗？離太遠？）。判斷依據在偵測時都算過了 | 前端提示 + 幾個門檻 |
 | **簽名庫改用 Capacitor Preferences** | 存在 `localStorage`，換手機或清除瀏覽器資料就沒了 | 換一層儲存 |
@@ -308,6 +307,23 @@
 ---
 
 ## 變更日誌
+
+### 2026/07/31 (CI/CD，不影響 App 版本號)
+
+- **GitHub Release 步驟**：打 `android-v*` 標籤時，`.github/workflows/android.yml`
+  現在會建立一個 GitHub Release，附上兩個免登入、點下去就能裝的 `.apk`：
+  - `scanmail-<tag>-full.apk` —— 完整版（需要後端）
+  - `scanmail-<tag>-offline.apk` —— 離線精簡版（裝置端媒體工具）
+  - 用 runner 內建的 `gh` CLI 建立 / 更新 Release（`gh release create` 或已存在時
+    `gh release upload --clobber`），沒有另外引入 marketplace action
+  - job 加上 `permissions: contents: write`，否則預設唯讀 token 建不了 Release
+- **順手修掉一個既有的標記錯誤**：release 建置流程原本會先跑「完整版建置」再跑
+  「離線版建置」（給 `test:studio` 用），但 tag 觸發的 `assembleRelease` 排在兩者
+  之後，等於**簽出來的 `scanmail-release-apk` 其實是離線版內容、卻掛著完整版的
+  artifact 名稱**。現在 release 階段會分別重跑一次 `build_mobile.py --sync` /
+  `--offline --sync` 再各自 `assembleRelease`，兩份 APK 名符其實
+- 這是 workflow 設定變更，不影響 App 執行邏輯或 `static/`，因此不需要跑
+  `mobile/` 下的瀏覽器測試；`main.py` 版本號維持 `3.15.0` 不變
 
 ### 2026/07/30 (每日自動開發 Routine，無程式異動)
 
