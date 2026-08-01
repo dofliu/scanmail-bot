@@ -281,9 +281,9 @@
 | API 路由 | 91 |
 | 工具頁面 | 7 |
 | 前端 JS 模組 | 25（其中 6 支是裝置端引擎：image-local / scan-lite / sign-lite / pdf-lite / pdf-write / doc-local） |
-| 後端服務模組 | 12 |
-| 資料庫表 | 7 |
-| 資料模型 | 5 (contact, group, template, history, sender) |
+| 後端服務模組 | 12（另有 form_fill/ dispatcher+4 backend、common/ 共用工具兩個子套件） |
+| 資料庫表 | 9 (contacts, contact_groups, group_members, email_templates, form_templates, send_history, user_sessions, sender_profiles, users) |
+| 資料模型 | 8 (contact, group, template, history, sender, form_template, session, user) |
 | 邊界偵測策略 | 7 (UNet_Mask, Canny×3, WhiteRegion, Otsu, Laplacian, HED, GrabCut — v5 逐邊證據評分 + 次像素精修) |
 | 掃描濾鏡 | 7 (auto, scan, color_doc, document, enhance, bw, original) |
 | 郵件模板 | 8 種文件類型預設 + 自訂 |
@@ -307,6 +307,23 @@
 ---
 
 ## 變更日誌
+
+### 2026/08/01 (文件整理，無程式異動)
+
+- 盤點目前專案狀況：核對 `app/routers/`、`app/services/`、`app/models/`、SQLite 資料表
+  與程式碼實際數量，抓到幾處文件沒跟上程式碼的地方並修正：
+  - **README.md**「技術架構」ASCII 圖：路由模組 7 → **9**（漏了 `auth.py`、
+    `form_tools.py`）、服務模組 10 → **12**、SQLite 資料表 7 → **9**（漏了
+    `form_templates`、`users`，`groups` 更名為實際的 `contact_groups`）
+  - **README.md**「專案結構」樹狀圖：`core/` 補上 `auth.py` / `rate_limiter.py`；
+    `routers/` 補上 `auth.py` / `form_tools.py`；`services/` 補上 `ai_renamer.py`、
+    `flex_builder.py`、`form_fill/`（表單填寫 dispatcher + 4 backend）、
+    `common/`；`models/` 補上 `form_template.py` / `session.py` / `user.py`
+  - **docs/ARCHITECTURE.md**：架構圖 SQLite 表數同步更新（routers/services 數量
+    本來就是對的），「最後更新」日期回填為實際檢查日期
+  - **docs/TODO.md**「平台統計」：資料庫表 7 → 9、資料模型 5 → 8，都補上完整清單
+  - 其餘統計（API 91 個、工具頁面 7、前端 JS 模組 25、測試 275 pytest + 273
+    瀏覽器測試）逐項對過程式碼與測試檔案，數字正確，未變動
 
 ### 2026/07/31 (CI/CD，不影響 App 版本號)
 

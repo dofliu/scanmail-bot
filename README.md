@@ -367,14 +367,15 @@ choco install ffmpeg
 │   工具導航列 · 7 個工具頁面 · 手機/桌面雙介面           │
 ├──────────────────────────────────────────────────────┤
 │              FastAPI 後端 (Python)                     │
-│   7 個路由模組 · 10 個服務模組 · SSE 即時進度           │
+│   9 個路由模組 · 12 個服務模組 · SSE 即時進度           │
 ├───────────┬──────────┬──────────┬────────────────────┤
 │ Gemini    │ OpenCV   │ Pillow   │ moviepy / pypdf    │
 │ Vision AI │ 掃描處理  │ 圖片處理  │ 影片 / PDF 處理     │
 ├───────────┴──────────┴──────────┴────────────────────┤
-│              SQLite 資料庫 (7 張表)                     │
-│  contacts · groups · group_members · email_templates  │
-│  send_history · user_sessions · sender_profiles       │
+│              SQLite 資料庫 (9 張表)                     │
+│  contacts · contact_groups · group_members             │
+│  email_templates · form_templates · send_history       │
+│  user_sessions · sender_profiles · users               │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -390,35 +391,50 @@ scanmail-bot/
 │   ├── core/                       # 共用基礎設施
 │   │   ├── sessions.py             #   工作階段管理
 │   │   ├── tasks.py                #   背景任務 + SSE 進度
-│   │   └── file_manager.py         #   暫存檔管理
+│   │   ├── file_manager.py         #   暫存檔管理 + 路徑穿越防禦
+│   │   ├── auth.py                 #   登入 / JWT
+│   │   └── rate_limiter.py         #   API 速率限制
 │   │
-│   ├── routers/                    # API 路由
+│   ├── routers/                    # API 路由（9 個模組）
 │   │   ├── scanmail.py             #   掃描郵寄 + 批次寄送 + 群組 + 模板
 │   │   ├── image_tools.py          #   圖片批次處理
 │   │   ├── pdf_tools.py            #   PDF 合併/浮水印/加密
 │   │   ├── doc_convert.py          #   文件格式轉換
 │   │   ├── gif_tools.py            #   GIF 動畫製作
 │   │   ├── video_tools.py          #   影片合併/壓縮/轉GIF
-│   │   └── batch_rename.py         #   批次改名
+│   │   ├── batch_rename.py         #   批次改名
+│   │   ├── form_tools.py           #   表單自動填寫（Beta）
+│   │   └── auth.py                 #   登入 / 使用者
 │   │
-│   ├── services/                   # 業務邏輯
+│   ├── services/                   # 業務邏輯（12 個模組）
 │   │   ├── doc_scanner.py          #   邊界偵測 v5（逐邊評分/次像素精修/寬高比恢復）/透視校正/濾鏡
 │   │   ├── image_processor.py      #   圖片驗證/PDF 轉換
 │   │   ├── ai_analyzer.py          #   Gemini AI 辨識
+│   │   ├── ai_renamer.py           #   AI 輔助批次改名
 │   │   ├── email_sender.py         #   SMTP 寄送
 │   │   ├── image_batch.py          #   圖片批次處理引擎
 │   │   ├── pdf_processor.py        #   PDF 處理引擎
 │   │   ├── doc_converter.py        #   文件轉檔引擎
 │   │   ├── gif_creator.py          #   GIF 製作引擎
 │   │   ├── video_processor.py      #   影片處理引擎
-│   │   └── batch_renamer.py        #   改名引擎
+│   │   ├── batch_renamer.py        #   改名引擎
+│   │   ├── flex_builder.py         #   表單填寫的版面 flex 排版
+│   │   ├── form_fill/              #   表單自動填寫：dispatcher + 4 backend
+│   │   │   │                       #   （acroform / pdfplumber / paddle / gemini）
+│   │   │   ├── dispatcher.py
+│   │   │   ├── filler.py · matcher.py · schema.py · semantic_mapper.py
+│   │   │   └── backends/
+│   │   └── common/                 #   共用工具（json_parsing.py 等）
 │   │
-│   ├── models/                     # 資料庫模型
+│   ├── models/                     # 資料庫模型（8 個）
 │   │   ├── contact.py              #   聯絡人 CRUD
 │   │   ├── group.py                #   收件人群組
 │   │   ├── template.py             #   郵件模板
 │   │   ├── history.py              #   寄件歷史
-│   │   └── sender.py               #   寄件人設定
+│   │   ├── sender.py               #   寄件人設定
+│   │   ├── form_template.py        #   表單填寫模板
+│   │   ├── session.py              #   工作階段
+│   │   └── user.py                 #   使用者帳號
 │   │
 │   └── config.py                   # 環境變數設定
 │

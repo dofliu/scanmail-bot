@@ -3,7 +3,7 @@ name_zh: 文件掃描郵件平台
 category: personal_tools
 progress: 100
 status: production
-last_updated: "2026-07-31"
+last_updated: "2026-08-01"
 next_milestone: "Live viewfinder (camera preview with edge overlay + auto-shutter) or another 手邊小東西 from docs/TODO.md 後續工作"
 technologies:
   - Python
@@ -18,5 +18,5 @@ outputs:
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
 key_metrics: "91 API endpoints, 8 tool categories, 275 pytest + 273 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "GitHub Release step for one-tap APK install (CI/workflow only, app version unchanged at 3.15.0). Tagging android-v* now makes .github/workflows/android.yml create a GitHub Release with two ready-to-install .apk assets attached: scanmail-<tag>-full.apk (needs the backend) and scanmail-<tag>-offline.apk (device-only media tools). Uses the runner's built-in gh CLI (release create, or release upload --clobber if the tag's release already exists) rather than pulling in a marketplace action; added permissions: contents: write since the default token is read-only. Also fixed a pre-existing mislabeling bug: the tag-triggered assembleRelease ran right after the offline web-assets sync (done for the test:studio step), so the artifact named scanmail-release-apk actually packaged the offline build. The release stage now reruns build_mobile.py --sync and --offline --sync separately before each assembleRelease so both APKs match their names. Previous change — v3.15.0 — direct touch control for collages: select an image and drag to reposition it inside its cell, pinch to zoom, or hit swap and tap another image to trade places, with framing stored as relative values so thumbnail composition matches full-resolution export."
+recent_changes: "Docs-only audit (no code change): cross-checked README.md/ARCHITECTURE.md/TODO.md against the actual codebase and fixed stale counts that had drifted — routers 7→9 (missing auth.py, form_tools.py), services 10→12, SQLite tables 7→9 (missing form_templates, users; groups renamed to the real contact_groups table), data models 5→8 (missing form_template, session, user), plus the README project-structure tree for core/routers/services/models. Everything else checked out already accurate (91 API endpoints, 7 tool tabs, 25 frontend JS modules, 275 pytest + 273 browser tests). Previous change — GitHub Release step for one-tap APK install (CI/workflow only, app version unchanged at 3.15.0): tagging android-v* now makes .github/workflows/android.yml create a GitHub Release with two ready-to-install .apk assets (scanmail-<tag>-full.apk, scanmail-<tag>-offline.apk) via the runner's built-in gh CLI, and fixed a pre-existing bug where the tag-triggered release build actually packaged the offline web assets under the full-version artifact name."
 
