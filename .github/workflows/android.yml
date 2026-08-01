@@ -29,6 +29,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # 打 tag 時要用 gh release create/upload 附加 APK，預設的 read-only token 做不到
+    permissions:
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
@@ -141,7 +144,13 @@ jobs:
             echo "path=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Assemble release APK
+      # mobile/www/ 現在裝的是上面「離線精簡版」的內容（測 test:studio 時同步過），
+      # 完整版 release 要先切回來重新同步一次，不然簽出來的是掛著完整版名字的離線版
+      - name: Rebuild full web assets for release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: python scripts/build_mobile.py --sync
+
+      - name: Assemble full release APK
         if: startsWith(github.ref, 'refs/tags/android-v')
         working-directory: mobile/android
         env:
@@ -151,10 +160,64 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Upload release APK
+      - name: Upload full release APK
         if: startsWith(github.ref, 'refs/tags/android-v')
         uses: actions/upload-artifact@v4
         with:
           name: scanmail-release-apk
           path: mobile/android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      # 這一份留給 GitHub Release —— 檔名要在跟離線版一起發佈時分得清楚
+      - name: Collect full release APK for the Release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: |
+          mkdir -p release-assets
+          cp mobile/android/app/build/outputs/apk/release/*.apk \
+            "release-assets/scanmail-${{ github.ref_name }}-full.apk"
+
+      - name: Rebuild offline web assets for release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: python scripts/build_mobile.py --offline --sync
+
+      - name: Assemble offline release APK
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        working-directory: mobile/android
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ steps.keystore.outputs.path }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon assembleRelease
+
+      - name: Upload offline release APK
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanmail-offline-release-apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - name: Collect offline release APK for the Release
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        run: |
+          cp mobile/android/app/build/outputs/apk/release/*.apk \
+            "release-assets/scanmail-${{ github.ref_name }}-offline.apk"
+
+      # 免登入、點下去就能裝：把兩個 APK 附到這個 tag 的 GitHub Release 上。
+      # 用 gh CLI（runner 內建）而不是另外引入 marketplace action。
+      # 允許重跑同一個 tag：release 已存在就改用 upload --clobber 蓋掉舊檔。
+      - name: Publish GitHub Release with APKs
+        if: startsWith(github.ref, 'refs/tags/android-v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" release-assets/*.apk \
+              --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "${{ github.ref_name }}" release-assets/*.apk \
+              --repo "${{ github.repository }}" \
+              --title "${{ github.ref_name }}" \
+              --generate-notes
+          fi
