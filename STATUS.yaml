@@ -4,7 +4,21 @@ category: personal_tools
 progress: 100
 status: production
 last_updated: "2026-08-01"
-next_milestone: "Live viewfinder (camera preview with edge overlay + auto-shutter) or another 手邊小東西 from docs/TODO.md 後續工作"
+next_milestone: "rotateFit — viewfinder framing should follow rotate/deskew the same way crop's rotateRect does (see roadmap[0] and docs/TODO.md 後續工作)"
+# 每天 03:00 的 routine 依序從這裡挑下一項；一個晚上做完一項就從陣列頭部移除、
+# 相應把 docs/TODO.md 那一項的核取方塊打勾。順序＝投報率 ÷ 風險，跟 TODO.md 後續工作一致；
+# 完整的「為什麼還沒做」寫在 TODO.md，這裡只留一行摘要方便不開檔案就看到下一步是什麼。
+roadmap:
+  - "取景跟著旋轉走（rotateFit）：拉正 / 旋轉後對焦點要跟著轉，比照裁切框已有的 rotateRect"
+  - "簽名庫改用 Capacitor Preferences：@capacitor/preferences 已是相依套件只是還沒接上；記得網頁版要有等效 fallback"
+  - "低信心時的重拍建議：偵測時算過的門檻（反光/過暗/太遠）變成前端提示文案，而不是只說『沒把握』"
+  - "即時取景 M1：getUserMedia 取流 + 每隔幾幀跑一次 scan-lite 偵測 + 疊框顯示（先不做自動快門）"
+  - "即時取景 M2：框穩定度判斷 + 倒數 + 自動快門（接續 M1）"
+  - "標註工具 M1：箭頭 / 方框，共用打碼既有的拖框互動；drawTexts 從單一物件改陣列（多圖層前置工作）"
+  - "標註工具 M2：螢光筆 / 手寫（接續 M1 的多圖層）"
+  - "裝置端 OCR M1：先做數字與英文（tesseract.js 模型小很多，發票金額/單號/日期先吃下）"
+  - "裝置端 OCR M2：中文選配（語言包大、辨識率不如後端 PaddleOCR）"
+  - "次像素角點精修：先擱置，等有真實照片的角點誤差回饋再排（現在補是憑空優化）"
 technologies:
   - Python
   - FastAPI
@@ -18,5 +32,5 @@ outputs:
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
 key_metrics: "91 API endpoints, 8 tool categories, 275 pytest + 273 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "Docs-only audit (no code change): cross-checked README.md/ARCHITECTURE.md/TODO.md against the actual codebase and fixed stale counts that had drifted — routers 7→9 (missing auth.py, form_tools.py), services 10→12, SQLite tables 7→9 (missing form_templates, users; groups renamed to the real contact_groups table), data models 5→8 (missing form_template, session, user), plus the README project-structure tree for core/routers/services/models. Everything else checked out already accurate (91 API endpoints, 7 tool tabs, 25 frontend JS modules, 275 pytest + 273 browser tests). Previous change — GitHub Release step for one-tap APK install (CI/workflow only, app version unchanged at 3.15.0): tagging android-v* now makes .github/workflows/android.yml create a GitHub Release with two ready-to-install .apk assets (scanmail-<tag>-full.apk, scanmail-<tag>-offline.apk) via the runner's built-in gh CLI, and fixed a pre-existing bug where the tag-triggered release build actually packaged the offline web assets under the full-version artifact name."
+recent_changes: "Docs-only planning pass (no code change): added a `roadmap` array to this file — 10 items, ordered ROI÷risk, one-line summaries — so the nightly routine can pick roadmap[0] directly instead of re-deriving priority from TODO.md every run. next_milestone now points at roadmap[0]. docs/TODO.md 後續工作 split the three bigger items (live viewfinder, annotation tool, on-device OCR) into explicit M1/M2 checkboxes matching the roadmap entries. docs/DAILY_ROUTINE.md's selection step (定位/選題) and closing contract (收尾契約) updated to read/maintain roadmap. Previous change — docs-only audit: cross-checked README.md/ARCHITECTURE.md/TODO.md against the actual codebase and fixed stale counts — routers 7→9, services 10→12, SQLite tables 7→9, data models 5→8. Before that — GitHub Release step for one-tap APK install: tagging android-v* now makes .github/workflows/android.yml create a GitHub Release with two ready-to-install .apk assets via the runner's built-in gh CLI."
 

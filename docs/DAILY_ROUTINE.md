@@ -48,24 +48,31 @@ session，把 ScanMail+ 往前推**一個小而完整的增量**，然後把進�
 
 | 讀什麼 | 為什麼 |
 |------|------|
-| `STATUS.yaml` | 進度、`next_milestone`、目前的 key metrics |
+| `STATUS.yaml` | 進度、`next_milestone`、`roadmap`（排好序的下幾個增量）、目前的 key metrics |
 | [TODO.md](TODO.md) 「已完成功能」 | Phase 1–17 做過的事，別重造輪子 |
-| [TODO.md](TODO.md) 「**後續工作**」 | **選題來源**，每項都寫了為什麼還沒做 |
+| [TODO.md](TODO.md) 「**後續工作**」 | **選題的完整依據**，每項都寫了為什麼還沒做；大功能已拆成 M1/M2 checkbox |
 | [TODO.md](TODO.md) 「評估過、決定不做的」 | **不要碰**：去背、裝置端影片處理、iOS、等寬字型 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | 模組分工、裝置端引擎那一側 |
 | [ANDROID.md](ANDROID.md) | App 建置流程、離線版功能、簽章 |
 
 ### 2. 選一個「今天的增量」
 
-從「後續工作」依**投報率 ÷ 風險**挑下一個合理的小步。判準：
+**先看 `STATUS.yaml` 的 `roadmap` 陣列** —— 這是已經照投報率 ÷ 風險排好的佇列，
+預設**直接挑陣列第一項**，不必重新排序。它是 [TODO.md](TODO.md) 「後續工作」的精簡版：
+`roadmap` 只留一行摘要方便不開檔案就知道下一步，完整的「為什麼還沒做」在 TODO.md。
+
+只有這些情況才偏離 `roadmap[0]`：
+
+- 它依賴的前一項還沒做完（例如「即時取景 M2」排在「M1」前面卻 M1 還沒做）
+- 上一次 `ROUTINE_LOG.md` 留了「未完成／原因」，那個優先於 roadmap
+- `roadmap` 是空的，或每一項都做完了 —— 回頭從 [TODO.md](TODO.md)「後續工作」重新選一項、
+  補進 `roadmap`
+
+判準（roadmap 為空、或要重新規劃時才需要重新套用）：
 
 - 範圍要能在**這一次 session 內做完＋測試＋開 PR**。做不完的不是好選擇。
-- 大功能就拆，只做其中一個子步，其餘寫回 TODO.md ——
-  例如「即時取景」可以先只做 `getUserMedia` 取流與每隔幾幀跑偵測，
-  穩定度判斷與自動快門留給下一次。
+- 大功能就拆，只做其中一個子步，其餘寫回 TODO.md（M1/M2 這種切法就是為此存在）。
 - 同樣投報率的，優先選**風險低、可回歸測試**的那個。
-- 手邊小東西（取景跟著旋轉走、低信心重拍建議、簽名庫換 Preferences 等）
-  隨時可以拿一個來做；它們就是為了這種場合列的。
 
 ### 3. 開發
 
@@ -132,8 +139,8 @@ git push -u origin claude/nightly-<主題>
 
 | 檔案 | 更新什麼 |
 |------|------|
-| `STATUS.yaml` | `last_updated`、`recent_changes`；必要時 `next_milestone`、`key_metrics` |
-| [TODO.md](TODO.md) | 勾掉完成項、把拆出來的後續補進「後續工作」、「變更日誌」加一則（含版本號） |
+| `STATUS.yaml` | `last_updated`、`recent_changes`；**把做完的那一項從 `roadmap` 陣列移除**，`next_milestone` 跟著換成新的 `roadmap[0]`；必要時 `key_metrics` |
+| [TODO.md](TODO.md) | 勾掉完成項（M1/M2 是獨立的 checkbox，只勾做完的那個）、把拆出來的後續補進「後續工作」、「變更日誌」加一則（含版本號） |
 | [ROUTINE_LOG.md](ROUTINE_LOG.md) | **加一筆**：日期／主題／分支／PR／結果／下一步 |
 | [ARCHITECTURE.md](ARCHITECTURE.md) / [ANDROID.md](ANDROID.md) | 動到架構或 App 就順手更新 |
 | [README.md](../README.md) | 新增功能、API 端點數、測試數有變就更新 |
