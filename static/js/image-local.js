@@ -459,6 +459,9 @@
       bitmap: corrected,
       preview: previewOf(corrected),
       cropRect: null,
+      // 透視校正會把整張圖重新映射，舊的對焦點指到的已經不是同一塊內容 ——
+      // 跟裁切框一樣歸零，讓拉正後的結果從「剛好填滿」重新開始構圖
+      fit: null,
       // 只留第一次的原圖 —— 拉正兩次的話「還原」該回到最初，不是回到上一次
       original: item.original || { bitmap: item.bitmap, preview: item.preview },
     };
@@ -468,7 +471,9 @@
   function undoDeskew(item) {
     if (!item.original) return item;
     const { original, ...rest } = item;
-    return { ...rest, bitmap: original.bitmap, preview: original.preview, cropRect: null };
+    return {
+      ...rest, bitmap: original.bitmap, preview: original.preview, cropRect: null, fit: null,
+    };
   }
 
   /**
@@ -662,6 +667,32 @@
     return axis === 'h'
       ? { ...rect, x: 1 - rect.x - rect.w }
       : { ...rect, y: 1 - rect.y - rect.h };
+  }
+
+  /**
+   * 格子內的取景也要跟著轉，理由跟裁切框一樣：對焦點是「原圖上的哪一點」，
+   * 圖轉了它就落到別的內容上，調好的構圖會在按下旋轉的瞬間跳掉。
+   * 座標映射沿用 rotateRect 那一套 —— 順時針 90° 時 (x, y) → (1 - y, x)。
+   * zoom 是「相對於剛好填滿格子」的倍率，跟方向無關，原封不動帶過去。
+   */
+  function rotateFit(fit, delta) {
+    if (!fit) return null;
+    let f = { ...fit };
+    let times = ((Math.round(delta / 90) % 4) + 4) % 4;
+    while (times--) {
+      const x = f.x == null ? 0.5 : f.x;
+      const y = f.y == null ? 0.5 : f.y;
+      f = { ...f, x: 1 - y, y: x };
+    }
+    return f;
+  }
+
+  /** 鏡射同理：翻面之後對焦點要換到對稱的另一側 */
+  function flipFit(fit, axis) {
+    if (!fit) return null;
+    return axis === 'h'
+      ? { ...fit, x: 1 - (fit.x == null ? 0.5 : fit.x) }
+      : { ...fit, y: 1 - (fit.y == null ? 0.5 : fit.y) };
   }
 
   /** 在指定方框內畫圖：contain 等比縮入（可能留白）、cover 裁切填滿 */
@@ -1215,6 +1246,8 @@
     centeredRect,
     rotateRect,
     flipRect,
+    rotateFit,
+    flipFit,
     filterOf,
     applyRedactions,
     drawTexts,

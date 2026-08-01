@@ -9,6 +9,17 @@
 
 ---
 
+## 2026/08/01（第三筆）— 取景跟著旋轉走（rotateFit）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[0]`：拼貼的格子內取景在旋轉 / 翻面 / 拉正之後會飄掉 |
+| 分支 | `claude/nightly-rotate-fit` |
+| PR | 見分支上的草稿 PR |
+| 結果 | 完成，v3.16.0。`static/js/image-local.js` 新增 `rotateFit` / `flipFit`，`studio.jsx` 的旋轉 / 翻面接上（原本只帶 `cropRect`）；`deskewItem` / `undoDeskew` 把 `fit` 跟 `cropRect` 一起設回 `null`（透視校正整張重新映射，舊對焦點沒有意義）。座標映射刻意跟 `rotateRect` 同一套，並用「拿一個沒有大小的裁切框跟 `rotateFit` 對答案」的測試把這個約束釘住。測試 +15（圖片引擎 54 → 69），含一組三色直帶的像素驗證：旋轉前後格子中央取樣要同色，另外刻意保留一個「沒跟著轉會看到綠色」的對照案例。全綠 —— pytest 272 passed + 3 skipped、瀏覽器 288 項（image 69 / studio 80 / doc 51 / sign 45 / scan 22 / pages 21）|
+| 環境注意事項 | 這個容器有兩個坑，下次直接照做省時間：①`npm ci` 裝的 Playwright 版本跟容器內建的 Chromium 對不上，**不要跑 `playwright install`**，改用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx`（測試本來就支援這個環境變數）②`pip install` 完要再補一個 `pip install cffi pytest`，否則 `tests/generate_test_forms.py` 會在 `cryptography` 掛掉（`ModuleNotFoundError: _cffi_backend`）。`pip install` 對 files.pythonhosted.org 會 read timeout，加 `--timeout 120` |
+| 下一步 | 做 `roadmap[0]`：**簽名庫改用 Capacitor Preferences**。簽名 / 印章目前存在 `localStorage`（找 `static/js/` 裡讀寫簽名庫的地方，`sign-lite.js` 與 `studio.jsx` 的簽名庫面板），換手機或清瀏覽器資料就沒了。`@capacitor/preferences` 已經在 `mobile/package.json` 的相依裡、只是沒接上；`static/js/native.js` 是既有的原生能力橋接層，加一層「有原生就用 Preferences、沒有就退回 localStorage」的儲存介面比較乾淨，網頁版與離線版都要能跑。補 `npm run test:sign` / `test:studio` 的測試（studio 測試裡已經有存簽名 → 在 PDF 分頁看得到的案例可以延伸）。做完把這項從 `STATUS.yaml` 的 `roadmap` 移除、`docs/TODO.md`「手邊就能做的小東西」對應那列刪掉 |
+
 ## 2026/08/01（第二筆）— 排出後續 10 個增量的 roadmap（無程式異動）
 
 | 項目 | 內容 |

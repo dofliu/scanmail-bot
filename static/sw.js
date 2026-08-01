@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scanmail-v16';
+const CACHE_NAME = 'scanmail-v17';
 const ASSETS = [
   '/',
   '/index.html',
