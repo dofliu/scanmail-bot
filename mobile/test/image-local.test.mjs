@@ -419,6 +419,126 @@ check('對焦點移到左邊 → 格子裡看到的是原圖左半（紅）',
 check('對焦點移到右邊 → 格子裡看到的是原圖右半（藍）',
   framedPixels.right.endsWith(',255'), framedPixels.right);
 
+// ── 取景跟著旋轉 / 翻面走 ──────────────────────────────
+console.log('\n取景跟著旋轉走');
+
+const fitTransforms = await page.evaluate(() => {
+  const L = window.SMImageLocal;
+  const start = { zoom: 2.5, x: 0.2, y: 0.7 };
+
+  // 對焦點就是一個沒有大小的裁切框，兩者的座標映射必須一致 ——
+  // 不一致的話裁切框跟取景會在旋轉後各自跑到不同地方
+  const agreesWithRect = [90, 180, 270, -90, 360].every((d) => {
+    const asRect = L.rotateRect({ x: start.x, y: start.y, w: 0, h: 0 }, d);
+    const asFit = L.rotateFit(start, d);
+    return Math.abs(asRect.x - asFit.x) < 1e-9 && Math.abs(asRect.y - asFit.y) < 1e-9;
+  });
+
+  return {
+    agreesWithRect,
+    cw90: L.rotateFit(start, 90),
+    round: L.rotateFit(L.rotateFit(L.rotateFit(L.rotateFit(start, 90), 90), 90), 90),
+    ccw90: L.rotateFit(start, -90),
+    noFit: [L.rotateFit(null, 90), L.flipFit(null, 'h')],
+    // 沒填 x / y 的取景等同置中，不能算成 NaN
+    partial: L.rotateFit({ zoom: 3 }, 90),
+    flipH: L.flipFit(start, 'h'),
+    flipV: L.flipFit(start, 'v'),
+    flipTwice: L.flipFit(L.flipFit(start, 'h'), 'h'),
+  };
+});
+
+check('旋轉對焦點跟裁切框用同一套座標映射',
+  fitTransforms.agreesWithRect === true, JSON.stringify(fitTransforms.cw90));
+// 順時針 90°：原圖左緣會轉到上緣，所以 (x, y) → (1 - y, x)
+check('順時針 90°：(x, y) → (1 - y, x)',
+  Math.abs(fitTransforms.cw90.x - 0.3) < 1e-9 && Math.abs(fitTransforms.cw90.y - 0.2) < 1e-9,
+  JSON.stringify(fitTransforms.cw90));
+check('轉四次回到原點', Math.abs(fitTransforms.round.x - 0.2) < 1e-9 &&
+  Math.abs(fitTransforms.round.y - 0.7) < 1e-9, JSON.stringify(fitTransforms.round));
+check('逆時針 90° 等同順時針 270°',
+  Math.abs(fitTransforms.ccw90.x - 0.7) < 1e-9 && Math.abs(fitTransforms.ccw90.y - 0.8) < 1e-9,
+  JSON.stringify(fitTransforms.ccw90));
+check('縮放倍率跟方向無關，原封不動帶過去',
+  fitTransforms.cw90.zoom === 2.5 && fitTransforms.flipH.zoom === 2.5,
+  JSON.stringify([fitTransforms.cw90.zoom, fitTransforms.flipH.zoom]));
+check('沒動過取景的圖不會被硬塞一個 fit',
+  fitTransforms.noFit.every((v) => v === null), JSON.stringify(fitTransforms.noFit));
+check('沒填對焦點時當作置中，不會算成 NaN',
+  Math.abs(fitTransforms.partial.x - 0.5) < 1e-9 &&
+  Math.abs(fitTransforms.partial.y - 0.5) < 1e-9 && fitTransforms.partial.zoom === 3,
+  JSON.stringify(fitTransforms.partial));
+check('水平翻面：對焦點換到對稱的另一側',
+  Math.abs(fitTransforms.flipH.x - 0.8) < 1e-9 && fitTransforms.flipH.y === 0.7,
+  JSON.stringify(fitTransforms.flipH));
+check('垂直翻面：只動另一個軸',
+  Math.abs(fitTransforms.flipV.y - 0.3) < 1e-9 && fitTransforms.flipV.x === 0.2,
+  JSON.stringify(fitTransforms.flipV));
+check('翻兩次回到原點', Math.abs(fitTransforms.flipTwice.x - 0.2) < 1e-9,
+  JSON.stringify(fitTransforms.flipTwice));
+
+// 真的畫出來：旋轉前後，格子中央看到的內容要是同一塊
+const rotatedFraming = await page.evaluate(() => {
+  const L = window.SMImageLocal;
+  // 三條直帶（左紅、中綠、右藍）—— 兩色分不出「跟著轉」和「剛好停在接縫」
+  const src = document.createElement('canvas');
+  src.width = 240; src.height = 120;
+  const sc = src.getContext('2d');
+  [['#ff0000', 0], ['#00ff00', 80], ['#0000ff', 160]].forEach(([color, x]) => {
+    sc.fillStyle = color; sc.fillRect(x, 0, 80, 120);
+  });
+
+  // 順時針轉 90°，畫法跟 renderItem 一致 —— 左邊那條紅帶會跑到最上面
+  const rot = document.createElement('canvas');
+  rot.width = 120; rot.height = 240;
+  const rc = rot.getContext('2d');
+  rc.translate(rot.width / 2, rot.height / 2);
+  rc.rotate(Math.PI / 2);
+  rc.drawImage(src, -src.width / 2, -src.height / 2);
+
+  const sample = (img, fit) => {
+    const c = document.createElement('canvas');
+    c.width = 120; c.height = 120;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    L.drawCell(ctx, img, { x: 0, y: 0, w: 120, h: 120 }, {}, 'cover', fit);
+    const d = ctx.getImageData(60, 60, 1, 1).data;
+    return `${d[0]},${d[1]},${d[2]}`;
+  };
+
+  const before = { zoom: 1, x: 0.1, y: 0.5 };   // 對焦在最左邊的紅帶
+  return {
+    before: sample(src, before),
+    after: sample(rot, L.rotateFit(before, 90)),
+    stale: sample(rot, before),                 // 取景沒跟著轉會看到的東西
+  };
+});
+
+check('旋轉前對焦在紅帶', rotatedFraming.before === '255,0,0', rotatedFraming.before);
+check('旋轉後取景跟著走 → 格子中央還是同一塊（紅）',
+  rotatedFraming.after === '255,0,0', rotatedFraming.after);
+check('取景沒跟著轉的話構圖會飄掉（綠）—— 這是修掉的行為',
+  rotatedFraming.stale === '0,255,0', rotatedFraming.stale);
+
+// 拉正會把整張圖重新映射，舊的對焦點指到的不是同一塊內容了
+const deskewFit = await page.evaluate(() => {
+  const L = window.SMImageLocal;
+  const canvas = document.createElement('canvas');
+  canvas.width = 40; canvas.height = 40;
+  // deskewItem 只用到 SMScanLite.warp，測這一段不需要真的跑透視校正
+  window.SMScanLite = { warp: () => canvas };
+  const item = {
+    bitmap: canvas, preview: canvas,
+    cropRect: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 },
+    fit: { zoom: 2, x: 0.2, y: 0.8 },
+  };
+  const corners = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }];
+  const deskewed = L.deskewItem(item, corners);
+  return { after: deskewed.fit, reverted: L.undoDeskew(deskewed).fit };
+});
+
+check('拉正後取景歸零（跟裁切框一樣）', deskewFit.after === null, JSON.stringify(deskewFit));
+check('還原拉正後取景也歸零', deskewFit.reverted === null, JSON.stringify(deskewFit));
+
 await browser.close();
 
 const failed = results.filter((r) => !r.pass);

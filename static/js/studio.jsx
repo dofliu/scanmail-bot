@@ -1125,10 +1125,20 @@ function StudioEditor() {
     rotate: (((current.rotate + delta) % 360) + 360) % 360,
     // 裁切框跟著轉，不然轉一下就會裁到別的地方
     cropRect: window.SMImageLocal.rotateRect(current.cropRect, delta),
+    // 格子內的取景同理 —— 對焦點不跟著轉，調好的構圖按一下旋轉就跳掉了
+    fit: window.SMImageLocal.rotateFit(current.fit, delta),
   });
   const flip = (axis) => patch(axis === 'h'
-    ? { flipH: !current.flipH, cropRect: window.SMImageLocal.flipRect(current.cropRect, 'h') }
-    : { flipV: !current.flipV, cropRect: window.SMImageLocal.flipRect(current.cropRect, 'v') });
+    ? {
+      flipH: !current.flipH,
+      cropRect: window.SMImageLocal.flipRect(current.cropRect, 'h'),
+      fit: window.SMImageLocal.flipFit(current.fit, 'h'),
+    }
+    : {
+      flipV: !current.flipV,
+      cropRect: window.SMImageLocal.flipRect(current.cropRect, 'v'),
+      fit: window.SMImageLocal.flipFit(current.fit, 'v'),
+    });
 
   const remove = () => {
     const i = sel;

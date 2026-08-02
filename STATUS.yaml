@@ -4,12 +4,11 @@ category: personal_tools
 progress: 100
 status: production
 last_updated: "2026-08-01"
-next_milestone: "rotateFit — viewfinder framing should follow rotate/deskew the same way crop's rotateRect does (see roadmap[0] and docs/TODO.md 後續工作)"
+next_milestone: "簽名庫改用 Capacitor Preferences — @capacitor/preferences 已是相依套件只是還沒接上；網頁版要有等效 fallback (see roadmap[0] and docs/TODO.md 後續工作)"
 # 每天 03:00 的 routine 依序從這裡挑下一項；一個晚上做完一項就從陣列頭部移除、
 # 相應把 docs/TODO.md 那一項的核取方塊打勾。順序＝投報率 ÷ 風險，跟 TODO.md 後續工作一致；
 # 完整的「為什麼還沒做」寫在 TODO.md，這裡只留一行摘要方便不開檔案就看到下一步是什麼。
 roadmap:
-  - "取景跟著旋轉走（rotateFit）：拉正 / 旋轉後對焦點要跟著轉，比照裁切框已有的 rotateRect"
   - "簽名庫改用 Capacitor Preferences：@capacitor/preferences 已是相依套件只是還沒接上；記得網頁版要有等效 fallback"
   - "低信心時的重拍建議：偵測時算過的門檻（反光/過暗/太遠）變成前端提示文案，而不是只說『沒把握』"
   - "即時取景 M1：getUserMedia 取流 + 每隔幾幀跑一次 scan-lite 偵測 + 疊框顯示（先不做自動快門）"
@@ -31,6 +30,6 @@ outputs:
   - mobile_app
 description: "Document scanning and mailing platform"
 description_zh: "文件掃描與郵件平台"
-key_metrics: "91 API endpoints, 8 tool categories, 275 pytest + 273 browser tests, web + Android + offline-only APK from one frontend"
-recent_changes: "Docs-only planning pass (no code change): added a `roadmap` array to this file — 10 items, ordered ROI÷risk, one-line summaries — so the nightly routine can pick roadmap[0] directly instead of re-deriving priority from TODO.md every run. next_milestone now points at roadmap[0]. docs/TODO.md 後續工作 split the three bigger items (live viewfinder, annotation tool, on-device OCR) into explicit M1/M2 checkboxes matching the roadmap entries. docs/DAILY_ROUTINE.md's selection step (定位/選題) and closing contract (收尾契約) updated to read/maintain roadmap. Previous change — docs-only audit: cross-checked README.md/ARCHITECTURE.md/TODO.md against the actual codebase and fixed stale counts — routers 7→9, services 10→12, SQLite tables 7→9, data models 5→8. Before that — GitHub Release step for one-tap APK install: tagging android-v* now makes .github/workflows/android.yml create a GitHub Release with two ready-to-install .apk assets via the runner's built-in gh CLI."
+key_metrics: "91 API endpoints, 8 tool categories, 275 pytest + 288 browser tests, web + Android + offline-only APK from one frontend"
+recent_changes: "v3.16.0 — framing now follows rotate/flip/deskew. `static/js/image-local.js` gained `rotateFit` / `flipFit`: the collage focal point is stored in *source* image coordinates, so rotating an item used to leave it pointing at different content and the carefully-adjusted composition jumped the moment you tapped rotate. Crop had this covered since v3.10.0 (`rotateRect` / `flipRect`); framing was the one that got missed. The mapping is deliberately identical to `rotateRect` (clockwise 90° = `(x, y) → (1 - y, x)`) and a test pins that agreement by rotating a zero-size crop rect and comparing — if the two ever diverge, crop and framing would land in different places after a rotate. `zoom` is relative to fill so it carries over untouched; a `null` fit stays `null` (untouched items keep the pixel-identical fast path). `deskewItem` / `undoDeskew` now reset `fit` alongside `cropRect` — a perspective warp remaps the whole image, so the old focal point is meaningless. `studio.jsx` rotate/flip wired up. +15 browser tests (image engine 54 → 69) including a three-band pixel check that samples the same colour before and after a rotate, plus a deliberate 'what it looked like unfixed' case so a regression goes red. Previous change — docs-only planning pass: added a `roadmap` array to this file — 10 items, ordered ROI÷risk, one-line summaries — so the nightly routine can pick roadmap[0] directly instead of re-deriving priority from TODO.md every run. next_milestone now points at roadmap[0]. docs/TODO.md 後續工作 split the three bigger items (live viewfinder, annotation tool, on-device OCR) into explicit M1/M2 checkboxes matching the roadmap entries. docs/DAILY_ROUTINE.md's selection step (定位/選題) and closing contract (收尾契約) updated to read/maintain roadmap. Previous change — docs-only audit: cross-checked README.md/ARCHITECTURE.md/TODO.md against the actual codebase and fixed stale counts — routers 7→9, services 10→12, SQLite tables 7→9, data models 5→8. Before that — GitHub Release step for one-tap APK install: tagging android-v* now makes .github/workflows/android.yml create a GitHub Release with two ready-to-install .apk assets via the runner's built-in gh CLI."
 
