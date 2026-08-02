@@ -9,6 +9,19 @@
 
 ---
 
+## 2026/08/02 — 簽名庫存進原生儲存（Capacitor Preferences）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[0]`：簽名庫存在 `localStorage`，App 內清一次快取就沒了 |
+| 分支 | `claude/nightly-signature-preferences` |
+| PR | 見分支上的草稿 PR |
+| 結果 | 完成，v3.17.0。`static/js/native.js` 新增 `SMNative.store`（`isDurable` / `get` / `set` / `remove`）—— App 走 Capacitor Preferences（原生 SharedPreferences），瀏覽器退回 `localStorage`；`@capacitor/preferences` 本來就在相依裡，只是一直沒接上。**關鍵設計**：App 內 `get()` 只問 Preferences、**不**因為它沒有就去翻 `localStorage`，因為「原生儲存沒有這個 key」正是「要不要把舊資料搬過去」的判斷依據，退回去讀就永遠搬不成；只有外掛丟例外才退回。`sign-lite.js` 新增 `ready()` / `flush()`：Preferences 是非同步的而 `list()` 被同步的畫圖路徑用著，所以 App 內多留一份記憶體副本（`cache`），網頁版 `cache` 恆為 `null`、逐次讀 `localStorage`，多分頁行為零變化。升級後第一次執行自動搬家。`studio.jsx` 的 `useSignatures` 改成先 `await ready()`。測試 +7（簽名 45 → 52），用假的 `window.SMCap` 驗搬家 / 清掉 localStorage 後還在 / 存刪寫進 Preferences / 外掛壞掉的退路 / 桌面瀏覽器不碰原生儲存。全綠 —— pytest 272 passed + 3 skipped、瀏覽器 295 項（image 69 / studio 80 / sign 52 / doc 51 / scan 22 / pages 21）|
+| CI | 見 PR |
+| 順手修掉的 | `docs/ANDROID.md`「離線精簡版的取捨」還列著「取景不會跟著旋轉走」，那是 v3.16.0 已經做掉的，一併移除 |
+| 環境注意事項 | 跟前一天一樣，照做省時間：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx` ②`pip install -r requirements.txt` 之後要再補 `pip install cffi pytest`，否則 `tests/generate_test_forms.py` 會在 `cryptography` 掛掉；`pip install` 加 `--timeout 120` 免得 read timeout ③跑 `npm run test:studio` 前要先 `python3 scripts/build_mobile.py --offline` 重新打包，不然測到的是舊的 `mobile/www/` |
+| 下一步 | 做 `roadmap[0]`：**低信心時的重拍建議**。`static/js/scan-lite.js` 的 `detect()` 信心 < 0.45 時回 `method: 'fallback'`，介面（`studio.jsx` 的 `StudioDeskew`，找「低信心變色提醒」那段）目前只說「沒把握」，沒告訴使用者該怎麼補救。作法：偵測時**已經算過**的統計量（四邊形內部亮度、邊緣強度、面積佔比 —— 看 `scan-lite.js` 評分那一段拿得到哪些）挑幾個訂門檻，對應成「太暗了，找亮一點的地方」「離太遠，靠近一點」「有反光，換個角度」這種可執行的文案，回傳結構多帶一個 `hint` 欄位，UI 顯示出來。補 `npm run test:scan` 的測試 —— 合成一張刻意過暗 / 刻意太小的影像，驗 `hint` 是對應那一則（既有測試就是用合成影像量角點誤差，照抄那套產圖方式）。做完把這項從 `STATUS.yaml` 的 `roadmap` 移除、`docs/TODO.md`「手邊就能做的小東西」對應那列刪掉 |
+
 ## 2026/08/01（第三筆）— 取景跟著旋轉走（rotateFit）
 
 | 項目 | 內容 |
