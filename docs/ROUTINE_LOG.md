@@ -9,6 +9,20 @@
 
 ---
 
+## 2026/08/03 — 低信心時說得出「為什麼」（重拍建議）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[1]`：偵測沒把握時只講一句「⚠ 沒把握抓對」，使用者不知道該改什麼 |
+| 分支 | `claude/nightly-retake-hints` |
+| PR | #46（草稿，base `main`）|
+| 結果 | 完成，v3.18.0。`static/js/scan-lite.js` 新增 `assess()`：逐像素掃一次四邊形內部，取得積分圖給不了的過曝比例與梯度分布，換算成五種說得出口的原因 —— `cropped` / `dark` / `glare` / `far` / `flat`，量不出原因就退回一句通用的 `unknown`（不沉默）。依嚴重程度排序、最多 3 條。`detect()` 一律回傳 `hints` 與 `quality`，抓得準時 `hints` 是空陣列。`studio.jsx` 的拉正畫面在警告下方列出建議，信心足夠時不顯示。**門檻是量出來的**：先寫了一支校正腳本跑合成的「拍壞」樣本，確認正常照片離每個門檻都還有一大段（昏暗但清楚的照片量到 100，離 `dark` 的 85 有餘裕）。測試 +13（偵測 22 → 34、介面 80 → 81）。全綠 —— pytest 272 passed + 3 skipped、瀏覽器 301 項（image 69 / studio 81 / doc 51 / sign 45 / scan 34 / pages 21）|
+| 刻意沒做 | **「照片糊掉」的建議**。原本在清單裡，量完發現用現有的梯度圖分不出來：一張清楚的空白紙 p95 梯度 68，一張糊到看不清字的也是 68（`features()` 又先做過半徑 2 的模糊）。誤報一次使用者就不再相信這些提示，所以寧可不給。理由與兩條可行的作法（在 `features()` 留一份未模糊的高頻能量、或改量邊緣寬度）已寫進 `docs/TODO.md` 後續工作 |
+| 版本號 | **用 3.18.0 而不是 3.17.0** —— PR #45 已經佔用了 3.17.0，但還沒合併。兩邊都從 `main`（3.16.0）長出來，同時用 3.17.0 會是實際的錯誤；跳號只是少一個數字。`main.py`、`docs/TODO.md`、`STATUS.yaml`、PR 描述都照 3.18.0 寫 |
+| 未收尾 | **PR #45（v3.17.0，簽名庫改用 Capacitor Preferences）做完了、CI 全綠，但還沒合併。** 這次沒有動它 —— 它沒有紅燈也沒有 review 意見，只是等使用者按合併。兩個 PR 都改了 `STATUS.yaml` / `docs/TODO.md` / `docs/ROUTINE_LOG.md`，先合併哪一個，另一個都會在這三份文件上有小衝突，取兩邊的內容即可 |
+| 環境注意事項 | 沿用上一筆：①**不要跑 `playwright install`**，改用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx` ②`pip install -r requirements.txt` 之後要再補 `pip install cffi pytest`，否則 `tests/generate_test_forms.py` 會在 `cryptography` 掛掉；`pip install` 加 `--timeout 120` ③`tests/generate_test_forms.py` 產出的 fixture 是有進版控的，重跑之後 bytes 會變 —— 提交前記得 `git checkout -- tests/fixtures/forms/` ④跑 `npm run test:studio` 前要先 `python scripts/build_mobile.py --offline`（改過 `static/` 就要重跑一次） |
+| 下一步 | 先確認 PR #45 合併了沒。**合併了**：把「簽名庫改用 Capacitor Preferences」從 `STATUS.yaml` 的 `roadmap` 移除，然後做新的 `roadmap[0]`：**即時取景 M1**。作法 —— 在 `static/js/` 加一支相機層（離線版不能引 CDN），`getUserMedia({ video: { facingMode: 'environment' } })` 取流畫進 `<video>`，用 `requestAnimationFrame` 每隔 4–6 幀把當下畫面畫到離屏 canvas 再餵給 `SMScanLite.detect()`（單張 100–300ms，所以要用旗標擋住重入，不能每幀都跑），偵測結果的四個角疊在預覽上畫 SVG polygon —— 樣式直接抄 `studio.jsx` 的 `StudioDeskew`（低信心黃框 / 高信心綠框），順便把這次做的 `hints` 一起顯示在預覽下方，即時取景正是它最有價值的地方。**先不做自動快門**（那是 M2）。測試用假的 `getUserMedia`（`navigator.mediaDevices` 可以在測試裡覆寫，回傳一個從 canvas `captureStream()` 來的軌道），驗「有跑偵測」「框有更新」「離開畫面時軌道有停掉」。**沒合併**：不要動它，照樣做即時取景 M1，並在 PR 描述註明版本號往下一號走 |
+
 ## 2026/08/01（第三筆）— 取景跟著旋轉走（rotateFit）
 
 | 項目 | 內容 |

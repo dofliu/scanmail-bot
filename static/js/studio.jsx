@@ -508,7 +508,7 @@ function StudioDeskew({ item, onApply, onCancel, onRevert }) {
           y: Math.max(0, Math.min(1, p.y / src.height)),
         }));
         setCorners(rel);
-        setInfo({ confidence: res.confidence, method: res.method });
+        setInfo({ confidence: res.confidence, method: res.method, hints: res.hints });
       } catch (e) {
         setCorners([
           { x: 0.06, y: 0.06 }, { x: 0.94, y: 0.06 },
@@ -600,6 +600,16 @@ function StudioDeskew({ item, onApply, onCancel, onRevert }) {
             : low ? '⚠ 沒把握抓對 —— 請確認四個角，需要的話拖曳調整'
             : '✓ 抓到文件邊界了，不對的話可以拖曳四個角'}
         </div>
+        {/* 「沒把握」本身不可行動 —— 真正有用的是「為什麼」跟「重拍時改什麼」。
+            所以只在低信心時列出來，抓得準的時候沒必要對使用者說教 */}
+        {low && info.hints?.length > 0 && (
+          <ul style={{
+            margin: '4px 0 0', padding: '0 0 0 16px', listStyle: 'disc',
+            fontSize: '11px', lineHeight: 1.55, color: 'var(--ink-3)',
+          }}>
+            {info.hints.map((h) => <li key={h.code}>{h.text}</li>)}
+          </ul>
+        )}
       </div>
 
       <div className="row" style={{
