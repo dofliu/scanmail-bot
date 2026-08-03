@@ -73,7 +73,7 @@ ScanMail+ 是一個文件掃描郵寄平台，另外整合了一整套媒體 / �
 | `store.js` | 狀態管理 |
 | `api.js` | 後端呼叫與下載（App 內走原生寫檔 + 系統分享） |
 | `config.js` | 執行環境設定層：網頁版同源、App 版用絕對位址 |
-| `native.js` | Capacitor 橋接（存檔、分享） |
+| `native.js` | Capacitor 橋接（存檔、分享、持久化小資料） |
 
 裝置端引擎（不依賴後端，也不依賴 React）：
 
@@ -81,12 +81,35 @@ ScanMail+ 是一個文件掃描郵寄平台，另外整合了一整套媒體 / �
 |------|------|------|
 | `image-local.js` | ~1280 | 縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 裁切 / 打碼 / 濾鏡 / 文字 / 格子取景（裁切框與取景都會跟著旋轉走：`rotateRect` / `rotateFit`）|
 | `scan-lite.js` | ~1040 | 文件邊界偵測（梯度導向 Hough）+ 透視校正（WebGL）+ 拍攝品質診斷（`assess()`：低信心時說得出反光 / 過暗 / 太遠）|
-| `sign-lite.js` | ~500 | 簽名模型（向量筆畫）、去白底匯入、PDF 路徑輸出 |
+| `sign-lite.js` | ~590 | 簽名模型（向量筆畫）、去白底匯入、PDF 路徑輸出、簽名庫的持久化 |
 | `pdf-lite.js` | ~990 | PDF 物件解析器：讀 xref / 展開物件串流 / 挑頁重組 / 蓋章 |
 | `pdf-write.js` | ~520 | PDF 產生器（Type0 內嵌字型、影像 XObject） |
 | `doc-local.js` | ~1120 | PDF / Word / Markdown 互轉，中間隔一層共用文件模型 |
 | `ttf-lite.js` | ~370 | TrueType 解析與子集化（只把用到的字寫進 PDF） |
 | `zip-lite.js` | ~210 | 用瀏覽器內建 CompressionStream 讀寫 zip（DOCX 就是 zip） |
+
+#### 「要留著的東西」存在哪裡（`SMNative.store`）
+
+`localStorage` 在瀏覽器是儲存，在 App 的 WebView 裡卻只是**快取** ——
+Android 的「清除快取」、系統回收儲存空間、部分 ROM 的省電清理都會把它清掉。
+所以 `native.js` 提供一層統一的介面，讓呼叫端不必自己判斷跑在哪裡：
+
+| 方法 | App 內 | 瀏覽器 |
+|------|------|------|
+| `isDurable()` | `true` | `false` |
+| `get(key)` | **只問** Capacitor Preferences；外掛丟例外才退回 `localStorage` | `localStorage` |
+| `set(key, value)` | Preferences（失敗往外丟）＋ `localStorage` 鏡像（失敗不影響） | `localStorage` |
+| `remove(key)` | 兩邊都刪 | `localStorage` |
+
+`get()` 在 App 內不退回 `localStorage` 是刻意的：**「原生儲存沒有這個 key」是判斷
+「要不要把舊資料搬過去」的唯一依據**，偷偷退回去讀的話就永遠搬不成，
+資料也永遠留在會被清掉的地方。
+
+Preferences 是非同步的，而 `sign-lite.js` 的 `list()` 被同步的畫圖路徑用著，
+所以簽名庫在 App 內多留一份記憶體副本：開場 `ready()` 把 Preferences 讀進來，
+之後 `list()` 讀它、寫入排隊送出（`flush()` 可以等落地）。
+網頁版那份副本恆為 `null`，`list()` 每次直接讀 `localStorage` ——
+多分頁互看得到，行為與加這層之前完全相同。
 
 ### 2. 後端主程式 (`main.py`)
 

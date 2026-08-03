@@ -192,8 +192,8 @@
 - [x] `image-local.js`：`drawSignatures()`，疊在文字圖層之上
 - [x] `doc-local.js`：`pdfPageImage()` 單獨把一頁畫大一點，供擺放畫面用
 - [x] 介面：簽名板（手寫）、簽名庫（存 / 刪 / 匯入）、擺放畫面（拖曳 + 大小 / 濃度 / 傾斜）
-  - 編輯分頁與頁面分頁共用同一個簽名庫，存在 localStorage
-- [x] 45 個簽名測試 + 10 個介面測試 + 4 個打包防呆測試
+  - 編輯分頁與頁面分頁共用同一個簽名庫（v3.17.0 起 App 內存在 Capacitor Preferences）
+- [x] 52 個簽名測試 + 10 個介面測試 + 4 個打包防呆測試
 
 ### Phase 16：裝置端邊界偵測 + 透視校正
 
@@ -218,7 +218,18 @@
 - [x] 介面：交換模式 + `pickIndex()`，畫布與縮圖列共用
 - [x] 11 個引擎測試 + 8 個介面測試 + 3 個打包防呆測試
 
-### Phase 18：低信心時的重拍建議
+### Phase 18：簽名庫存進原生儲存
+
+- [x] `native.js`：`SMNative.store`（`isDurable` / `get` / `set` / `remove`）
+  - App 內走 Capacitor Preferences（原生 SharedPreferences），瀏覽器退回 `localStorage`
+  - 讀取在 App 內**只問 Preferences**，「沒有這個 key」是搬家判斷的依據
+- [x] `sign-lite.js`：`ready()` 接上原生儲存、`flush()` 等寫入落地
+  - App 內多一份記憶體副本，讓同步的 `list()` 仍能服務畫圖路徑
+  - 升級後第一次執行把 `localStorage` 的舊簽名搬進 Preferences
+  - 網頁版 `cache` 恆為 `null`，逐次讀 `localStorage`，行為零變化
+- [x] 7 個原生儲存測試（搬家 / 清快取後還在 / 讀寫 / 外掛壞掉 / 網頁路徑）
+
+### Phase 19：低信心時的重拍建議
 
 - [x] `static/js/scan-lite.js`：`assess()` —— 把偵測時算過的量測值換成可行動的建議
   - 一次逐像素掃過四邊形內部，取得積分圖給不了的東西（過曝比例、梯度分布）
@@ -237,7 +248,7 @@
 
 | 項目 | 為什麼 | 規模 |
 |------|------|------|
-| **簽名庫改用 Capacitor Preferences** | 存在 `localStorage`，換手機或清除瀏覽器資料就沒了 | 換一層儲存 |
+| **伺服器位址也改用原生儲存** | `config.js` 的後端位址還存在 `localStorage`，跟簽名庫原本的問題一樣 —— 系統清快取就得重設一次。`SMNative.store` 已經在了，只差接上；要留意 `config.js` 在 `index.html` 裡**排在 `native.js` 之前**、而且是同步讀取，得先處理載入順序或改成非同步取得位址 | 換一層儲存 |
 | **「照片糊掉」的判斷** | v3.18.0 的重拍建議刻意沒收這一條 —— 量過了，用現有的梯度圖分不出來：一張清楚的空白紙 p95 梯度是 68，一張糊到看不清字的也是 68（`features()` 又先做過半徑 2 的模糊）。要做得先在 `features()` 留一份未模糊的高頻能量，或改量邊緣寬度 | 換一個量測方式 |
 
 ### 值得做一版的功能
@@ -347,6 +358,32 @@
 - `studio.jsx` 的拉正畫面在「沒把握」下方列出建議；信心足夠時不顯示
 - 測試 +13（偵測 22 → 34、介面 80 → 81）：每個情境只改一個變因，
   出來的建議要剛好對上那個變因；另外釘住「拍得好的照片不會被亂給建議」
+
+### 2026/08/02 (v3.17.0 — 簽名庫存進原生儲存)
+
+- 簽名庫原本存在 `localStorage`。在 App 裡這不是「一個儲存位置」而是**會被清掉的快取** ——
+  Android 的「清除快取」、系統回收儲存空間、部分 ROM 的省電清理都會把 WebView 的資料
+  一起帶走，使用者手寫好的簽名就這樣不見了，而且沒有任何提示
+- **`SMNative.store`**（`static/js/native.js`）：一層統一的「要留著的小資料存哪裡」介面。
+  App 內走 Capacitor Preferences（寫的是原生 SharedPreferences，只有解除安裝才會消失），
+  瀏覽器退回 `localStorage`。`@capacitor/preferences` 早就在相依裡了，只是一直沒接上
+  - 讀取在 App 內**只問 Preferences**，不會因為它沒有就偷偷去翻 `localStorage`。
+    這個分別是整件事的關鍵：「原生儲存沒有這個 key」正是「要不要把舊資料搬過去」的判斷依據，
+    退回去讀的話就永遠搬不成，資料也永遠留在會被清掉的地方
+  - 只有外掛整個丟例外才退回 `localStorage`，免得功能直接不能用
+- **`ready()` / `flush()`**（`static/js/sign-lite.js`）：Preferences 是非同步的，
+  而 `list()` 被同步的畫圖路徑用著，所以 App 內多一份記憶體副本 ——
+  開場 `ready()` 把 Preferences 讀進來，之後 `list()` 讀它、寫入排隊送出，`flush()` 等落地
+  - 升級後第一次執行，`localStorage` 裡的舊簽名會自動搬進 Preferences（只發生一次）
+  - App 內不再因為 `localStorage` 存不下就砍掉最舊的簽名 —— Preferences 容量大得多，
+    `localStorage` 在 App 內只是順手留的鏡像，寫不進去也不影響
+  - 網頁版的 `cache` 恆為 `null`，`list()` 每次直接讀 `localStorage`，
+    兩個分頁各自存的簽名一樣互看得到，行為與這版之前一模一樣
+- `studio.jsx` 的 `useSignatures` 改成先 `await ready()`，不然 App 內面板會先閃一下
+  「還沒有簽名」再跳出內容
+- 測試 +7（簽名 45 → 52）：用假的 `window.SMCap` 模擬原生環境，驗搬家、
+  「清掉 `localStorage` 之後簽名還在」、存 / 刪寫進 Preferences、外掛讀失敗的退路，
+  以及桌面瀏覽器開同一份打包時完全不碰原生儲存
 
 ### 2026/08/01 (v3.16.0 — 取景跟著旋轉走)
 

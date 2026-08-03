@@ -640,12 +640,15 @@ function StudioDeskew({ item, onApply, onCancel, onRevert }) {
 /**
  * 讀出存好的簽名，順便把點陣簽名的圖片先載進來 ——
  * drawInto 是同步的，沒先載好就會畫出一片空白。
+ *
+ * 沒帶 next 就先 await ready()：App 內簽名庫存在原生的 Preferences 裡，
+ * 要非同步讀回來，跳過的話面板會先閃一下「還沒有簽名」。
  */
 function useSignatures() {
   const [items, setItems] = stUseState([]);
 
   const reload = stUseCallback(async (next) => {
-    const list = next || window.SMSignLite.list();
+    const list = next || (await window.SMSignLite.ready());
     await Promise.all(list.map((s) => window.SMSignLite.hydrate(s).catch(() => s)));
     setItems(list);
     return list;

@@ -4,12 +4,15 @@
  * 網頁版載入這支檔案時，window.SMCap 不存在，所有函式都會走瀏覽器原本的路徑，
  * 行為與加入這層之前完全相同。只有在 APK 內執行時才會用到 Capacitor 外掛。
  *
- * 提供三件事：
+ * 提供四件事：
  *   1. saveFile()      — 統一的「把處理結果存起來」入口。
  *                        瀏覽器用 <a download>；App 內寫入檔案後叫出系統分享，
  *                        因為 WebView 不支援 blob: 的下載。
- *   2. 伺服器設定畫面   — App 內建前端，必須先知道後端位址才能運作。
- *   3. 啟動初始化      — 收起啟動畫面、設定狀態列配色。
+ *   2. store           — 統一的「要留著的小資料存哪裡」入口。
+ *                        瀏覽器用 localStorage；App 內用 Capacitor Preferences，
+ *                        因為 WebView 的 localStorage 會跟著系統清快取一起被清掉。
+ *   3. 伺服器設定畫面   — App 內建前端，必須先知道後端位址才能運作。
+ *   4. 啟動初始化      — 收起啟動畫面、設定狀態列配色。
  */
 (function () {
   const CAP = () => window.SMCap || null;
@@ -149,6 +152,90 @@
       toast(`已儲存 ${uris.length} 個檔案`, 'ok');
     }
     return { method: 'native', count: uris.length };
+  }
+
+  // ══════════════════════════════════════════════
+  //  持久化小資料（簽名庫這種「要留著」的東西）
+  // ══════════════════════════════════════════════
+
+  /**
+   * localStorage 在 App 裡不是可靠的儲存 —— Android 的「清除快取」、
+   * 系統回收儲存空間、甚至部分 ROM 的省電清理，都會把 WebView 的資料一起清掉。
+   * 使用者手寫好的簽名就這樣不見了，而且沒有任何提示。
+   *
+   * Capacitor Preferences 寫的是原生 SharedPreferences，只有解除安裝才會消失，
+   * 所以 App 內以它為準；瀏覽器沒有這個外掛，照舊用 localStorage。
+   *
+   * 讀取一律「先原生、讀不到再退回 localStorage」——
+   * 這樣舊版本 App 存在 localStorage 的資料在升級後還找得到（呼叫端負責搬過去）。
+   */
+
+  function prefs() {
+    const cap = CAP();
+    return isNative() && cap && cap.Preferences ? cap.Preferences : null;
+  }
+
+  /** App 內有沒有真的接上原生儲存。false 代表 localStorage 就是唯一的家。 */
+  function isDurable() {
+    return !!prefs();
+  }
+
+  function localGet(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;   // 隱私模式下可能整個不可用
+    }
+  }
+
+  /**
+   * 讀一個值。
+   *
+   * App 內只問 Preferences —— **不會**因為它沒有就去翻 localStorage。
+   * 這個分別很重要：「原生儲存沒有這個 key」是呼叫端判斷「要不要把舊資料搬過去」
+   * 的依據，偷偷退回 localStorage 的話就永遠搬不成，資料也永遠留在會被清掉的地方。
+   * 只有外掛整個壞掉（丟例外）才退回 localStorage，免得功能直接不能用。
+   *
+   * @returns {Promise<string|null>} 沒存過回 null（跟 localStorage.getItem 一致）
+   */
+  async function storeGet(key) {
+    const p = prefs();
+    if (p) {
+      try {
+        const res = await p.get({ key });
+        const value = res && res.value;
+        return value === undefined ? null : value;
+      } catch (e) {
+        return localGet(key);
+      }
+    }
+    return localGet(key);
+  }
+
+  /**
+   * 寫一個值。
+   * App：寫進 Preferences（失敗就往外丟，呼叫端才知道沒存成功），
+   *      localStorage 只當鏡像，寫不進去（配額）不影響結果。
+   * 瀏覽器：只有 localStorage，配額例外照樣往外丟。
+   */
+  async function storeSet(key, value) {
+    const p = prefs();
+    if (p) {
+      await p.set({ key, value });
+      try { localStorage.setItem(key, value); } catch (e) { /* 鏡像失敗不影響 */ }
+      return { durable: true };
+    }
+    localStorage.setItem(key, value);
+    return { durable: false };
+  }
+
+  /** 刪掉一個值（兩邊都刪，免得退回讀取時又把舊的撿回來） */
+  async function storeRemove(key) {
+    const p = prefs();
+    if (p) {
+      try { await p.remove({ key }); } catch (e) { /* 忽略 */ }
+    }
+    try { localStorage.removeItem(key); } catch (e) { /* 忽略 */ }
   }
 
   // ══════════════════════════════════════════════
@@ -302,6 +389,12 @@
     isNative: isNative,
     saveFile: saveFile,
     saveFiles: saveFiles,
+    store: {
+      isDurable: isDurable,
+      get: storeGet,
+      set: storeSet,
+      remove: storeRemove,
+    },
     openServerSetup: openServerSetup,
     closeServerSetup: closeSetup,
   };
