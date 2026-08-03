@@ -541,13 +541,150 @@
     return { score, geo, content, edgeMin, edges };
   }
 
+  // ── 拍攝品質診斷 ─────────────────────────────────────────
+
+  /**
+   * 一句「沒把握抓對」對使用者沒有用 —— 他不知道該改什麼，只能原地再拍一次
+   * 一模一樣的照片。但照片會壞的方式其實就那幾種（太暗、反光、離太遠、
+   * 紙跟桌面同色、拍到一半），而且判斷依據在偵測時全部算過了：
+   * 亮度積分圖、梯度圖、四邊形面積。這裡把那些數字換算成「下一步該做什麼」。
+   *
+   * 門檻一律取保守值，而且每一條都拿合成的「拍壞」樣本量過，確認正常照片
+   * 離門檻還有一大段距離（見 mobile/test/scan-lite.test.mjs 的診斷段落）。
+   * 誤報的代價比漏報高得多 —— 對一張其實沒問題的照片說「太暗了」，
+   * 使用者下次就不會再相信這些提示。**量不出可靠的差別就不要給建議**：
+   * 「照片糊掉」原本也在清單裡，量完發現分不出來（見 sharpness 那段）就拿掉了。
+   */
+  const HINT_TEXT = {
+    cropped: '文件被畫面切掉了 —— 退後一點，四個角都要入鏡',
+    dark: '光線不足 —— 開個燈或換到亮一點的地方，注意別讓影子壓在紙上',
+    glare: '紙面有反光 —— 讓光源不要正對紙面，稍微側一點拍',
+    far: '文件在畫面裡太小 —— 靠近一點，讓紙大致填滿畫面',
+    flat: '紙跟桌面顏色太接近 —— 換到深色、單純的桌面上再拍',
+    unknown: '找不到明顯的紙張邊界 —— 確認四個角都在畫面裡、背景單純一點，或直接拖曳四個角',
+  };
+
+  /** 最多給幾條建議。全部倒給使用者等於沒講重點 */
+  const MAX_HINTS = 3;
+
+  const ramp = (v, lo, hi) => clamp((v - lo) / (hi - lo), 0, 1);
+
+  /**
+   * 量測這張照片的拍攝品質，回傳可行動的建議。
+   *
+   * @param ft   features() 的結果
+   * @param quad 目前最好的四邊形（**工作解析度座標**）；偵測失敗時傳退回框，
+   *             那時「內部」幾乎就是整張畫面，亮度/反光的判斷一樣成立，
+   *             只有需要內外對比的 flat 會自動略過
+   * @returns {{hints: Array<{code, text, severity}>, metrics: object}}
+   */
+  function assess(ft, quad) {
+    const { gray, mag, width: w, height: h } = ft;
+
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of quad) {
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
+    }
+    const y0 = clamp(Math.floor(minY), 0, h - 1);
+    const y1 = clamp(Math.ceil(maxY), 0, h - 1);
+
+    // 逐像素掃四邊形內部。scoreQuad 走積分圖是因為要跑幾百個候選；
+    // 這裡只跑一次，而且要的是積分圖給不了的東西（過曝比例、梯度分布）
+    let count = 0;
+    let total = 0;
+    let totalSq = 0;
+    let clipped = 0;
+    const magHist = new Uint32Array(64);   // 0–255 分 64 格，取分位數用
+    for (let y = y0; y <= y1; y++) {
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = 0; i < 4; i++) {
+        const a = quad[i];
+        const b = quad[(i + 1) % 4];
+        if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) {
+          const x = a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x);
+          if (x < lo) lo = x;
+          if (x > hi) hi = x;
+        }
+      }
+      if (!isFinite(lo) || hi <= lo) continue;
+      const x0 = clamp(Math.round(lo), 0, w);
+      const x1 = clamp(Math.round(hi), 0, w);
+      const row = y * w;
+      for (let x = x0; x < x1; x++) {
+        const v = gray[row + x];
+        total += v;
+        totalSq += v * v;
+        count++;
+        if (v >= 244) clipped++;
+        const m = mag[row + x];
+        magHist[m >= 252 ? 63 : m >> 2]++;
+      }
+    }
+
+    const metrics = {
+      paperMean: null, paperStd: null, bgMean: null, contrast: null,
+      glare: 0, areaRatio: 0, sharpness: 0, touching: 0,
+    };
+    if (count < 100) return { hints: [], metrics };
+
+    metrics.paperMean = total / count;
+    metrics.paperStd = Math.sqrt(Math.max(0, totalSq / count - metrics.paperMean ** 2));
+    metrics.glare = clipped / count;
+    metrics.areaRatio = polyArea(quad) / (w * h);
+
+    // 紙外面的平均亮度。內部佔掉整張畫面時（偵測失敗的退回框）沒得比
+    const frameTotal = ft.sum[h * ft.iw + w];
+    const bgCount = w * h - count;
+    if (bgCount > w * h * 0.06) {
+      metrics.bgMean = (frameTotal - total) / bgCount;
+      metrics.contrast = metrics.paperMean - metrics.bgMean;
+    }
+
+    // 內部梯度的 95 分位。**不拿來判斷「糊掉」** —— 量過了，分不出來：
+    // 一張清楚的空白紙量到 68，一張糊到看不清字的照片也是 68，
+    // 因為這個數字反映的是「紙上有多少高對比內容」而不是「邊有多銳利」
+    // （features() 又先做過一次半徑 2 的模糊）。留著是給呼叫端除錯用的
+    let acc = 0;
+    const target = count * 0.95;
+    let bin = 0;
+    for (; bin < 64; bin++) {
+      acc += magHist[bin];
+      if (acc >= target) break;
+    }
+    metrics.sharpness = Math.min(bin, 63) * 4;
+
+    // 角落壓在畫面邊上 → 紙很可能延伸到畫面外。一個角可能只是構圖貼邊，
+    // 兩個角就是整條邊被切掉了
+    const tol = Math.max(2, 0.008 * Math.max(w, h));
+    metrics.touching = quad.filter((p) =>
+      p.x <= tol || p.y <= tol || p.x >= w - 1 - tol || p.y >= h - 1 - tol).length;
+
+    const hints = [];
+    const add = (code, severity) => hints.push({ code, text: HINT_TEXT[code], severity });
+
+    if (metrics.touching >= 2) add('cropped', 0.6 + 0.1 * Math.min(metrics.touching, 4));
+    if (metrics.paperMean < 85) add('dark', 0.55 + 0.45 * ramp(85 - metrics.paperMean, 0, 45));
+    if (metrics.glare > 0.03) add('glare', 0.5 + 0.5 * ramp(metrics.glare, 0.03, 0.15));
+    if (metrics.areaRatio < 0.28) add('far', 0.4 + 0.6 * ramp(0.28 - metrics.areaRatio, 0, 0.18));
+    if (metrics.contrast != null && Math.abs(metrics.contrast) < 22) {
+      add('flat', 0.45 + 0.55 * ramp(22 - Math.abs(metrics.contrast), 0, 22));
+    }
+
+    hints.sort((a, b) => b.severity - a.severity);
+    return { hints: hints.slice(0, MAX_HINTS), metrics };
+  }
+
   // ── 對外：偵測 ───────────────────────────────────────────
 
   /**
    * 找出文件的四個角。
    *
-   * @returns {{corners, confidence, method}} corners 是**原圖座標**；
-   *          confidence < 0.45 時呼叫端不該自動裁切，應該請使用者自己拉
+   * @returns {{corners, confidence, method, hints}} corners 是**原圖座標**；
+   *          confidence < 0.45 時呼叫端不該自動裁切，應該請使用者自己拉，
+   *          並把 hints（拍攝品質建議，已依嚴重程度排序）顯示出來
    */
   function detect(source, opts = {}) {
     const ft = features(source, opts.workSize || WORK_SIZE);
@@ -562,29 +699,43 @@
     }
 
     const toSource = (p) => ({ x: p.x * ft.scale, y: p.y * ft.scale });
+
+    // 信心不足時，呼叫端要能告訴使用者「該怎麼重拍」，不是只說「沒把握」。
+    // 診斷只多掃一次工作解析度的畫面（480px），相對偵測本身可以忽略
+    const withHints = (result, quad) => {
+      const { hints, metrics } = assess(ft, quad);
+      result.quality = metrics;
+      // 量得出原因就講原因；量不出來也不能沉默，至少給一句通用的補救方向
+      result.hints = hints.length || result.confidence >= MIN_CONFIDENCE
+        ? hints
+        : [{ code: 'unknown', text: HINT_TEXT.unknown, severity: 0.3 }];
+      return result;
+    };
+
     if (!best) {
       // 找不到就退回「整張圖稍微內縮」，讓使用者從一個合理的框開始拉
       const inset = 0.04;
       const w = ft.width;
       const h = ft.height;
-      return {
-        corners: [
-          { x: w * inset, y: h * inset }, { x: w * (1 - inset), y: h * inset },
-          { x: w * (1 - inset), y: h * (1 - inset) }, { x: w * inset, y: h * (1 - inset) },
-        ].map(toSource),
+      const quad = [
+        { x: w * inset, y: h * inset }, { x: w * (1 - inset), y: h * inset },
+        { x: w * (1 - inset), y: h * (1 - inset) }, { x: w * inset, y: h * (1 - inset) },
+      ];
+      return withHints({
+        corners: quad.map(toSource),
         confidence: 0,
         method: 'fallback',
         lines: lines.length,
-      };
+      }, quad);
     }
 
-    return {
+    return withHints({
       corners: best.quad.map(toSource),
       confidence: clamp(best.score, 0, 1),
       method: 'hough',
       lines: lines.length,
       detail: { geo: best.geo, content: best.content, edgeMin: best.edgeMin },
-    };
+    }, best.quad);
   }
 
   // ── 對外：真實寬高比 ─────────────────────────────────────
@@ -879,12 +1030,12 @@ void main() {
   }
 
   window.SMScanLite = {
-    MIN_CONFIDENCE, WORK_SIZE,
+    MIN_CONFIDENCE, WORK_SIZE, HINT_TEXT,
     detect, warp, recoverAspect, outputSize,
     // 測試用
     _internals: {
       features, houghLines, quadsFromLines, scoreQuad, isValidQuad,
-      edgeSupport, order, polyArea, isConvex, homography, warp2D, warpGL, blur,
+      edgeSupport, order, polyArea, isConvex, homography, warp2D, warpGL, blur, assess,
     },
   };
 })();

@@ -124,6 +124,26 @@ await page.evaluate(() => {
       }
     }
     ctx.restore();
+
+    // 反光：打在紙面上的白色熱點（燈或窗戶正對著紙的樣子）。
+    // 裁到紙的形狀內 —— 反光是紙面反射出來的，不會溢到桌面上
+    if (o.glare) {
+      const g = ctx.createRadialGradient(o.glare.x, o.glare.y, 4, o.glare.x, o.glare.y, o.glare.r);
+      g.addColorStop(0, 'rgba(255,255,255,1)');
+      g.addColorStop(0.55, 'rgba(255,255,255,0.95)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(tl.x, tl.y);
+      ctx.lineTo(tr.x, tr.y);
+      ctx.lineTo(br.x, br.y);
+      ctx.lineTo(bl.x, bl.y);
+      ctx.closePath();
+      ctx.clip();
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
     return c;
   };
 
@@ -254,6 +274,79 @@ check('失敗時仍給一個可以手動調整的起始框',
 check('整張照片都是紙 → 不會硬說「這就是文件」',
   negatives.full.confidence < 0.45,
   `confidence=${negatives.full.confidence.toFixed(3)}`);
+
+console.log('\n拍壞的時候要說得出「為什麼」');
+
+// 「沒把握」不可行動 —— 使用者只能原地再拍一張一模一樣的照片。
+// 這一段驗的是 detect() 有沒有把偵測時算過的量測值換成具體的補救動作。
+// 每個情境都只改一個變因，所以出來的建議應該剛好對上那個變因。
+const diag = await page.evaluate(() => {
+  const NORMAL = [{ x: 120, y: 70 }, { x: 520, y: 70 }, { x: 520, y: 410 }, { x: 120, y: 410 }];
+  const run = (o) => {
+    const r = window.SMScanLite.detect(window.makeShot(o));
+    return {
+      conf: r.confidence,
+      codes: r.hints.map((h) => h.code),
+      sev: r.hints.map((h) => h.severity),
+      texts: r.hints.map((h) => h.text),
+      quality: r.quality,
+    };
+  };
+  return {
+    ok: run({ corners: NORMAL }),
+    dark: run({ corners: NORMAL, bg: '#151310', paper: '#4a473f' }),
+    dim: run({ corners: NORMAL, bg: '#2e2c28', paper: '#6b6862' }),
+    glare: run({ corners: NORMAL, glare: { x: 330, y: 230, r: 130 } }),
+    far: run({ corners: [{ x: 250, y: 180 }, { x: 390, y: 180 }, { x: 390, y: 300 }, { x: 250, y: 300 }] }),
+    flat: run({ corners: NORMAL, bg: '#e2e0da', paper: '#f2f0ea' }),
+    cropped: run({ corners: [{ x: 200, y: 70 }, { x: 639, y: 70 }, { x: 639, y: 410 }, { x: 200, y: 410 }] }),
+    blank: run({ corners: null }),
+    // 又暗又小又跟桌面同色 —— 一次踩到好幾個問題
+    messy: run({
+      corners: [{ x: 260, y: 190 }, { x: 380, y: 190 }, { x: 380, y: 290 }, { x: 260, y: 290 }],
+      bg: '#26241f', paper: '#38352e',
+    }),
+  };
+});
+
+check('拍得好的照片不會被亂給建議',
+  diag.ok.codes.length === 0,
+  `conf=${diag.ok.conf.toFixed(2)} 卻給了 ${diag.ok.codes.join(',')}`);
+check('太暗 → 說得出「光線不足」而不是只說沒把握',
+  diag.dark.codes.includes('dark'),
+  `codes=${diag.dark.codes.join(',')} paperMean=${diag.dark.quality.paperMean?.toFixed(0)}`);
+check('昏暗但拍得清楚的照片不會被誤判成太暗 —— 門檻要留餘裕',
+  !diag.dim.codes.includes('dark'),
+  `paperMean=${diag.dim.quality.paperMean?.toFixed(0)} codes=${diag.dim.codes.join(',')}`);
+check('紙面反光 → 說得出「反光」',
+  diag.glare.codes.includes('glare'),
+  `codes=${diag.glare.codes.join(',')} glare=${diag.glare.quality.glare?.toFixed(3)}`);
+check('反光的判準是過曝比例，不是「整體偏亮」',
+  diag.glare.quality.glare > 0.03 && diag.ok.quality.glare < 0.005,
+  `反光 ${diag.glare.quality.glare?.toFixed(3)} vs 正常 ${diag.ok.quality.glare?.toFixed(3)}`);
+check('離太遠 → 說得出「靠近一點」',
+  diag.far.codes.includes('far'),
+  `codes=${diag.far.codes.join(',')} areaRatio=${diag.far.quality.areaRatio?.toFixed(3)}`);
+check('紙跟桌面同色 → 說得出「換張深色桌面」',
+  diag.flat.codes.includes('flat'),
+  `codes=${diag.flat.codes.join(',')} contrast=${diag.flat.quality.contrast?.toFixed(1)}`);
+check('紙被畫面切掉 → 說得出「退後一點」',
+  diag.cropped.codes.includes('cropped'),
+  `codes=${diag.cropped.codes.join(',')} touching=${diag.cropped.quality.touching}`);
+// 量不出原因也不能沉默 —— 沉默等於把使用者丟回原地
+check('低信心但量不出原因時，至少給一句通用的補救方向',
+  diag.blank.conf < 0.45 && diag.blank.codes.length > 0,
+  `conf=${diag.blank.conf.toFixed(2)} codes=${diag.blank.codes.join(',')}`);
+check('建議依嚴重程度排序，而且不會一次倒一長串（最多 3 條）',
+  diag.messy.codes.length >= 2 && diag.messy.codes.length <= 3
+    && diag.messy.sev.every((s, i) => i === 0 || s <= diag.messy.sev[i - 1]),
+  `codes=${diag.messy.codes.join(',')} sev=${diag.messy.sev.map((s) => s.toFixed(2)).join(',')}`);
+check('每條建議都帶著可以直接顯示的中文文案',
+  diag.dark.texts.every((t) => typeof t === 'string' && t.length > 8),
+  JSON.stringify(diag.dark.texts));
+check('抓得準的時候 hints 是空陣列而不是 undefined —— 呼叫端不必特判',
+  Array.isArray(diag.ok.codes) && diag.ok.conf > 0.45,
+  `conf=${diag.ok.conf.toFixed(2)}`);
 
 console.log('\n真實寬高比反推');
 

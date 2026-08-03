@@ -9,6 +9,21 @@
 
 ---
 
+## 2026/08/03 — 低信心時說得出「為什麼」（重拍建議）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[1]`：偵測沒把握時只講一句「⚠ 沒把握抓對」，使用者不知道該改什麼 |
+| 分支 | `claude/nightly-retake-hints` |
+| PR | [#46](https://github.com/dofliu/scanmail-bot/pull/46)（base `main`）|
+| 結果 | 完成，v3.18.0。`static/js/scan-lite.js` 新增 `assess()`：逐像素掃一次四邊形內部，取得積分圖給不了的過曝比例與梯度分布，換算成五種說得出口的原因 —— `cropped` / `dark` / `glare` / `far` / `flat`，量不出原因就退回一句通用的 `unknown`（不沉默）。依嚴重程度排序、最多 3 條。`detect()` 一律回傳 `hints` 與 `quality`，抓得準時 `hints` 是空陣列。`studio.jsx` 的拉正畫面在警告下方列出建議，信心足夠時不顯示。**門檻是量出來的**：先寫了一支校正腳本跑合成的「拍壞」樣本，確認正常照片離每個門檻都還有一大段（昏暗但清楚的照片量到 100，離 `dark` 的 85 有餘裕）。測試 +13（偵測 22 → 34、介面 80 → 81）。全綠 —— pytest 272 passed + 3 skipped、瀏覽器 **308** 項（image 69 / studio 81 / doc 51 / sign 52 / scan 34 / pages 21；`sign 52` 是併入 PR #45 之後的數字）|
+| CI | 7 項全綠。**上一筆記錄的「Android `build` job 卡住」這次沒有重現** —— 完整跑完只花 4 分 20 秒（6 支瀏覽器測試 → assembleDebug → 離線建置 → studio 測試 → 離線 assembleDebug），`Test offline studio UI` 50 秒、跟本機一致。看來是當時 runner 的偶發問題，不是這個 workflow 本身有病，下一次不必預期它會卡 |
+| 刻意沒做 | **「照片糊掉」的建議**。原本在清單裡，量完發現用現有的梯度圖分不出來：一張清楚的空白紙 p95 梯度 68，一張糊到看不清字的也是 68（`features()` 又先做過半徑 2 的模糊）。誤報一次使用者就不再相信這些提示，所以寧可不給。理由與兩條可行的作法（在 `features()` 留一份未模糊的高頻能量、或改量邊緣寬度）已寫進 `docs/TODO.md` 後續工作 |
+| 版本號 | **用 3.18.0 而不是 3.17.0** —— 開工時 PR #45 已經佔用 3.17.0 但還沒合併，兩邊都從 `main`（3.16.0）長出來，同時用 3.17.0 會是實際的錯誤。#45 後來在這一晚稍後合併了，所以 3.18.0 正好接在它後面 |
+| 合併衝突 | 開工時 PR #45 還開著，所以這條分支是從 #45 之前的 `main` 長出來的。#45 合併之後如預期在 7 個檔案起了衝突，已經在分支上 merge `origin/main` 解掉：`main.py` / `version.properties` 取 3.18.0；`STATUS.yaml` 的 `roadmap` 把**兩項都**移除（#45 的簽名庫、這次的重拍建議），`recent_changes` 串成 v3.18.0 → v3.17.0；`docs/TODO.md` 依合併順序把這次的 Phase 18 改編號成 **Phase 19**，兩張後續工作的新列都留著；`ARCHITECTURE.md` 的 `scan-lite.js` 與 `sign-lite.js` 兩列各取一邊；`ANDROID.md` 的已知限制留下兩邊各自新增的那條 |
+| 環境注意事項 | 沿用上一筆：①**不要跑 `playwright install`**，改用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx` ②`pip install -r requirements.txt` 之後要再補 `pip install cffi pytest`，否則 `tests/generate_test_forms.py` 會在 `cryptography` 掛掉；`pip install` 加 `--timeout 120` ③`tests/generate_test_forms.py` 產出的 fixture 是有進版控的，重跑之後 bytes 會變 —— 提交前記得 `git checkout -- tests/fixtures/forms/` ④跑 `npm run test:studio` 前要先 `python scripts/build_mobile.py --offline`（改過 `static/` 就要重跑一次） |
+| 下一步 | 做 `roadmap[0]`：**伺服器位址也改用 `SMNative.store`**（這一項是 PR #45 排進 roadmap 的，優先於即時取景）。`static/js/config.js` 的後端位址還存在 `localStorage`，跟簽名庫原本的問題一樣 —— 系統清一次快取就得重設。`SMNative.store`（`static/js/native.js`）已經在了，只差接上。**難處在載入順序**：`config.js` 在 `index.html` 裡排在 `native.js` **之前**，而且是同步讀取位址，所以不能直接改成 `await store.get()`。兩條路可選 —— (a) 把 `config.js` 移到 `native.js` 之後、位址改成非同步取得，呼叫端等一個 ready promise（跟 `sign-lite.js` 的 `ready()` 同一套作法，可以照抄）；(b) 保持同步讀 `localStorage` 當開機快取，開場再從 Preferences 校正一次並寫回鏡像。建議 (a)，跟簽名庫一致比較好維護。記得**離線版沒有伺服器位址這個概念**，改動不能讓離線版壞掉。測試補在 `mobile/test/studio.test.mjs` 或新開一支，用假的 `window.SMCap`（`mobile/test/signature.test.mjs` 有現成的模擬方式可以照抄），驗「App 內存進 Preferences」「清掉 `localStorage` 之後位址還在」「瀏覽器走 `localStorage`」。做完把這項從 `STATUS.yaml` 的 `roadmap` 移除、`docs/TODO.md` 對應那列刪掉。再下一項才是即時取景 M1 |
+
 ## 2026/08/02 — 簽名庫存進原生儲存（Capacitor Preferences）
 
 | 項目 | 內容 |

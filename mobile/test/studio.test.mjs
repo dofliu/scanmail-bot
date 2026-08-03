@@ -389,6 +389,13 @@ check('抓不到文件時老實說沒把握，而不是硬裁',
   /沒把握/.test(await page.locator('.m-screen').innerText()),
   await page.locator('.m-screen').innerText());
 
+// 「沒把握」講完就沒下文的話，使用者只能原地再拍一張一樣的照片。
+// 純色塊沒有紙與桌面的分別，所以應該看到「紙跟桌面顏色太接近」那一類的建議
+const deskewHints = await page.locator('.m-screen ul li').allInnerTexts();
+check('沒把握時還要說得出怎麼補救，不是只丟一句「沒把握」',
+  deskewHints.length > 0 && deskewHints.every((t) => t.trim().length > 8),
+  JSON.stringify(deskewHints));
+
 // 拉正畫面裡的畫布就是這一張的預覽，所以量它才是量到「這張圖本身」——
 // 編輯畫面的畫布是三張的拼貼，格狀版面下尺寸固定，換了圖也看不出來
 const beforeDeskew = await canvasSize();
