@@ -4,7 +4,7 @@
  * 兩種簽名，走的路完全不一樣：
  *
  *   手繪（kind: 'draw'）  存的是筆畫的「點」，不是像素。所以放大不糊、
- *                        存進 localStorage 只有幾 KB，蓋進 PDF 時直接輸出
+ *                        存進裝置只有幾 KB，蓋進 PDF 時直接輸出
  *                        向量路徑 —— 印出來跟原生文件一樣銳利。
  *   匯入（kind: 'image'） 拍一張紙上的簽名或關防，去掉白底變成透明 PNG。
  *                        蓋進 PDF 走影像 XObject + SMask。
@@ -31,7 +31,7 @@
 
   /**
    * Ramer–Douglas–Peucker：把手指畫出來的上百個點砍到剩幾十個。
-   * 存進 localStorage 才不會爆，而且 PDF 路徑也短很多。
+   * 存起來才不會爆，而且 PDF 路徑也短很多。
    */
   function simplify(points, tolerance) {
     if (points.length < 3) return points.slice();
@@ -440,25 +440,117 @@
   }
 
   // ── 存放 ────────────────────────────────────────────────
+  //
+  // 網頁：localStorage 就是家，list() 每次直接讀 —— 兩個分頁各自存的簽名互看得到。
+  // App：localStorage 會跟著系統清快取被清掉，改以 Capacitor Preferences 為準
+  //      （window.SMNative.store，見 native.js）。但 Preferences 是**非同步**的，
+  //      而 list() 被同步的畫圖路徑用著，所以 App 內多一份記憶體副本：
+  //      開場 ready() 把 Preferences 讀進 cache，之後 list() 讀 cache、寫入非同步送出去。
+  //      cache 只在 App 內有值 —— 網頁版 cache 恆為 null，行為與加這層之前一模一樣。
 
   const KEY = 'sm.signatures';
   const MAX = 12;
 
-  function list() {
+  let cache = null;                 // 只有接上原生儲存時才會有值
+  let hydrating = null;             // ready() 的記憶化 promise
+  let writing = Promise.resolve();  // 依序送出的原生寫入
+  let writeError = null;
+
+  /** 有接上原生儲存就回傳它，網頁版回 null */
+  function durable() {
+    const n = window.SMNative;
+    return n && n.store && n.store.isDurable() ? n.store : null;
+  }
+
+  function parse(raw) {
     try {
-      const raw = JSON.parse(localStorage.getItem(KEY) || '[]');
-      return Array.isArray(raw) ? raw.filter((s) => s && (s.kind === 'draw' || s.kind === 'image')) : [];
+      const arr = JSON.parse(raw || '[]');
+      return Array.isArray(arr) ? arr.filter((s) => s && (s.kind === 'draw' || s.kind === 'image')) : [];
     } catch (e) {
       return [];
     }
   }
 
+  function serialize(items) {
+    return JSON.stringify(items.map(strip));
+  }
+
+  function readLocal() {
+    try {
+      return parse(localStorage.getItem(KEY));
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function list() {
+    return cache !== null ? cache : readLocal();
+  }
+
+  /**
+   * 把簽名庫接上裝置端的持久化儲存，App 內要先 await 過再 list()。
+   * 網頁版沒事可做，直接resolve。呼叫幾次都只做一次。
+   *
+   * @returns {Promise<Array>} 接好之後的簽名清單
+   */
+  function ready() {
+    if (!hydrating) hydrating = hydrate_();
+    return hydrating.then(list);
+  }
+
+  async function hydrate_() {
+    const store = durable();
+    if (!store) return;
+    let raw = null;
+    try {
+      raw = await store.get(KEY);
+    } catch (e) {
+      cache = readLocal();   // 讀不到就當作沒有原生儲存，至少還看得到舊的
+      return;
+    }
+    if (raw !== null && raw !== undefined) {
+      cache = parse(raw);
+      return;
+    }
+    // Preferences 裡沒這個 key = 第一次在接上原生儲存的版本裡執行，
+    // 把舊版本留在 localStorage 的簽名搬過去（只會發生一次）
+    cache = readLocal();
+    if (cache.length) {
+      try { await store.set(KEY, serialize(cache)); } catch (e) { /* 下次寫入時會再試 */ }
+    }
+  }
+
+  /** 等最近一次的原生寫入落地；寫失敗的話會 reject */
+  function flush() {
+    return writing.then(() => {
+      if (writeError) {
+        const e = writeError;
+        writeError = null;
+        throw e;
+      }
+    });
+  }
+
   function persist(items) {
+    const store = durable();
+    if (store) {
+      // App：Preferences 的容量遠大於 localStorage，所以不因為 localStorage 存不下就砍簽名。
+      // 記憶體副本先更新，畫面立刻反映得出來；寫入排隊送出，flush() 可以等它。
+      const keep = items.slice(0, MAX);
+      cache = keep;
+      const payload = serialize(keep);
+      writing = writing.then(() => store.set(KEY, payload)).then(
+        () => { writeError = null; },
+        (e) => { writeError = e; },
+      );
+      return keep;
+    }
+    // 網頁：localStorage 是唯一的儲存，
     // 存不下（點陣簽名太多）時砍掉最舊的再試，而不是整批丟失
     let keep = items.slice(0, MAX);
     for (;;) {
       try {
-        localStorage.setItem(KEY, JSON.stringify(keep.map(strip)));
+        localStorage.setItem(KEY, serialize(keep));
         return keep;
       } catch (e) {
         if (keep.length <= 1) throw new Error('簽名存不進來 —— 裝置的儲存空間滿了');
@@ -489,11 +581,19 @@
     return persist(list().map((s) => (s.id === id ? { ...s, name } : s)));
   }
 
+  /** 測試用：把儲存層倒回剛載入的狀態（換一組 window.SMCap 之後要重來） */
+  function resetStore() {
+    cache = null;
+    hydrating = null;
+    writing = Promise.resolve();
+    writeError = null;
+  }
+
   window.SMSignLite = {
     DEFAULTS, MAX,
     fromStrokes, fromImage, drawInto, preview, pdfOps, hydrate, pixels,
-    list, save, remove, rename,
+    list, save, remove, rename, ready, flush,
     // 測試用
-    _internals: { simplify, walk, hexToRgb, KEY },
+    _internals: { simplify, walk, hexToRgb, KEY, resetStore },
   };
 })();

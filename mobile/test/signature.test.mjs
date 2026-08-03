@@ -46,6 +46,7 @@ const HARNESS = `<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"
 <script src="/pdfjs/pdf.min.js"></script>
 <script>window.pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/pdf.worker.min.js';<\/script>
 <script src="/js/image-local.js"><\/script>
+<script src="/js/native.js"><\/script>
 <script src="/js/sign-lite.js"><\/script>
 <script src="/js/pdf-write.js"><\/script>
 <script src="/js/pdf-lite.js"><\/script>
@@ -576,6 +577,131 @@ check('簽名存得起來、最新的排前面', storage.count === 2 && storage.
 check('可以改名', storage.renamed === '改過名', storage.renamed);
 check('可以刪除', storage.left === 1, String(storage.left));
 check('存檔時丟掉快取欄位', storage.stripped, JSON.stringify(storage));
+
+// ── App 內的原生儲存（Capacitor Preferences）─────────────
+//
+// App 的 WebView 裡 localStorage 會跟著系統「清除快取」一起被清掉，簽名庫就沒了。
+// 所以 App 內改以 Preferences 為準（native.js 的 SMNative.store）。
+// 這裡用假的 window.SMCap 模擬原生環境 —— 真的 Capacitor 只在 APK 裡跑得起來，
+// 但要驗的是 sign-lite 這一側的行為：讀誰的、寫去哪、舊資料搬不搬得過去。
+await page.evaluate(() => {
+  window.__installFakeCap = (opts) => {
+    const mem = (opts && opts.seed) || {};
+    window.__prefs = mem;
+    window.SMCap = {
+      Capacitor: { isNativePlatform: () => (opts && opts.native === false ? false : true) },
+      Preferences: {
+        get: async ({ key }) => {
+          if (opts && opts.failRead) throw new Error('外掛壞了');
+          return { value: Object.prototype.hasOwnProperty.call(mem, key) ? mem[key] : null };
+        },
+        set: async ({ key, value }) => {
+          if (opts && opts.failWrite) throw new Error('寫不進去');
+          mem[key] = value;
+        },
+        remove: async ({ key }) => { delete mem[key]; },
+      },
+    };
+    window.SMSignLite._internals.resetStore();
+  };
+});
+
+// 1) 升級情境：舊版本的簽名留在 localStorage，Preferences 還是空的
+const migrated = await page.evaluate(async () => {
+  const KEY = window.SMSignLite._internals.KEY;
+  localStorage.setItem(KEY, JSON.stringify([{ ...window.demoSig(), id: 'old-1', name: '升級前存的' }]));
+  window.__installFakeCap({});
+  const items = await window.SMSignLite.ready();
+  return {
+    listed: items.map((s) => s.name),
+    inPrefs: JSON.parse(window.__prefs[KEY] || '[]').map((s) => s.name),
+  };
+});
+check('升級到 App 版：localStorage 的舊簽名自動搬進 Preferences',
+  migrated.listed.length === 1 && migrated.listed[0] === '升級前存的' &&
+  migrated.inPrefs.length === 1 && migrated.inPrefs[0] === '升級前存的',
+  JSON.stringify(migrated));
+
+// 2) 搬過去之後，Preferences 才是準的 —— 系統清掉 localStorage 也還在
+const survives = await page.evaluate(async () => {
+  const KEY = window.SMSignLite._internals.KEY;
+  const seed = { [KEY]: JSON.stringify([{ ...window.demoSig(), id: 'kept', name: '原生存的' }]) };
+  window.__installFakeCap({ seed });
+  localStorage.removeItem(KEY);   // 模擬 Android 清除快取，把 WebView 資料清光
+  const items = await window.SMSignLite.ready();
+  return { names: items.map((s) => s.name), local: localStorage.getItem(KEY) };
+});
+check('系統清掉 WebView 的 localStorage，簽名還在（Preferences 才是家）',
+  survives.names.length === 1 && survives.names[0] === '原生存的' && survives.local === null,
+  JSON.stringify(survives));
+
+// 3) App 內存 / 刪，寫的是 Preferences，localStorage 只是鏡像
+const nativeWrite = await page.evaluate(async () => {
+  const KEY = window.SMSignLite._internals.KEY;
+  window.__installFakeCap({});
+  localStorage.removeItem(KEY);
+  await window.SMSignLite.ready();
+  const a = window.SMSignLite.save({ ...window.demoSig(), name: '原生第一枚' });
+  const b = window.SMSignLite.save({ ...window.demoSig(), name: '原生第二枚' });
+  await window.SMSignLite.flush();
+  const afterSave = JSON.parse(window.__prefs[KEY] || '[]').map((s) => s.name);
+  const mirror = JSON.parse(localStorage.getItem(KEY) || '[]').map((s) => s.name);
+  window.SMSignLite.remove(b.saved.id);
+  await window.SMSignLite.flush();
+  return {
+    afterSave,
+    mirror,
+    afterRemove: JSON.parse(window.__prefs[KEY] || '[]').map((s) => s.name),
+    listedNow: window.SMSignLite.list().map((s) => s.name),
+    aOk: a.items.length === 1,
+  };
+});
+check('App 內存簽名寫進 Preferences，最新的一樣排前面',
+  nativeWrite.aOk && nativeWrite.afterSave.length === 2 && nativeWrite.afterSave[0] === '原生第二枚',
+  JSON.stringify(nativeWrite));
+check('App 內刪簽名，Preferences 跟著少一枚',
+  nativeWrite.afterRemove.length === 1 && nativeWrite.afterRemove[0] === '原生第一枚' &&
+  nativeWrite.listedNow.length === 1,
+  JSON.stringify(nativeWrite));
+check('Preferences 是準的，localStorage 只是順手留一份鏡像',
+  nativeWrite.mirror.length === 2 && nativeWrite.mirror[0] === '原生第二枚',
+  JSON.stringify(nativeWrite));
+
+// 4) 外掛讀不到（舊版 App、外掛沒裝起來）不能讓簽名庫整個消失
+const fallback = await page.evaluate(async () => {
+  const KEY = window.SMSignLite._internals.KEY;
+  localStorage.setItem(KEY, JSON.stringify([{ ...window.demoSig(), id: 'local-only', name: '只在本機' }]));
+  window.__installFakeCap({ failRead: true });
+  const items = await window.SMSignLite.ready();
+  return items.map((s) => s.name);
+});
+check('原生儲存讀失敗就退回 localStorage，不是空白一片',
+  fallback.length === 1 && fallback[0] === '只在本機', JSON.stringify(fallback));
+
+// 5) 網頁版（同一份打包在桌面瀏覽器開）完全不碰 Preferences
+const webPath = await page.evaluate(async () => {
+  const KEY = window.SMSignLite._internals.KEY;
+  window.__installFakeCap({ native: false });
+  localStorage.removeItem(KEY);
+  await window.SMSignLite.ready();
+  window.SMSignLite.save({ ...window.demoSig(), name: '網頁存的' });
+  return {
+    touchedPrefs: Object.keys(window.__prefs).length,
+    local: JSON.parse(localStorage.getItem(KEY) || '[]').map((s) => s.name),
+    durable: window.SMNative.store.isDurable(),
+  };
+});
+check('桌面瀏覽器開同一份打包：走 localStorage，不碰原生儲存',
+  webPath.touchedPrefs === 0 && webPath.durable === false &&
+  webPath.local.length === 1 && webPath.local[0] === '網頁存的',
+  JSON.stringify(webPath));
+
+// 收乾淨，免得影響後面的檢查
+await page.evaluate(() => {
+  delete window.SMCap;
+  window.SMSignLite._internals.resetStore();
+  localStorage.removeItem(window.SMSignLite._internals.KEY);
+});
 
 // ── 收尾 ────────────────────────────────────────────────
 check('過程中沒有 JS 例外', pageErrors.length === 0, pageErrors.join(' | '));

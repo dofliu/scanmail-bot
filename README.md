@@ -449,7 +449,7 @@ scanmail-bot/
 │   ├── vendor/fonts/               #   PDF 內嵌用的中文字型子集（OFL）
 │   └── js/
 │       ├── config.js               #   執行環境設定（決定 API 位址 / 離線模式）
-│       ├── native.js               #   App 專用：存檔/分享、伺服器設定畫面
+│       ├── native.js               #   App 專用：存檔/分享、原生儲存、伺服器設定畫面
 │       ├── image-local.js          #   本地圖片引擎（Canvas，離線版靠它）
 │       ├── doc-local.js            #   本地文件轉檔（PDF/Word/Markdown 互轉）
 │       ├── zip-lite.js             #   ZIP 讀寫（DOCX 拆包/打包）
