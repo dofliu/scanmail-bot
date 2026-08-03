@@ -17,6 +17,7 @@
 | 分支 | `claude/nightly-retake-hints` |
 | PR | #46（草稿，base `main`）|
 | 結果 | 完成，v3.18.0。`static/js/scan-lite.js` 新增 `assess()`：逐像素掃一次四邊形內部，取得積分圖給不了的過曝比例與梯度分布，換算成五種說得出口的原因 —— `cropped` / `dark` / `glare` / `far` / `flat`，量不出原因就退回一句通用的 `unknown`（不沉默）。依嚴重程度排序、最多 3 條。`detect()` 一律回傳 `hints` 與 `quality`，抓得準時 `hints` 是空陣列。`studio.jsx` 的拉正畫面在警告下方列出建議，信心足夠時不顯示。**門檻是量出來的**：先寫了一支校正腳本跑合成的「拍壞」樣本，確認正常照片離每個門檻都還有一大段（昏暗但清楚的照片量到 100，離 `dark` 的 85 有餘裕）。測試 +13（偵測 22 → 34、介面 80 → 81）。全綠 —— pytest 272 passed + 3 skipped、瀏覽器 301 項（image 69 / studio 81 / doc 51 / sign 45 / scan 34 / pages 21）|
+| CI | 7 項全綠。**上一筆記錄的「Android `build` job 卡住」這次沒有重現** —— 完整跑完只花 4 分 20 秒（6 支瀏覽器測試 → assembleDebug → 離線建置 → studio 測試 → 離線 assembleDebug），`Test offline studio UI` 50 秒、跟本機一致。看來是當時 runner 的偶發問題，不是這個 workflow 本身有病，下一次不必預期它會卡 |
 | 刻意沒做 | **「照片糊掉」的建議**。原本在清單裡，量完發現用現有的梯度圖分不出來：一張清楚的空白紙 p95 梯度 68，一張糊到看不清字的也是 68（`features()` 又先做過半徑 2 的模糊）。誤報一次使用者就不再相信這些提示，所以寧可不給。理由與兩條可行的作法（在 `features()` 留一份未模糊的高頻能量、或改量邊緣寬度）已寫進 `docs/TODO.md` 後續工作 |
 | 版本號 | **用 3.18.0 而不是 3.17.0** —— PR #45 已經佔用了 3.17.0，但還沒合併。兩邊都從 `main`（3.16.0）長出來，同時用 3.17.0 會是實際的錯誤；跳號只是少一個數字。`main.py`、`docs/TODO.md`、`STATUS.yaml`、PR 描述都照 3.18.0 寫 |
 | 未收尾 | **PR #45（v3.17.0，簽名庫改用 Capacitor Preferences）做完了、CI 全綠，但還沒合併。** 這次沒有動它 —— 它沒有紅燈也沒有 review 意見，只是等使用者按合併。兩個 PR 都改了 `STATUS.yaml` / `docs/TODO.md` / `docs/ROUTINE_LOG.md`，先合併哪一個，另一個都會在這三份文件上有小衝突，取兩邊的內容即可 |
