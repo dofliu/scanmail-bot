@@ -1160,8 +1160,8 @@ function ServerSetting(){
   const cfg = window.SM_CONFIG;
   // 位址不是常數 —— 清過快取的話要等 config.js 的 ready() 從原生儲存讀回來，
   // 沒訂閱的話這裡會一直顯示「尚未設定」（見 js/config.js）
-  const [apiBase, setApiBase] = React.useState(cfg ? cfg.apiBase : '');
-  React.useEffect(() => {
+  const [apiBase, setApiBase] = useState(cfg ? cfg.apiBase : '');
+  useEffect(() => {
     if (!cfg || !cfg.onApiBaseChange) return;
     setApiBase(cfg.apiBase);
     return cfg.onApiBaseChange(setApiBase);
