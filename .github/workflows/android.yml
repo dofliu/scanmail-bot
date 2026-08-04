@@ -92,6 +92,12 @@ jobs:
         working-directory: mobile
         run: npm run test:scan
 
+      # 伺服器位址的儲存與救援：載入順序是這件事最容易寫錯的地方，
+      # 每個情境都真的載入一次頁面，讓 config.js / native.js / api.js 照真實順序跑
+      - name: Test server address storage
+        working-directory: mobile
+        run: npm run test:config
+
       - name: Build web assets for the app
         env:
           SM_API_BASE: ${{ github.event.inputs.api_base }}

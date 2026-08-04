@@ -752,6 +752,40 @@ def test_config_js_defaults_to_same_origin_on_web():
     assert "sm_api_base" in source
 
 
+def test_config_js_keeps_the_address_in_native_storage():
+    """位址要存在原生儲存，不能只留在 localStorage。
+
+    WebView 的 localStorage 會跟著系統「清除快取」被清掉，位址一沒就要人重打 IP。
+    行為本身由 mobile/test/config.test.mjs 在瀏覽器裡驗；這裡釘住的是**接線**——
+    config.js 有沒有真的走 SMNative.store、native.js 有沒有在跳設定畫面前先問過它。
+    """
+    config = _strip_comments((JS / "config.js").read_text(encoding="utf-8"))
+    assert "SMNative" in config and "isDurable()" in config, "config.js 沒有接上原生儲存"
+    assert "function ready()" in config, "config.js 少了 ready() —— Preferences 是非同步的"
+
+    native = _strip_comments((JS / "native.js").read_text(encoding="utf-8"))
+    # 順序很要緊：先 await ready() 把位址救回來，才輪到「要不要跳設定畫面」
+    assert native.index("SM_CONFIG.ready()") < native.index("openServerSetup();"), (
+        "native.js 必須先 await SM_CONFIG.ready() 再判斷 isConfigured，"
+        "否則清過快取的使用者會被要求重打一次伺服器位址"
+    )
+
+
+def test_api_layer_follows_a_late_api_base():
+    """位址可能在載入之後才定案，api.js 不能把它當常數抄走。
+
+    載入時就先組好的前綴（imgBase 這種）都要在 rebase() 裡一起換掉，
+    漏掉哪一個，那一類工具就會在清過快取的裝置上打到 https://localhost。
+    """
+    source = _strip_comments((JS / "api.js").read_text(encoding="utf-8"))
+    assert "onApiBaseChange" in source, "api.js 沒有訂閱位址變化"
+
+    declared = set(re.findall(r"^\s*let (\w+Base) = `\$\{BASE\}", source, flags=re.MULTILINE))
+    rebased = set(re.findall(r"^\s*(\w+Base) = `\$\{BASE\}", source, flags=re.MULTILINE))
+    missing = declared - rebased
+    assert not missing, f"這些前綴沒有在 rebase() 裡跟著換：{sorted(missing)}"
+
+
 # ══════════════════════════════════════════════
 #  Service Worker
 # ══════════════════════════════════════════════

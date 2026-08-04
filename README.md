@@ -525,6 +525,7 @@ npm run test:doc       # 文件轉檔：產出真的 PDF / DOCX 再讀回來比�
 npm run test:pages     # PDF 頁面操作（pip install pikepdf 可多一層 qpdf 結構檢查）
 npm run test:sign      # 簽名蓋章：把頁面畫出來數墨點，確認落在該落的位置
 npm run test:scan      # 邊界偵測：合成有標準答案的影像，量角點誤差
+npm run test:config    # 伺服器位址的儲存與救援（每個情境都真的載入一次頁面）
 npm run test:studio    # 離線版介面（需要先跑過 build_mobile.py --offline）
 
 # 開發模式啟動

@@ -111,6 +111,30 @@ Preferences 是非同步的，而 `sign-lite.js` 的 `list()` 被同步的畫圖
 網頁版那份副本恆為 `null`，`list()` 每次直接讀 `localStorage` ——
 多分頁互看得到，行為與加這層之前完全相同。
 
+目前用這層的有兩個：**簽名庫**（`sign-lite.js`）與 **App 的伺服器位址**（`config.js`）。
+
+#### 伺服器位址的兩段式讀取（`config.js`）
+
+位址也不能只留在 `localStorage`，但它比簽名庫麻煩：`config.js` 在 `index.html` 裡
+**排在 `native.js` 之前**，而且是同步讀取 —— 載入的當下問不到非同步的 Preferences。
+解法是拆成兩段，而不是動整條載入鏈：
+
+| 階段 | 做什麼 | 誰觸發 |
+|------|------|------|
+| 開機（同步） | 照舊讀 `localStorage`。App 內它是原生儲存的鏡像，兩邊幾乎總是一樣，所以 `apiBase` 一載入就有值 | `config.js` 載入時 |
+| `ready()`（非同步） | 跟 Preferences 對答案：鏡像被清掉了就把位址救回來、原生儲存還沒有就把舊位址搬過去 | `native.js` 的 `init()` |
+
+**順序是重點**：`native.js` 先 `await SM_CONFIG.ready()`、之後才判斷要不要跳伺服器
+設定畫面。少了那個 `await`，位址雖然救得回來，畫面卻已經蓋上去要人重打一次 IP。
+
+代價是位址有可能在**載入之後**才定案，所以載入時抄走 `apiBase` 的模組要訂閱
+`SM_CONFIG.onApiBaseChange()`。`api.js` 的 `rebase()` 就是為此：各 function 裡的
+`${BASE}` 本來就是呼叫時求值，但七個工具前綴（`imgBase` 這種）是載入時先組好的字串，
+得跟著換 —— 漏掉哪一個，那一類工具就會在清過快取的裝置上打到 `https://localhost`。
+（`tests/test_mobile_build.py` 兩個防呆測試分別釘住這個順序與這份對應關係。）
+
+網頁版與離線版沒有「要連到哪一台」的問題，`ready()` 直接 resolve，完全不碰原生儲存。
+
 ### 2. 後端主程式 (`main.py`)
 
 約 140 行的 App Factory —— 建立 FastAPI 實例、掛上各路由模組、設定 CORS 與靜態檔案、

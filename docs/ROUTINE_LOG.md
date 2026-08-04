@@ -9,6 +9,21 @@
 
 ---
 
+## 2026/08/04 — 伺服器位址存進原生儲存
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[0]`：App 的後端位址還存在 `localStorage`，系統清一次快取就得重打一次 IP |
+| 分支 | `claude/nightly-server-address-preferences` |
+| PR | [#47](https://github.com/dofliu/scanmail-bot/pull/47)（草稿，base `main`）|
+| 結果 | 完成，v3.19.0。`static/js/config.js` 拆成**兩段**：開機仍同步讀 `localStorage`（App 內它是原生儲存的鏡像，所以 `apiBase` 一載入就有值、下游零影響），新增的 `ready()` 再非同步跟 `SMNative.store` 對答案 —— 鏡像被清掉就把位址救回來並補寫鏡像，原生儲存沒有這個 key 就把舊位址搬過去（沿用簽名庫「沒有 key＝該搬家」那套契約）。`native.js` 的 `init()` 先 `await SM_CONFIG.ready()` **才**判斷要不要跳伺服器設定畫面。`save()` / `clear()` 改成非同步，設定畫面等寫入落地再 reload；原生寫入失敗退回 `localStorage`。`api.js` 新增 `onApiBaseChange` 訂閱 + `rebase()`。`atoms.jsx` 的 `ServerSetting` 訂閱位址變化。測試 +25（新的 `npm run test:config`）+2 pytest。全綠 —— pytest 274 passed + 3 skipped、瀏覽器 **333** 項（image 69 / studio 81 / sign 52 / doc 51 / scan 34 / config 25 / pages 21）|
+| 關鍵設計 | **選了「同步 `localStorage` 當開機快取 + 非同步校正」而不是把 `config.js` 移到 `native.js` 之後改全非同步**（上一筆建議的 (a) 案）。理由：位址被 `api.js` 在載入時就組成字串用著，改全非同步等於要所有 API 呼叫端等一個 ready promise，動到的面積遠大於這個增量該有的風險。兩段式只多一個訂閱點，而且網頁版 / 離線版一行行為都沒變 |
+| 順序才是重點 | 少了 `native.js` 那個 `await`，位址其實**還是**救得回來 —— 但設定畫面已經蓋上去了，使用者看到的沒有任何改善。所以 `tests/test_mobile_build.py` 加了一條防呆，釘住原始碼裡 `SM_CONFIG.ready()` 必須排在 `openServerSetup()` 之前 |
+| 容易漏掉的地方 | `api.js` 有**七個工具前綴**（`imgBase` / `pdfBase` / `cvtBase` / `gifBase` / `vidBase` / `renBase` / `formBase`）是在載入時就先組好的字串，不像各 function 裡的 `${BASE}` 是呼叫時求值。漏掉哪一個，那一類工具就會在清過快取的裝置上打到 `https://localhost`。第二條 pytest 防呆用正規式比對「宣告的每個 `xxxBase` 都要出現在 `rebase()` 裡」 |
+| 測試作法 | `mobile/test/config.test.mjs` **每個情境都真的 `page.goto()` 一次**，harness 裡有一段 prelude 在 `config.js` 之前依查詢字串佈置旗標 / `localStorage` / 假的 `window.SMCap`，讓載入順序跟 App 裡一模一樣 —— 這件事最容易錯的就是順序，用 `_internals.boot()` 在同一頁重跑會測不到。**做過 mutation 檢查**：拿掉 `native.js` 的 `await` 與 `api.js` 的訂閱，25 項裡有 4 項會紅 |
+| 環境注意事項 | 沿用前幾筆：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome \| head -1) npm run test:xxx` ②`pip install -r requirements.txt` 之後補 `pip install cffi pytest`，`pip install` 加 `--timeout 120` ③改完版本號要跑一次 `python scripts/build_mobile.py`，否則 `mobile/android/version.properties` 對不上 `main.py` 會有一條 pytest 紅 ④`tests/generate_test_forms.py` 產出的 fixture 有進版控，重跑後 bytes 會變，提交前 `git checkout -- tests/fixtures/forms/` ⑤跑 `npm run test:studio` 前要先 `python scripts/build_mobile.py --offline` |
+| 下一步 | 做 `roadmap[0]`：**即時取景 M1**。目標是相機預覽疊邊框（**這一步先不做自動快門**，那是 M2）。偵測本身在 v3.14.0 就好了（`static/js/scan-lite.js` 的 `detect()`，單張約 100–300ms，而且 v3.18.0 起會回傳 `hints` / `quality` 可以直接拿來即時提示「太暗」「靠近一點」）；缺的是相機那一層：`getUserMedia({video:{facingMode:'environment'}})` 取流 → `<video>` → 每隔幾幀（不要每幀，偵測要 100ms+，抓約 300–500ms 一次或用 `requestAnimationFrame` 節流）把畫面畫到離屏 canvas 跑一次 `detect()` → 把回傳的四個角畫在疊層 canvas 上。**放哪裡**：`static/js/studio.jsx` 的 `StudioDeskew` 已經是全螢幕四角編輯畫面，即時取景比較適合另開一個元件、拍完把結果交給既有的拉正流程，不要塞進 `StudioDeskew`。**注意** ①`getUserMedia` 需要安全來源 —— App 的 WebView 是 `https://localhost` 沒問題，網頁版走 `http://區網IP:8000` 會被擋，要在沒有相機權限時優雅退回「選檔案」②離線版也要能用（不能依賴後端）③Android 需要 `CAMERA` 權限，看 `mobile/android/app/src/main/AndroidManifest.xml` 有沒有，沒有要補。測試補在新的 `npm run test:camera` 或延伸 `test:scan`，用假的 `navigator.mediaDevices.getUserMedia` 回一個 canvas captureStream（Playwright 也可以用 `--use-fake-device-for-media-stream`，但假的 `getUserMedia` 比較好控內容）。做完把這項從 `STATUS.yaml` 的 `roadmap` 移除、`docs/TODO.md`「即時取景」的 M1 打勾 |
+
 ## 2026/08/03 — 低信心時說得出「為什麼」（重拍建議）
 
 | 項目 | 內容 |

@@ -113,6 +113,14 @@ mobile/android/app/build/outputs/apk/release/app-release.apk
 
 隨時可以在 App 內的 **設定 → 伺服器連線** 換位址。
 
+**位址從 v3.19.0 起存在 Capacitor Preferences**（原生 SharedPreferences），
+跟簽名庫同一層（`SMNative.store`）。在那之前它存在 `localStorage`，
+而 WebView 的 `localStorage` 會跟著 Android 的「清除快取」一起被清掉 ——
+使用者只是清了一次快取，App 就跳回設定畫面要人重打一次 IP。
+現在清掉快取位址還在，升級後第一次開啟也會自動把舊位址搬過去。
+細節（尤其是 `config.js` 排在 `native.js` 之前造成的載入順序問題）見
+[ARCHITECTURE.md](ARCHITECTURE.md)。
+
 ---
 
 ## 情境 D：離線精簡版（不需要後端）
@@ -458,8 +466,6 @@ PDF 的合併、刪頁、抽頁、重排、轉向。
 * **即時取景** — 相機預覽疊邊框、框穩定自動快門。偵測本身已經有了，缺的是相機那一層。
 * **重拍建議說不出「照片糊掉」** — 反光 / 過暗 / 太遠 / 同色桌面 / 沒入鏡都判得出來，
   對焦沒對到判不出來：現有的梯度圖裡，一張清楚的空白紙跟一張糊掉的照片分數一樣。
-* **伺服器位址存在 `localStorage`** — 清除快取之後要重設一次。簽名庫在 v3.17.0
-  已經改用 Capacitor Preferences，這一項還沒接上同一層。
 
 > 完整版仍然保有全部功能，兩種版本共用同一份 `static/`，
 > 差別只在打包時有沒有加 `--offline`。

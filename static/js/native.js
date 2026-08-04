@@ -344,7 +344,9 @@
         if (!data || data.status !== 'ok') throw new Error('回應不是 ScanMail+ 伺服器');
         msgEl.style.color = '#2d6b52';
         msgEl.textContent = '✓ 連線成功（' + (data.service || 'ScanMail+') + ' ' + (data.version || '') + '），重新載入中…';
-        cfg.save(url);
+        // 寫進原生儲存是非同步的，要等它落地再重新載入 —— 沒等的話重整後
+        // 讀到的可能還是舊值（見 js/config.js 的 save()）
+        await cfg.save(url);
         setTimeout(() => window.location.reload(), 600);
       } catch (e) {
         saveBtn.disabled = false;
@@ -372,6 +374,11 @@
       try {
         await cap.SplashScreen.hide();
       } catch (e) { /* 忽略 */ }
+    }
+    // 先跟原生儲存對一次位址 —— 系統清過快取的話 localStorage 是空的，
+    // 沒問過就直接跳設定畫面，會要使用者重打一次明明還存著的 IP。
+    if (window.SM_CONFIG && typeof window.SM_CONFIG.ready === 'function') {
+      try { await window.SM_CONFIG.ready(); } catch (e) { /* 問不到就照開機值走 */ }
     }
     // 內建前端但還沒設定後端位址 → 直接請使用者填
     if (window.SM_CONFIG && !window.SM_CONFIG.isConfigured) {
