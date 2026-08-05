@@ -9,6 +9,22 @@
 
 ---
 
+## 2026/08/05 — 即時取景 M1（對準了才拍）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap` 的即時取景 M1：相機預覽疊即時邊框。**不是** `roadmap[0]` —— 第一項（伺服器位址）昨晚已經做在 PR #47，還開著沒合併，所以往下拿一項，跟 v3.18.0 當時的處置一致 |
+| 分支 | `claude/nightly-live-viewfinder` |
+| PR | [#48](https://github.com/dofliu/scanmail-bot/pull/48)（草稿） |
+| 結果 | 完成，v3.20.0。新增裝置端引擎 `static/js/scan-live.js`（~290 行）：`getUserMedia` 取流 → 節流跑 `SMScanLite.detect()` → 平滑角點 → 疊框 → 全解析度快門。**三個關鍵取捨**：①**節流是核心不是優化** —— 偵測是同步的、會擋住 UI 執行緒，所以一次跑完才排下一次、兩次之間至少 350ms、取樣先縮到 640px；②**平滑但不能黏住** —— EMA 收手抖，但角點平均位移 > 畫面 10% 就直接跟上（鏡頭真的移開時，延遲比抖動更難看）；③**快門對留下來的那一張重新偵測** —— 取景時的結果是「上一張」的，多花 100–300ms 換到「拉正畫面看到的框就是照片本身的框」。介面 `StudioCamera`：抓到框變綠、抓不穩變黃並列出 v3.18.0 的重拍建議；兩個入口（空畫面的「📷 用相機拍一張」＋工具列的「📷 拍照」）。照片帶 `liveCorners` 進編輯器，`StudioDeskew` 直接沿用不重測，`deskewItem` 清掉、`undoDeskew` 還原。全綠 —— pytest 275 passed + 3 skipped、瀏覽器 351 項（圖片 71 / 介面 90 / 簽名 52 / 文件 51 / 掃描 34 / 取景 32 / 頁面 21）|
+| 順手做掉的 | ①空畫面本來**沒有工具列**，寫測試時才發現「開 App 想直接拍」根本按不到 —— 空狀態補上「📷 用相機拍一張」，`if (camera)` 的判斷也要排在「還沒選圖」的 return **之前**；②`static/sw.js` 的快取清單補上新檔（有 pytest 在把關）；③CI（`.github/workflows/android.yml`）加一步 `npm run test:live` |
+| 測試手法 | 無頭瀏覽器沒有鏡頭，用 **`canvas.captureStream()` 當假相機**：畫面是「桌上的一張紙」、四個角已知，取流 → 偵測 → 疊框 → 快門整條路走得完，CI 上不需要任何相機。**兩個踩過的坑**：①場景要先畫在離屏畫布再一次 `drawImage` 貼過去 —— captureStream 是在畫布被畫到的當下取樣的，一筆一筆畫會送出「只有背景、紙還沒畫上」的半成品幀，測起來像偵測壞了；②合成內文的線**要細**（紙高 /200），畫成 5px 粗黑條時偵測器會把最上面那條當成紙的邊，整組失敗。介面那條「拉正沿用取景的框」是**反證**的：先把 `window.SMScanLite.detect` 換成回傳明顯錯誤的框，框還是落在紙上才算數 |
+| 刻意沒做 | **自動快門（M2）**。`session.latest()` 每次都帶著平滑前的 `rawCorners`，穩定度直接從連續幾次的位移算就有了 —— 缺的不是程式，是**門檻**：合成串流完全不會抖，在它上面調出來的數字沒有意義，要拿真實裝置的手持資料抓 |
+| 版本號 | **用 3.20.0 而不是 3.19.0** —— 開工時 PR #47 已經佔用 3.19.0 但還沒合併，兩邊都從 `main`（3.18.0）長出來 |
+| 合併衝突預告 | 這條分支從 #47 之前的 `main` 長出來。#47 合併之後，`main.py` / `version.properties`（取 3.20.0）、`STATUS.yaml`（`roadmap` 兩項都要移除、`recent_changes` 串成 v3.20.0 → v3.19.0）、`docs/TODO.md`（這次的 Phase 20 依合併順序改編號成 **21**，兩張表的新列都留著）、`docs/ROUTINE_LOG.md`、`README.md`、`docs/ANDROID.md`、`docs/ARCHITECTURE.md` 會衝突，處理方式跟 8/03 那次一樣 |
+| 環境注意事項 | 沿用前幾筆：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx`（版本號會變，先 `ls /opt/pw-browsers/` 確認） ②`pip install -r requirements.txt` 之後補 `pip install cffi pytest`，`pip install` 加 `--timeout 120` ③`python tests/generate_test_forms.py` 會改到有進版控的 fixture，提交前 `git checkout -- tests/fixtures/forms/` ④跑 `test:studio` 前要先 `python3 scripts/build_mobile.py --offline` |
+| 下一步 | **先看 PR #47 跟 #48 合併了沒**（兩張都是草稿），沒合併就先追那個，不要再往上疊第三個未合併的版本號。之後做 `roadmap`：#47 沒合併的話仍是伺服器位址那項（做法寫在 8/04 那筆）；都合併了就換**即時取景 M2（自動快門）**：`scan-live.js` 的 `onResult` 已經回傳平滑前的 `rawCorners`，在 session 裡多記幾筆算「連續 N 次角點位移 < 門檻」即可，UI 在 `StudioCamera` 加倒數與自動觸發 `capture()`。**門檻不要在合成串流上調**（它不會抖）—— 可行的作法是先把穩定度數值顯示在取景畫面上，拿真機手持看幾秒的實際範圍再定；測試改成「餵一段每幀都微幅位移的串流」驗不該觸發、「完全靜止」驗會觸發。另外 `docs/TODO.md` 新增了一項「取景節流門檻要看真機」（現在固定 350ms / 640px），也適合跟 M2 一起量 |
+
 ## 2026/08/03 — 低信心時說得出「為什麼」（重拍建議）
 
 | 項目 | 內容 |

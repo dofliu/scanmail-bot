@@ -498,6 +498,19 @@ function StudioDeskew({ item, onApply, onCancel, onRevert }) {
       canvas.height = src.height;
       canvas.getContext('2d').drawImage(src, 0, 0);
     }
+    // 即時取景拍的照片，快門當下已經對這一張偵測過了 —— 直接沿用那個框：
+    // 使用者按快門前看到的框，跟這裡看到的是同一個，不會「拍完框就變了」，
+    // 也省掉一次同樣輸入、同樣結果的偵測
+    if (item.liveCorners && item.liveCorners.length === 4) {
+      setCorners(item.liveCorners.map((p) => ({
+        x: Math.max(0, Math.min(1, p.x)), y: Math.max(0, Math.min(1, p.y)),
+      })));
+      setInfo({
+        confidence: item.liveConfidence == null ? 1 : item.liveConfidence,
+        method: 'live', hints: item.liveHints || [],
+      });
+      return undefined;
+    }
     // 讓畫面先畫出來再算，不然點下去會愣住一下
     const timer = setTimeout(() => {
       if (!alive) return;
@@ -629,6 +642,147 @@ function StudioDeskew({ item, onApply, onCancel, onRevert }) {
           borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
         }}>
           <BarBtn ic="✓" label="拉正" accent disabled={!corners} onClick={() => onApply(corners)}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 即時取景 ─────────────────────────────────────────────────
+
+/**
+ * 相機預覽 + 會跟著文件走的邊框（引擎在 static/js/scan-live.js）。
+ *
+ * 原本的順序是「拍 → 進編輯器 → 按拉正 → 才知道歪不歪」，
+ * 歪了就得整套重來。這裡把判斷提前到按快門之前 —— **對準了才拍**。
+ *
+ * 版面刻意讓外框跟影像同比例（`aspectRatio` + `object-fit: contain`），
+ * 疊在上面的 SVG 就能直接吃引擎給的相對座標，不必自己算 cover 裁掉了多少，
+ * 跟拉正畫面（StudioDeskew）是同一套畫法。
+ *
+ * 這一版沒有自動快門 —— 那要先知道「框穩了」的門檻抓多少才算數。
+ */
+function StudioCamera({ onCapture, onCancel }) {
+  const videoRef = stUseRef(null);
+  const sessionRef = stUseRef(null);
+  const [status, setStatus] = stUseState({ starting: true });
+  const [live, setLive] = stUseState(null);
+  const [shooting, setShooting] = stUseState(false);
+
+  stUseEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const session = await window.SMScanLive.start(videoRef.current, {
+          onResult: (res) => { if (alive) setLive(res); },
+        });
+        // 開相機是非同步的，這中間使用者可能已經按了取消 —— 沒收掉的話相機燈會一直亮著
+        if (!alive) { session.stop(); return; }
+        sessionRef.current = session;
+        const v = videoRef.current;
+        setStatus({
+          starting: false,
+          ratio: v && v.videoWidth && v.videoHeight ? v.videoWidth / v.videoHeight : 3 / 4,
+        });
+      } catch (e) {
+        if (alive) setStatus({ starting: false, error: e.message });
+      }
+    })();
+    return () => {
+      alive = false;
+      if (sessionRef.current) sessionRef.current.stop();
+      sessionRef.current = null;
+    };
+  }, []);
+
+  const shoot = async () => {
+    const session = sessionRef.current;
+    if (!session || shooting) return;
+    setShooting(true);
+    try {
+      // capture() 會對這一張重新偵測，所以拉正畫面拿到的框就是照片本身的框
+      const shot = await session.capture();
+      onCapture(shot);
+    } catch (e) {
+      window.SMStore?.toast(e.message, 'err');
+      setShooting(false);
+    }
+  };
+
+  const ratio = (live && live.frame && live.frame.height)
+    ? live.frame.width / live.frame.height
+    : (status.ratio || 3 / 4);
+  const corners = live && live.corners;
+  const low = !live || live.low;
+  const line = status.error ? `⚠ ${status.error}`
+    : status.starting ? '啟動相機中…'
+      : !live ? '把文件放進畫面，對準四個角'
+        : low ? '⚠ 還沒抓穩 —— 對準文件，或照下面的建議調整'
+          : '✓ 抓到邊界了 —— 按快門';
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '10px', background: '#111', overflow: 'hidden',
+      }}>
+        {status.error ? (
+          <div style={{ color: '#eee', fontSize: '12.5px', textAlign: 'center', lineHeight: 1.7, padding: '0 20px' }}>
+            {status.error}
+            <div style={{ color: '#999', fontSize: '11.5px', marginTop: '8px' }}>
+              也可以退回去用「＋ 加圖」選現成的照片。
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            position: 'relative', aspectRatio: `${ratio}`,
+            maxWidth: '100%', maxHeight: '100%', width: '100%',
+          }}>
+            <video ref={videoRef} muted playsInline style={{
+              display: 'block', width: '100%', height: '100%',
+              objectFit: 'contain', background: '#000',
+            }}/>
+            {corners && (
+              <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{
+                position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none',
+              }}>
+                <path fillRule="evenodd" fill="rgba(0,0,0,0.35)"
+                  d={`M0,0 H100 V100 H0 Z M${corners.map((c) => `${c.x * 100},${c.y * 100}`).join(' L')} Z`}/>
+                <polygon points={corners.map((c) => `${c.x * 100},${c.y * 100}`).join(' ')}
+                  fill="none" stroke={low ? '#e0a33a' : '#4fc38a'} strokeWidth="2.5"
+                  vectorEffect="non-scaling-stroke"/>
+              </svg>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 14px 4px', flexShrink: 0 }}>
+        <div style={{ fontSize: '11.5px', color: low ? 'var(--warn, #b8862d)' : 'var(--ink-3)' }}>{line}</div>
+        {/* 抓不穩的時候才給建議 —— 對準了還在旁邊碎念只是雜訊 */}
+        {!status.error && low && live && live.hints && live.hints.length > 0 && (
+          <ul style={{
+            margin: '4px 0 0', padding: '0 0 0 16px', listStyle: 'disc',
+            fontSize: '11px', lineHeight: 1.55, color: 'var(--ink-3)',
+          }}>
+            {live.hints.slice(0, 2).map((h) => <li key={h.code}>{h.text}</li>)}
+          </ul>
+        )}
+      </div>
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
+          <BarBtn ic="✕" label="取消" onClick={onCancel}/>
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="⦿" label={shooting ? '拍攝中' : '快門'} accent
+            disabled={!!status.error || status.starting || shooting} onClick={shoot}/>
         </div>
       </div>
     </div>
@@ -1055,6 +1209,7 @@ function StudioEditor() {
   const [cropping, setCropping] = stUseState(false);
   const [redacting, setRedacting] = stUseState(false);
   const [deskewing, setDeskewing] = stUseState(false);
+  const [camera, setCamera] = stUseState(false);   // 即時取景（全螢幕）
   const [swapFrom, setSwapFrom] = stUseState(-1);   // 交換模式：等著點第二張
   // null | { mode:'draw' } | { mode:'place', src, aspect }
   const [signing, setSigning] = stUseState(null);
@@ -1126,6 +1281,26 @@ function StudioEditor() {
       }
     }
     setItems((prev) => [...prev, ...loaded]);
+    setBusy('');
+  };
+
+  /** 即時取景按下快門 —— 照片進編輯器，取景時抓到的框跟著進來給拉正用 */
+  const addShot = async (shot) => {
+    setCamera(false);
+    setBusy('讀取照片...');
+    try {
+      const item = await window.SMImageLocal.loadItem(shot.file);
+      item.url = URL.createObjectURL(shot.file);
+      item.crop = 0;
+      if (shot.corners) {
+        item.liveCorners = shot.corners;
+        item.liveConfidence = shot.confidence;
+        item.liveHints = shot.hints || [];
+      }
+      setItems((prev) => [...prev, item]);
+    } catch (e) {
+      window.SMStore?.toast('照片讀取失敗：' + e.message, 'err');
+    }
     setBusy('');
   };
 
@@ -1340,6 +1515,12 @@ function StudioEditor() {
     setBusy('');
   };
 
+  // 取景是全螢幕的，而且沒有圖也能開（開 App 直接拍）——
+  // 所以要排在「還沒選圖」的空畫面之前判斷
+  if (camera) {
+    return <StudioCamera onCancel={() => setCamera(false)} onCapture={addShot}/>;
+  }
+
   // ── 還沒選圖 ──
   if (!items.length) {
     return (
@@ -1349,6 +1530,12 @@ function StudioEditor() {
             單張 = 編輯 · 多張 = 拼貼，都是即時預覽
           </div>
         </UploadDropzone>
+        {/* 手邊的東西還沒進手機時，「先拍一張」才是起點 ——
+            空畫面沒有工具列，這裡不放就等於得先選一張不相干的圖才拍得到 */}
+        {window.SMScanLive?.isSupported() && (
+          <button className="btn" style={{ width: '100%', marginTop: '10px' }}
+            onClick={() => setCamera(true)}>📷 用相機拍一張</button>
+        )}
         {busy && <div style={{ fontSize: '12px', color: 'var(--ink-3)', marginTop: '10px' }}>{busy}</div>}
       </div>
     );
@@ -1729,6 +1916,10 @@ function StudioEditor() {
               <input ref={addRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
                 onChange={(e) => { addFiles(Array.from(e.target.files)); e.target.value = ''; }}/>
               <BarBtn ic="＋" label="加圖" onClick={() => addRef.current?.click()}/>
+              {/* 沒有相機（或沒權限拿得到相機）的裝置就不要放這顆 —— 按了只會出現錯誤訊息 */}
+              {window.SMScanLive?.isSupported() && (
+                <BarBtn ic="📷" label="拍照" onClick={() => { setSheet(null); setCamera(true); }}/>
+              )}
               <BarBtn ic="✕" label="清空" onClick={clear}/>
             </>
           )}
@@ -2470,7 +2661,7 @@ function Studio() {
 
 Object.assign(window, {
   Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages,
-  StudioCropper, StudioRedactor, StudioDeskew, DocPreview,
+  StudioCropper, StudioRedactor, StudioDeskew, StudioCamera, DocPreview,
   SignaturePad, SignaturePlacer, SignatureSheet, useSignatures,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,

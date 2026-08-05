@@ -539,6 +539,28 @@ const deskewFit = await page.evaluate(() => {
 check('拉正後取景歸零（跟裁切框一樣）', deskewFit.after === null, JSON.stringify(deskewFit));
 check('還原拉正後取景也歸零', deskewFit.reverted === null, JSON.stringify(deskewFit));
 
+// 即時取景拍下來的照片會帶著「快門當下抓到的框」，拉正畫面拿它當起點。
+// 校正之後那個框指的是舊的那張圖 —— 留著的話再開一次拉正會照著它再切一刀
+const deskewLive = await page.evaluate(() => {
+  const L = window.SMImageLocal;
+  const canvas = document.createElement('canvas');
+  canvas.width = 40; canvas.height = 40;
+  window.SMScanLite = { warp: () => canvas };
+  const live = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }];
+  const item = { bitmap: canvas, preview: canvas, cropRect: null, fit: null, liveCorners: live };
+  const corners = [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: 1, y: 1 }, { x: 0, y: 1 }];
+  const deskewed = L.deskewItem(item, corners);
+  const reverted = L.undoDeskew(deskewed);
+  return {
+    after: deskewed.liveCorners,
+    reverted: reverted.liveCorners && reverted.liveCorners[0],
+  };
+});
+check('拉正後就不再沿用取景時的框', deskewLive.after === null, JSON.stringify(deskewLive.after));
+check('還原成原圖後，取景時的框又對得上了',
+  deskewLive.reverted && Math.abs(deskewLive.reverted.x - 0.1) < 1e-9,
+  JSON.stringify(deskewLive.reverted));
+
 await browser.close();
 
 const failed = results.filter((r) => !r.pass);
