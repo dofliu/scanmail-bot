@@ -14,7 +14,8 @@
     "test:doc": "node test/doc-local.test.mjs",
     "test:pages": "node test/pdf-pages.test.mjs",
     "test:sign": "node test/signature.test.mjs",
-    "test:scan": "node test/scan-lite.test.mjs"
+    "test:scan": "node test/scan-lite.test.mjs",
+    "test:live": "node test/scan-live.test.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.2",

@@ -10,6 +10,7 @@ const ASSETS = [
   '/js/ttf-lite.js',
   '/js/pdf-write.js',
   '/js/scan-lite.js',
+  '/js/scan-live.js',
   '/js/sign-lite.js',
   '/js/pdf-lite.js',
   '/js/doc-local.js',
