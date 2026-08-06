@@ -15,7 +15,7 @@
     "test:pages": "node test/pdf-pages.test.mjs",
     "test:sign": "node test/signature.test.mjs",
     "test:scan": "node test/scan-lite.test.mjs",
-    "test:config": "node test/config.test.mjs"
+    "test:config": "node test/config.test.mjs",
     "test:live": "node test/scan-live.test.mjs"
   },
   "dependencies": {

@@ -113,7 +113,7 @@ mobile/android/app/build/outputs/apk/release/app-release.apk
 
 隨時可以在 App 內的 **設定 → 伺服器連線** 換位址。
 
-**位址從 v3.19.0 起存在 Capacitor Preferences**（原生 SharedPreferences），
+**位址從 v3.21.0 起存在 Capacitor Preferences**（原生 SharedPreferences），
 跟簽名庫同一層（`SMNative.store`）。在那之前它存在 `localStorage`，
 而 WebView 的 `localStorage` 會跟著 Android 的「清除快取」一起被清掉 ——
 使用者只是清了一次快取，App 就跳回設定畫面要人重打一次 IP。
