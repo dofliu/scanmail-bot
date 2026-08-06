@@ -462,8 +462,13 @@
       // 透視校正會把整張圖重新映射，舊的對焦點指到的已經不是同一塊內容 ——
       // 跟裁切框一樣歸零，讓拉正後的結果從「剛好填滿」重新開始構圖
       fit: null,
+      // 即時取景拍下時記的那個框是「拉正之前」那張的座標，套用之後就不再對應
+      // 任何東西了。留著的話再開一次拉正會拿它當起點，把已經正了的圖再切一刀
+      liveCorners: null,
       // 只留第一次的原圖 —— 拉正兩次的話「還原」該回到最初，不是回到上一次
-      original: item.original || { bitmap: item.bitmap, preview: item.preview },
+      original: item.original || {
+        bitmap: item.bitmap, preview: item.preview, liveCorners: item.liveCorners || null,
+      },
     };
   }
 
@@ -473,6 +478,8 @@
     const { original, ...rest } = item;
     return {
       ...rest, bitmap: original.bitmap, preview: original.preview, cropRect: null, fit: null,
+      // 回到原圖，取景時的框自然又對得上了
+      liveCorners: original.liveCorners || null,
     };
   }
 

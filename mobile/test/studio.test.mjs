@@ -54,6 +54,52 @@ const pageErrors = [];
 page.on('pageerror', (e) => pageErrors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') pageErrors.push(m.text()); });
 
+/**
+ * 假相機 —— 無頭瀏覽器沒有鏡頭，但 `canvas.captureStream()` 產得出一條
+ * 貨真價實的 MediaStream，取景那條路（getUserMedia → video → 偵測 → 疊框）
+ * 就能整條走完。畫面是「桌上的一張紙」，四個角是已知的，所以疊出來的框
+ * 對不對可以直接量。
+ *
+ * 場景先畫在離屏畫布上再一次貼過去 —— captureStream 是在畫布被畫到的當下
+ * 取樣的，一筆一筆畫上去會送出「只有背景、紙還沒畫上」的半成品幀。
+ */
+await page.addInitScript(() => {
+  window.__fakeCam = { paper: { x0: 140, y0: 100, x1: 660, y1: 500, w: 800, h: 600 } };
+  const install = () => {
+    if (!navigator.mediaDevices) return;
+    navigator.mediaDevices.getUserMedia = async () => {
+      const p = window.__fakeCam.paper;
+      const c = document.createElement('canvas');
+      c.width = p.w; c.height = p.h;
+      const ctx = c.getContext('2d');
+      const off = document.createElement('canvas');
+      off.width = p.w; off.height = p.h;
+      const o = off.getContext('2d');
+      const paint = () => {
+        o.fillStyle = '#4a4038';
+        o.fillRect(0, 0, p.w, p.h);
+        o.fillStyle = '#f2f0ea';
+        o.fillRect(p.x0, p.y0, p.x1 - p.x0, p.y1 - p.y0);
+        o.strokeStyle = '#333';
+        o.lineWidth = 2;
+        for (let i = 1; i <= 8; i++) {
+          const y = p.y0 + (p.y1 - p.y0) * i / 9;
+          o.beginPath();
+          o.moveTo(p.x0 + 40, y);
+          o.lineTo(p.x1 - (i % 3 === 0 ? 160 : 40), y);
+          o.stroke();
+        }
+        ctx.drawImage(off, 0, 0);
+      };
+      paint();
+      window.__fakeCam.timer = setInterval(paint, 70);
+      window.__fakeCam.stream = c.captureStream(15);
+      return window.__fakeCam.stream;
+    };
+  };
+  install();
+});
+
 await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
 await page.waitForTimeout(1200);
 
@@ -735,6 +781,94 @@ check('輸出產生一份 PDF',
   (await page.locator('text=.pdf').count()) >= 1 &&
   (await page.locator('button:has-text("儲存")').count()) === 1,
   await page.locator('.m-screen').innerText());
+
+// ── 即時取景 ────────────────────────────────────────────
+await page.locator('.chip:has-text("編輯")').click();
+await page.waitForTimeout(400);
+if ((await barLabels()).some((x) => x.includes('完成'))) {
+  await page.locator('button:has-text("完成")').last().click();
+  await page.waitForTimeout(300);
+}
+if ((await barLabels()).some((x) => x.includes('清空'))) {
+  await page.locator('button:has-text("清空")').click();
+  await page.waitForTimeout(300);
+}
+
+// 一開 App 手邊還沒有圖 —— 空畫面就要按得到相機，不然得先隨便選一張圖才拍得到
+check('空畫面就給得出「用相機拍一張」',
+  (await page.locator('button:has-text("用相機拍一張")').count()) === 1,
+  (await barLabels()).join(','));
+
+/** SVG 上的 points="x,y ..."（0–100）→ 相對座標 */
+const polyPoints = async () => {
+  const raw = await page.evaluate(() => {
+    const poly = document.querySelector('.m-screen svg polygon');
+    return poly ? poly.getAttribute('points') : null;
+  });
+  if (!raw) return null;
+  return raw.trim().split(/\s+/).map((pair) => {
+    const [x, y] = pair.split(',').map(Number);
+    return { x: x / 100, y: y / 100 };
+  });
+};
+const PAPER_REL = [
+  { x: 140 / 800, y: 100 / 600 }, { x: 660 / 800, y: 100 / 600 },
+  { x: 660 / 800, y: 500 / 600 }, { x: 140 / 800, y: 500 / 600 },
+];
+const paperError = (pts) => (!pts || pts.length !== 4 ? 1
+  : pts.reduce((sum, p, i) => sum + Math.hypot(p.x - PAPER_REL[i].x, p.y - PAPER_REL[i].y), 0) / 4);
+
+await page.locator('button:has-text("用相機拍一張")').click();
+await page.waitForTimeout(1800);
+const liveBox = await polyPoints();
+check('取景畫面出現相機影像', (await page.locator('.m-screen video').count()) === 1, '沒有 video 元素');
+check('取景時就把邊框疊在畫面上', paperError(liveBox) < 0.05,
+  `框的平均誤差 ${paperError(liveBox).toFixed(4)}`);
+check('抓到邊界時直接告訴使用者可以按快門',
+  /抓到邊界/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+// 離開取景沒把軌道關掉的話，相機燈會一直亮著
+await page.locator('button:has-text("取消")').click();
+await page.waitForTimeout(400);
+check('離開取景就把相機關掉',
+  await page.evaluate(() => window.__fakeCam.stream.getVideoTracks()[0].readyState === 'ended'),
+  await page.evaluate(() => window.__fakeCam.stream.getVideoTracks()[0].readyState));
+check('取消後回到原本的畫面',
+  (await page.locator('button:has-text("用相機拍一張")').count()) === 1,
+  (await barLabels()).join(','));
+
+await page.locator('button:has-text("用相機拍一張")').click();
+await page.waitForTimeout(1800);
+await page.locator('button:has-text("快門")').click();
+await page.waitForTimeout(1500);
+check('按快門就把照片放進編輯器（全解析度）',
+  JSON.stringify(await canvasSize()) === JSON.stringify({ w: 800, h: 600 }),
+  JSON.stringify(await canvasSize()));
+// 連拍第二張、第三張的入口 —— 有圖之後空畫面的按鈕就不見了，工具列要接手
+check('已經有圖之後，工具列上也有「拍照」', (await barLabels()).some((x) => x.includes('拍照')),
+  (await barLabels()).join(','));
+
+// 拉正沿用快門當下的偵測結果 —— 把 detect 換成會回一個明顯錯誤的框，
+// 如果拉正畫面還是框在紙上，就證明那個框是取景時帶過來的，不是現場重測的
+await page.evaluate(() => {
+  window.__realDetect = window.SMScanLite.detect;
+  window.SMScanLite.detect = () => ({
+    corners: [{ x: 0, y: 0 }, { x: 8, y: 0 }, { x: 8, y: 8 }, { x: 0, y: 8 }],
+    confidence: 0, method: 'stub', hints: [], quality: null,
+  });
+});
+const shotBox = await page.locator('canvas').boundingBox();
+await page.mouse.click(shotBox.x + shotBox.width / 2, shotBox.y + shotBox.height / 2);
+await page.waitForTimeout(400);
+await page.locator('button:has-text("拉正")').click();
+await page.waitForTimeout(900);
+const seeded = await polyPoints();
+check('拉正沿用取景時抓到的框，不必重測一次', paperError(seeded) < 0.05,
+  `框的平均誤差 ${paperError(seeded).toFixed(4)}`);
+await page.evaluate(() => { window.SMScanLite.detect = window.__realDetect; });
+await page.locator('button:has-text("取消")').click();
+await page.waitForTimeout(300);
 
 const realErrors = pageErrors.filter((e) => !/favicon/i.test(e) && !/status of 404/.test(e));
 check('全程沒有 JS 錯誤', realErrors.length === 0, realErrors.join(' | '));

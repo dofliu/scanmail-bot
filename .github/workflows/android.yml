@@ -97,6 +97,11 @@ jobs:
       - name: Test server address storage
         working-directory: mobile
         run: npm run test:config
+      # 即時取景：用 canvas.captureStream() 當假相機，整條路（取流 → 偵測 →
+      # 疊框 → 快門）都走得完，不需要 runner 上有鏡頭
+      - name: Test live viewfinder
+        working-directory: mobile
+        run: npm run test:live
 
       - name: Build web assets for the app
         env:

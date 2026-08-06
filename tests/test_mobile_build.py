@@ -154,6 +154,29 @@ def test_local_image_engine_is_self_contained():
         assert symbol in source, f"image-local.js 少了 {symbol}"
 
 
+def test_live_viewfinder_is_self_contained():
+    """即時取景只用瀏覽器本身的能力 —— 離線版沒有後端可以問。"""
+    source = _strip_comments((JS / "scan-live.js").read_text(encoding="utf-8"))
+    for forbidden in ("window.API", "fetch(", "SM_CONFIG", "http://", "https://"):
+        assert forbidden not in source, f"scan-live.js 不該用到 {forbidden}"
+    for symbol in ("window.SMScanLive", "getUserMedia", "SMScanLite.detect"):
+        assert symbol in source, f"scan-live.js 少了 {symbol}"
+
+
+def test_live_viewfinder_releases_the_camera():
+    """stop() 一定要關掉軌道 —— 漏收的話相機燈會一直亮著。"""
+    source = (JS / "scan-live.js").read_text(encoding="utf-8")
+    stop = source[source.index("function stop()"):source.index("return {\n      video,")]
+    assert "getTracks().forEach((t) => t.stop())" in stop, "stop() 沒有關掉相機軌道"
+    assert "srcObject = null" in stop, "stop() 沒有把串流從 video 上放開"
+
+
+def test_index_loads_the_live_viewfinder_after_the_detector():
+    """scan-live.js 啟動時就會去問 window.SMScanLite，順序反了會變成不支援。"""
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    assert html.index("js/scan-lite.js") < html.index("js/scan-live.js")
+
+
 def test_local_engine_rejects_formats_canvas_cannot_encode():
     """canvas.toBlob 遇到不認得的型別會安靜地吐 PNG，必須先擋掉。"""
     source = (JS / "image-local.js").read_text(encoding="utf-8")
