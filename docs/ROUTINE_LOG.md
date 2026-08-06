@@ -26,6 +26,21 @@
 | 環境注意事項 | 沿用前幾筆：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx`（版本號會變，先 `ls /opt/pw-browsers/` 確認） ②`pip install -r requirements.txt` 之後補 `pip install cffi pytest`，`pip install` 加 `--timeout 120` ③`python tests/generate_test_forms.py` 會改到有進版控的 fixture，提交前 `git checkout -- tests/fixtures/forms/` ④跑 `test:studio` 前要先 `python3 scripts/build_mobile.py --offline` |
 | 下一步 | **先看 PR #47 跟 #48 合併了沒**（兩張都是草稿），沒合併就先追那個，不要再往上疊第三個未合併的版本號。之後做 `roadmap`：#47 沒合併的話仍是伺服器位址那項（做法寫在 8/04 那筆）；都合併了就換**即時取景 M2（自動快門）**：`scan-live.js` 的 `onResult` 已經回傳平滑前的 `rawCorners`，在 session 裡多記幾筆算「連續 N 次角點位移 < 門檻」即可，UI 在 `StudioCamera` 加倒數與自動觸發 `capture()`。**門檻不要在合成串流上調**（它不會抖）—— 可行的作法是先把穩定度數值顯示在取景畫面上，拿真機手持看幾秒的實際範圍再定；測試改成「餵一段每幀都微幅位移的串流」驗不該觸發、「完全靜止」驗會觸發。另外 `docs/TODO.md` 新增了一項「取景節流門檻要看真機」（現在固定 350ms / 640px），也適合跟 M2 一起量 |
 
+## 2026/08/04 — 伺服器位址存進原生儲存
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[0]`：App 的後端位址還存在 `localStorage`，系統清一次快取就得重打一次 IP |
+| 分支 | `claude/nightly-server-address-preferences` |
+| PR | [#47](https://github.com/dofliu/scanmail-bot/pull/47)（草稿，base `main`）|
+| 結果 | 完成，**v3.21.0**（做完時標 3.19.0，見下方「合併衝突」）。`static/js/config.js` 拆成**兩段**：開機仍同步讀 `localStorage`（App 內它是原生儲存的鏡像，所以 `apiBase` 一載入就有值、下游零影響），新增的 `ready()` 再非同步跟 `SMNative.store` 對答案 —— 鏡像被清掉就把位址救回來並補寫鏡像，原生儲存沒有這個 key 就把舊位址搬過去（沿用簽名庫「沒有 key＝該搬家」那套契約）。`native.js` 的 `init()` 先 `await SM_CONFIG.ready()` **才**判斷要不要跳伺服器設定畫面。`save()` / `clear()` 改成非同步，設定畫面等寫入落地再 reload；原生寫入失敗退回 `localStorage`。`api.js` 新增 `onApiBaseChange` 訂閱 + `rebase()`。`atoms.jsx` 的 `ServerSetting` 訂閱位址變化。測試 +25（新的 `npm run test:config`）+2 pytest。併入 #48 之後全綠 —— pytest 277 passed + 3 skipped、瀏覽器 **376** 項（介面 90 / 圖片 71 / 簽名 52 / 文件 51 / 掃描 34 / 取景 32 / 位址 25 / 頁面 21）|
+| 關鍵設計 | **選了「同步 `localStorage` 當開機快取 + 非同步校正」而不是把 `config.js` 移到 `native.js` 之後改全非同步**（上一筆建議的 (a) 案）。理由：位址被 `api.js` 在載入時就組成字串用著，改全非同步等於要所有 API 呼叫端等一個 ready promise，動到的面積遠大於這個增量該有的風險。兩段式只多一個訂閱點，而且網頁版 / 離線版一行行為都沒變 |
+| 順序才是重點 | 少了 `native.js` 那個 `await`，位址其實**還是**救得回來 —— 但設定畫面已經蓋上去了，使用者看到的沒有任何改善。所以 `tests/test_mobile_build.py` 加了一條防呆，釘住原始碼裡 `SM_CONFIG.ready()` 必須排在 `openServerSetup()` 之前 |
+| 容易漏掉的地方 | `api.js` 有**七個工具前綴**（`imgBase` / `pdfBase` / `cvtBase` / `gifBase` / `vidBase` / `renBase` / `formBase`）是在載入時就先組好的字串，不像各 function 裡的 `${BASE}` 是呼叫時求值。漏掉哪一個，那一類工具就會在清過快取的裝置上打到 `https://localhost`。第二條 pytest 防呆用正規式比對「宣告的每個 `xxxBase` 都要出現在 `rebase()` 裡」 |
+| 測試作法 | `mobile/test/config.test.mjs` **每個情境都真的 `page.goto()` 一次**，harness 裡有一段 prelude 在 `config.js` 之前依查詢字串佈置旗標 / `localStorage` / 假的 `window.SMCap`，讓載入順序跟 App 裡一模一樣 —— 這件事最容易錯的就是順序，用 `_internals.boot()` 在同一頁重跑會測不到。**做過 mutation 檢查**：拿掉 `native.js` 的 `await` 與 `api.js` 的訂閱，25 項裡有 4 項會紅 |
+| 合併衝突 | #48 先合併，所以這條分支要併上去。**踩到一個要注意的狀況**：使用者在 GitHub 上手動推了一個 merge commit（`10f3d2a`），但衝突是用「兩邊都留」收掉的 —— `main.py` 出現兩行 `version=`、`version.properties` 兩組版本號、`mobile/package.json` 少一個逗號（JSON 直接壞掉，`npm ci` 失敗所以 build 全紅）、`STATUS.yaml` 的 `last_updated` / `next_milestone` / `key_metrics` / `recent_changes` 各重複一次、`docs/TODO.md` 整段「後續工作」重複、兩個 Phase 20。**沒有 force push 蓋掉那個 commit**，而是在它上面補一個修正 commit。處理方式：版本號取 **3.21.0**（3.20.0 已被 #48 用掉，版本號跟著實際落地順序走，3.19.0 因此不存在）；`roadmap` 兩項都移除；TODO 的 Phase 依合併順序 —— #48 是 20、這份改成 21；變更日誌與本檔都把最新的擺最上面；兩支測試腳本 / 兩個 CI 步驟 / README 兩行都保留 |
+| 環境注意事項 | 沿用前幾筆：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=$(ls -d /opt/pw-browsers/chromium-*/chrome-linux/chrome \| head -1) npm run test:xxx` ②`pip install -r requirements.txt` 之後補 `pip install cffi pytest`，`pip install` 加 `--timeout 120` ③改完版本號要跑一次 `python scripts/build_mobile.py`，否則 `mobile/android/version.properties` 對不上 `main.py` 會有一條 pytest 紅 ④`tests/generate_test_forms.py` 產出的 fixture 有進版控，重跑後 bytes 會變，提交前 `git checkout -- tests/fixtures/forms/` ⑤跑 `npm run test:studio` 前要先 `python scripts/build_mobile.py --offline` |
+| 下一步 | 做 `roadmap[0]`：**即時取景 M2（自動快門）**。M1 已經在 v3.20.0 落地，`scan-live.js` 的 `onResult` 已經回傳平滑前的 `rawCorners`，在 session 裡多記幾筆算「連續 N 次角點位移 < 門檻」即可，UI 在 `StudioCamera` 加倒數與自動觸發 `capture()`。**門檻不要在合成串流上調**（它不會抖）—— 先把穩定度數值顯示在取景畫面上，拿真機手持看幾秒的實際範圍再定；測試改成「餵一段每幀都微幅位移的串流」驗不該觸發、「完全靜止」驗會觸發。另外 `docs/TODO.md` 有一項「取景節流門檻要看真機」（現在固定 350ms / 640px），適合一起量 |
 ## 2026/08/03 — 低信心時說得出「為什麼」（重拍建議）
 
 | 項目 | 內容 |

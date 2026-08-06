@@ -92,6 +92,11 @@ jobs:
         working-directory: mobile
         run: npm run test:scan
 
+      # 伺服器位址的儲存與救援：載入順序是這件事最容易寫錯的地方，
+      # 每個情境都真的載入一次頁面，讓 config.js / native.js / api.js 照真實順序跑
+      - name: Test server address storage
+        working-directory: mobile
+        run: npm run test:config
       # 即時取景：用 canvas.captureStream() 當假相機，整條路（取流 → 偵測 →
       # 疊框 → 快門）都走得完，不需要 runner 上有鏡頭
       - name: Test live viewfinder

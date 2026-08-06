@@ -1158,6 +1158,14 @@ function AuthScreen() {
 // 網頁版前端與後端同源，沒有「要連到哪一台」的問題，因此不顯示。
 function ServerSetting(){
   const cfg = window.SM_CONFIG;
+  // 位址不是常數 —— 清過快取的話要等 config.js 的 ready() 從原生儲存讀回來，
+  // 沒訂閱的話這裡會一直顯示「尚未設定」（見 js/config.js）
+  const [apiBase, setApiBase] = useState(cfg ? cfg.apiBase : '');
+  useEffect(() => {
+    if (!cfg || !cfg.onApiBaseChange) return;
+    setApiBase(cfg.apiBase);
+    return cfg.onApiBaseChange(setApiBase);
+  }, []);
   // 精簡離線版沒有後端可連，設定這一項只會讓人困惑
   if (!cfg || !cfg.bundled || cfg.offlineOnly) return null;
   return (
@@ -1168,7 +1176,7 @@ function ServerSetting(){
           掃描、AI 辨識與寄信都在後端執行，App 需要知道後端位址。
         </div>
         <div style={{fontSize:'13px', fontWeight:600, wordBreak:'break-all', marginBottom:'10px'}}>
-          {cfg.apiBase || '尚未設定'}
+          {apiBase || '尚未設定'}
         </div>
         <button className="btn" style={{width:'100%'}}
                 onClick={() => window.SMNative && window.SMNative.openServerSetup()}>

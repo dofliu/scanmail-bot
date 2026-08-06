@@ -5,8 +5,12 @@
 const ScanMailAPI = (() => {
   // 網頁版是空字串（同源，維持 `/api/...`）；
   // Android App 內建前端時是後端的絕對位址（見 js/config.js）。
-  const ROOT = (window.SM_CONFIG && window.SM_CONFIG.apiBase) || '';
-  const BASE = `${ROOT}/api`;
+  //
+  // 不是常數 —— App 內位址有可能在開機之後才定案：localStorage 被系統清快取清掉時，
+  // config.js 的 ready() 會從原生儲存把它救回來。以它組出來的前綴都得跟著換，
+  // 見這支檔案最後面的 rebase()。
+  let ROOT = (window.SM_CONFIG && window.SM_CONFIG.apiBase) || '';
+  let BASE = `${ROOT}/api`;
 
   function authToken() {
     try { return localStorage.getItem('session_token'); } catch (e) { return null; }
@@ -148,11 +152,30 @@ const ScanMailAPI = (() => {
     return json(`${BASE}/settings`, data);
   }
 
+  // ── 位址換掉時重算所有前綴 ──────────────────────────────
+  //
+  // App 內清過快取的話，正確的位址要等 config.js 的 ready() 從原生儲存讀回來，
+  // 那已經是載入之後的事了。各 function 裡的 `${BASE}` 是呼叫時才求值的，
+  // 換掉 BASE 就會生效；但下面幾個工具前綴是載入時就先組好的字串，得一起換。
+  //
+  // 註冊放在檔案最後（見 rebase 的呼叫處），這時候所有變數都初始化完了。
+  function rebase(base) {
+    ROOT = base || '';
+    BASE = `${ROOT}/api`;
+    imgBase = `${BASE}/tools/image`;
+    pdfBase = `${BASE}/tools/pdf`;
+    cvtBase = `${BASE}/tools/convert`;
+    gifBase = `${BASE}/tools/gif`;
+    vidBase = `${BASE}/tools/video`;
+    renBase = `${BASE}/tools/rename`;
+    formBase = `${BASE}/tools/form`;
+  }
+
   // ══════════════════════════════════════════════
   //  Image tools    prefix: /api/tools/image
   // ══════════════════════════════════════════════
 
-  const imgBase = `${BASE}/tools/image`;
+  let imgBase = `${BASE}/tools/image`;
 
   function imgResize(file, width, height, mode, fmt, quality) {
     const fd = new FormData();
@@ -256,7 +279,7 @@ const ScanMailAPI = (() => {
   //  PDF tools    prefix: /api/tools/pdf
   // ══════════════════════════════════════════════
 
-  const pdfBase = `${BASE}/tools/pdf`;
+  let pdfBase = `${BASE}/tools/pdf`;
 
   function pdfMerge(files, addToc = false, addPageNumbers = false) {
     const fd = new FormData();
@@ -312,7 +335,7 @@ const ScanMailAPI = (() => {
   //  Doc convert    prefix: /api/tools/convert
   // ══════════════════════════════════════════════
 
-  const cvtBase = `${BASE}/tools/convert`;
+  let cvtBase = `${BASE}/tools/convert`;
 
   function docConvert(file, direction) {
     const fd = new FormData();
@@ -331,7 +354,7 @@ const ScanMailAPI = (() => {
   //  GIF tools    prefix: /api/tools/gif
   // ══════════════════════════════════════════════
 
-  const gifBase = `${BASE}/tools/gif`;
+  let gifBase = `${BASE}/tools/gif`;
 
   function gifCreate(files, durationMs, loop, resizeW, resizeH) {
     const fd = new FormData();
@@ -348,7 +371,7 @@ const ScanMailAPI = (() => {
   //  Video tools    prefix: /api/tools/video
   // ══════════════════════════════════════════════
 
-  const vidBase = `${BASE}/tools/video`;
+  let vidBase = `${BASE}/tools/video`;
 
   function vidMerge(files, fmt) {
     const fd = new FormData();
@@ -379,7 +402,7 @@ const ScanMailAPI = (() => {
   //  Batch rename    prefix: /api/tools/rename
   // ══════════════════════════════════════════════
 
-  const renBase = `${BASE}/tools/rename`;
+  let renBase = `${BASE}/tools/rename`;
 
   function renamePreview(filenames, opts) {
     return json(`${renBase}/preview`, { filenames, ...opts });
@@ -407,7 +430,7 @@ const ScanMailAPI = (() => {
   //  Auto Form Fill   prefix: /api/tools/form
   // ══════════════════════════════════════════════
 
-  const formBase = `${BASE}/tools/form`;
+  let formBase = `${BASE}/tools/form`;
 
   function formDetect(file, hint = '') {
     const fd = new FormData();
@@ -603,6 +626,12 @@ const ScanMailAPI = (() => {
     uploadImage, detectEdges, processScan, applyFilter, rotateImage,
     addPage, listPages, removePage, clearPages,
     analyze, sendEmail, batchSend,
+    // rebase 由檔案最後註冊給 config.js；currentBase / toolBases 是測試用的觀測點
+    _internals: {
+      rebase,
+      currentBase: () => BASE,
+      toolBases: () => ({ imgBase, pdfBase, cvtBase, gifBase, vidBase, renBase, formBase }),
+    },
     // Contacts
     listContacts, createContact, deleteContact,
     // Groups
@@ -641,3 +670,8 @@ const ScanMailAPI = (() => {
 })();
 
 window.API = ScanMailAPI;
+
+// App 內位址可能在開機之後才從原生儲存救回來（見 js/config.js 的 ready()）
+if (window.SM_CONFIG && window.SM_CONFIG.onApiBaseChange) {
+  window.SM_CONFIG.onApiBaseChange(ScanMailAPI._internals.rebase);
+}
