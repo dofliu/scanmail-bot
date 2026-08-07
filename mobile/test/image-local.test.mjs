@@ -331,6 +331,240 @@ check('平鋪浮水印四個象限都蓋到',
   layers.tiledQuadrants === 4, `只蓋到 ${layers.tiledQuadrants} 個象限`);
 check('空白文字不會留下痕跡', layers.emptyChanged === 0, `改了 ${layers.emptyChanged} 點`);
 
+// ── 標註（箭頭 / 方框）─────────────────────────────────
+console.log('\n標註');
+
+const marks = await page.evaluate(() => {
+  const L = window.SMImageLocal;
+  // 純白底才看得出「哪些像素被畫上去了」—— 紅藍兩半會把顏色比對弄得很吵
+  const white = (w, h) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h);
+    return c;
+  };
+  const painted = (cv, x, y, w, h) => {
+    const d = cv.getContext('2d').getImageData(x, y, w, h).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] !== 255 || d[i + 1] !== 255 || d[i + 2] !== 255) n++;
+    }
+    return n;
+  };
+
+  // 「箭頭有沒有頭」問的是「靠近箭尖的地方是不是比箭身高」，
+  // 所以量的是某一段 x 範圍內畫到的**垂直高度**，不是點數 ——
+  // 點數會被線寬與暈邊稀釋，高度不會。
+  const spanY = (cv, x, w) => {
+    const d = cv.getContext('2d').getImageData(x, 0, w, cv.height).data;
+    let top = -1;
+    let bottom = -1;
+    for (let row = 0; row < cv.height; row++) {
+      for (let col = 0; col < w; col++) {
+        const i = (row * w + col) * 4;
+        if (d[i] !== 255 || d[i + 1] !== 255 || d[i + 2] !== 255) {
+          if (top < 0) top = row;
+          bottom = row;
+          break;
+        }
+      }
+    }
+    return top < 0 ? 0 : bottom - top + 1;
+  };
+
+  const out = {};
+
+  // 方框：四條邊上要有筆跡，正中間必須是空的 —— 方框是框不是色塊
+  const boxed = white(400, 200);
+  L.drawAnnotations(boxed, [{ kind: 'box', x1: 0.25, y1: 0.25, x2: 0.75, y2: 0.75 }]);
+  out.boxTop = painted(boxed, 96, 46, 208, 8);
+  out.boxBottom = painted(boxed, 96, 146, 208, 8);
+  out.boxLeft = painted(boxed, 96, 46, 8, 108);
+  out.boxRight = painted(boxed, 296, 46, 8, 108);
+  out.boxHollow = painted(boxed, 140, 80, 120, 40);
+  out.boxOutside = painted(boxed, 0, 0, 60, 30);
+
+  // 箭頭指向的那一端要比尾端粗 —— 箭頭有沒有頭，就看這個
+  // 線寬指定成 0.02 而不是用預設值：測試畫布短邊只有 200px，預設的 0.006 算出來
+  // 是 1.5px 的線、7px 的箭頭，頭跟尾在取樣格裡差不了幾個點。量的是幾何，不是預設值。
+  const arrow = white(400, 200);
+  L.drawAnnotations(arrow, [{ kind: 'arrow', x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5, width: 0.02 }]);
+  out.arrowHead = spanY(arrow, 336, 20);
+  out.arrowTail = spanY(arrow, 40, 20);
+
+  // 反過來拖，頭要換到另一邊。方框做同樣的事得到的是同一塊 ——
+  // 這一對是「為什麼存起點終點而不是 x/y/w/h」的證明
+  const back = white(400, 200);
+  L.drawAnnotations(back, [{ kind: 'arrow', x1: 0.9, y1: 0.5, x2: 0.1, y2: 0.5, width: 0.02 }]);
+  out.backHead = spanY(back, 44, 20);
+  out.backTail = spanY(back, 340, 20);
+
+  const boxA = white(400, 200);
+  const boxB = white(400, 200);
+  L.drawAnnotations(boxA, [{ kind: 'box', x1: 0.25, y1: 0.25, x2: 0.75, y2: 0.75 }]);
+  L.drawAnnotations(boxB, [{ kind: 'box', x1: 0.75, y1: 0.75, x2: 0.25, y2: 0.25 }]);
+  const same = (a, b) => {
+    const pa = a.getContext('2d').getImageData(0, 0, 400, 200).data;
+    const pb = b.getContext('2d').getImageData(0, 0, 400, 200).data;
+    for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) return false;
+    return true;
+  };
+  out.boxDirectionless = same(boxA, boxB);
+
+  // 相對座標：換一個尺寸的畫布，落點的比例要一樣
+  const small = white(200, 100);
+  L.drawAnnotations(small, [{ kind: 'box', x1: 0.25, y1: 0.25, x2: 0.75, y2: 0.75 }]);
+  out.scaledTop = painted(small, 48, 21, 104, 8);
+  out.scaledHollow = painted(small, 70, 40, 60, 20);
+
+  // 顏色：指定的顏色要真的出現（暈邊是黑的，所以只找純色那一點）
+  const tinted = white(400, 200);
+  L.drawAnnotations(tinted, [{ kind: 'box', x1: 0.2, y1: 0.2, x2: 0.8, y2: 0.8, color: '#00ff00', width: 0.02 }]);
+  const scan = tinted.getContext('2d').getImageData(0, 0, 400, 200).data;
+  let green = 0;
+  for (let i = 0; i < scan.length; i += 4) {
+    if (scan[i] < 60 && scan[i + 1] > 200 && scan[i + 2] < 60) green++;
+  }
+  out.green = green;
+
+  // 暈邊：紅箭頭壓在紅底上，沒有暈邊就整支消失
+  const red = document.createElement('canvas');
+  red.width = 200; red.height = 200;
+  const rx = red.getContext('2d');
+  rx.fillStyle = '#e5322d'; rx.fillRect(0, 0, 200, 200);
+  // 量的是「有沒有變暗」而不是「有沒有變」：同色疊同色在 alpha 合成下仍會有幾個
+  // 位元組的捨入差，那不代表使用者看得見。暈邊的作用就是那一圈深色，所以數深色點。
+  const darker = (data) => {
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) if (data[i] < 180) n++;
+    return n;
+  };
+  L.drawAnnotations(red, [{ kind: 'arrow', x1: 0.2, y1: 0.5, x2: 0.8, y2: 0.5, width: 0.02 }]);
+  out.haloVisible = darker(rx.getImageData(0, 0, 200, 200).data);
+
+  const flat = document.createElement('canvas');
+  flat.width = 200; flat.height = 200;
+  const fx = flat.getContext('2d');
+  fx.fillStyle = '#e5322d'; fx.fillRect(0, 0, 200, 200);
+  L.drawAnnotations(flat, [{ kind: 'arrow', x1: 0.2, y1: 0.5, x2: 0.8, y2: 0.5, width: 0.02, halo: false }]);
+  out.noHaloInvisible = darker(fx.getImageData(0, 0, 200, 200).data);
+
+  // 沒有大小的那一筆（手抖點一下）不該留下任何東西
+  const dot = white(400, 200);
+  L.drawAnnotations(dot, [{ kind: 'box', x1: 0.5, y1: 0.5, x2: 0.5, y2: 0.5 }]);
+  L.drawAnnotations(dot, [{ kind: 'arrow', x1: 0.5, y1: 0.5, x2: 0.5001, y2: 0.5 }]);
+  out.dotPainted = painted(dot, 0, 0, 400, 200);
+
+  // 空陣列 / null 走原樣返回的快路
+  const untouched = white(400, 200);
+  out.emptySame = L.drawAnnotations(untouched, []) === untouched
+    && L.drawAnnotations(untouched, null) === untouched
+    && painted(untouched, 0, 0, 400, 200) === 0;
+
+  // null 混在陣列裡不能整批爆掉
+  const mixed = white(400, 200);
+  let threw = false;
+  try {
+    L.drawAnnotations(mixed, [null, { kind: 'box', x1: 0.1, y1: 0.1, x2: 0.4, y2: 0.4 }]);
+  } catch (e) { threw = true; }
+  out.nullSafe = !threw && painted(mixed, 0, 0, 400, 200) > 0;
+
+  return out;
+});
+
+check('方框畫的是框不是色塊（四邊有筆跡、中間空的）',
+  marks.boxTop > 100 && marks.boxBottom > 100 && marks.boxLeft > 50 && marks.boxRight > 50
+  && marks.boxHollow === 0 && marks.boxOutside === 0,
+  JSON.stringify(marks));
+check('箭頭的頭比箭身高（箭頭真的有頭）',
+  marks.arrowHead > marks.arrowTail * 1.8 && marks.arrowTail > 0,
+  `頭高 ${marks.arrowHead}px、身高 ${marks.arrowTail}px`);
+check('反過來拖，箭頭的頭跟著換邊',
+  marks.backHead > marks.backTail * 1.8 && marks.backTail > 0,
+  `頭高 ${marks.backHead}px、身高 ${marks.backTail}px`);
+check('方框沒有方向 —— 從哪個角拖都是同一塊',
+  marks.boxDirectionless, '兩次拖曳畫出來的不一樣');
+check('座標是相對的：換尺寸的畫布落點比例一樣',
+  marks.scaledTop > 50 && marks.scaledHollow === 0,
+  `上緣 ${marks.scaledTop} 點、中間 ${marks.scaledHollow} 點`);
+check('指定的顏色真的畫得出來', marks.green > 200, `只有 ${marks.green} 個綠點`);
+check('暈邊讓同色底上的標註仍然看得見',
+  marks.haloVisible > 300 && marks.noHaloInvisible === 0,
+  `有暈邊 ${marks.haloVisible} 個深色點、關掉暈邊 ${marks.noHaloInvisible} 個`);
+check('沒有大小的那一筆不留痕跡', marks.dotPainted === 0, `改了 ${marks.dotPainted} 點`);
+check('空的標註陣列原樣返回、不動畫布', marks.emptySame, JSON.stringify(marks.emptySame));
+check('陣列裡混到 null 不會整批失敗', marks.nullSafe, JSON.stringify(marks.nullSafe));
+
+const marksItem = await page.evaluate(async () => {
+  const L = window.SMImageLocal;
+  const c = document.createElement('canvas');
+  c.width = 400; c.height = 200;
+  const x = c.getContext('2d');
+  x.fillStyle = '#ffffff'; x.fillRect(0, 0, 400, 200);
+  const blob = await new Promise((r) => c.toBlob(r, 'image/png'));
+  const item = await L.loadItem(new File([blob], 'w.png', { type: 'image/png' }));
+
+  const painted = (cv, px, py, w, h) => {
+    const d = cv.getContext('2d').getImageData(px, py, w, h).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] !== 255 || d[i + 1] !== 255 || d[i + 2] !== 255) n++;
+    }
+    return n;
+  };
+
+  const out = {};
+  out.defaultEmpty = Array.isArray(item.annotations) && item.annotations.length === 0;
+
+  // renderItem 要把標註畫進去
+  const shown = L.renderItem({ ...item, annotations: [{ kind: 'box', x1: 0.25, y1: 0.25, x2: 0.75, y2: 0.75 }] });
+  out.rendered = painted(shown, 96, 46, 208, 8);
+
+  // 標註排在打碼**之後** —— 指著「這裡要改」的箭頭被馬賽克吃掉就白畫了。
+  // 整張塗黑再畫一條綠框，看得到綠色才表示順序是對的
+  const over = L.renderItem({
+    ...item,
+    redactions: [{ x: 0, y: 0, w: 1, h: 1, style: 'fill' }],
+    annotations: [{ kind: 'box', x1: 0.25, y1: 0.25, x2: 0.75, y2: 0.75, color: '#00ff00', width: 0.02 }],
+  });
+  const d = over.getContext('2d').getImageData(0, 0, over.width, over.height).data;
+  let green = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i] < 60 && d[i + 1] > 200 && d[i + 2] < 60) green++;
+  }
+  out.aboveRedaction = green;
+
+  // 標註跟裁切一樣在「看到的畫面」上：裁掉一半之後，同一組相對座標
+  // 要落在裁切後的畫布上，而不是原圖的位置
+  const cropped = L.renderItem({
+    ...item, cropRect: { x: 0, y: 0, w: 0.5, h: 1 },
+    annotations: [{ kind: 'box', x1: 0.2, y1: 0.2, x2: 0.8, y2: 0.8 }],
+  });
+  out.croppedSize = [cropped.width, cropped.height];
+  out.croppedMark = painted(cropped, 36, 36, 130, 8);
+
+  // 沒有標註的那條路徑要跟以前逐像素相同（不會有回歸）
+  const plain = L.renderItem(item);
+  const noneField = L.renderItem({ ...item, annotations: [] });
+  const pa = plain.getContext('2d').getImageData(0, 0, 400, 200).data;
+  const pb = noneField.getContext('2d').getImageData(0, 0, 400, 200).data;
+  let diff = 0;
+  for (let i = 0; i < pa.length; i++) if (pa[i] !== pb[i]) diff++;
+  out.noRegression = diff;
+  return out;
+});
+
+check('新讀進來的圖片有一個空的標註陣列', marksItem.defaultEmpty, JSON.stringify(marksItem.defaultEmpty));
+check('renderItem 會把標註畫進成品', marksItem.rendered > 100, `${marksItem.rendered} 點`);
+check('標註疊在打碼之上，不會被遮蓋吃掉',
+  marksItem.aboveRedaction > 200, `只有 ${marksItem.aboveRedaction} 個綠點`);
+check('標註跟打碼一樣落在裁切後的畫面上',
+  marksItem.croppedSize.join() === '200,200' && marksItem.croppedMark > 50,
+  JSON.stringify([marksItem.croppedSize, marksItem.croppedMark]));
+check('沒有標註時的輸出與改動前逐像素相同',
+  marksItem.noRegression === 0, `差了 ${marksItem.noRegression} 個位元組`);
+
 // ── 格子內的取景（縮放 + 對焦點）────────────────────────
 console.log('\n格子內取景');
 

@@ -420,6 +420,8 @@
       cropRect: null,
       adjust: null,
       redactions: [],
+      // 標註（箭頭 / 方框）—— 跟打碼同一套座標，但疊上去而不是改像素
+      annotations: [],
       // 格子內的取景（縮放 + 對焦點）—— 拼貼時才用得到
       fit: null,
     };
@@ -570,7 +572,9 @@
 
     const cropped = cropToRect(out.canvas, item.cropRect);
     // 打碼排在裁切之後：使用者是在「看到的畫面」上框的
-    return applyRedactions(cropped, item.redactions);
+    const redacted = applyRedactions(cropped, item.redactions);
+    // 標註疊在打碼之上 —— 指著「這欄請填」的箭頭要是被馬賽克吃掉就白畫了
+    return drawAnnotations(redacted, item.annotations);
   }
 
   /**
@@ -658,6 +662,98 @@
   }
 
   /**
+   * 標註 —— 箭頭與方框。「這裡要改」「這欄請填」，把話講在圖上比另外打一段字清楚。
+   *
+   * 跟打碼的差別是**可逆**：打碼直接把像素改掉、拿掉就回不去了，標註只是疊一筆在上面。
+   * 但兩者在介面上共用同一套拖框手勢，所以座標也刻意用同一套 0–1 相對值，
+   * 縮圖預覽跟原圖匯出才會落在同一個位置。
+   *
+   * 每一筆存的是拖曳的**起點 → 終點**（`x1,y1,x2,y2`），不是打碼那種 `x/y/w/h`：
+   * 方框從哪個角開始拖都一樣，但箭頭是有方向的 —— 正規化成矩形就把「箭頭指哪邊」
+   * 這件唯一重要的事丟掉了。方框自己從兩點推回矩形，成本比反過來低得多。
+   *
+   * 線寬相對短邊，跟文字的字級同一套慣例。
+   */
+  function drawAnnotations(canvas, annotations) {
+    if (!annotations || !annotations.length) return canvas;
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const W = canvas.width;
+    const H = canvas.height;
+    const unit = Math.min(W, H);
+
+    for (const a of annotations) {
+      if (!a) continue;
+      const x1 = (a.x1 == null ? 0 : a.x1) * W;
+      const y1 = (a.y1 == null ? 0 : a.y1) * H;
+      const x2 = (a.x2 == null ? 0 : a.x2) * W;
+      const y2 = (a.y2 == null ? 0 : a.y2) * H;
+      // 手抖點一下會產生一個沒有大小的形狀 —— 畫出來只是一個看不懂的小點
+      if (Math.abs(x2 - x1) < 1 && Math.abs(y2 - y1) < 1) continue;
+
+      const lw = Math.max(1.5, (a.width == null ? DEFAULT_MARK_WIDTH : a.width) * unit);
+      ctx.save();
+      ctx.filter = 'none';
+      ctx.globalAlpha = a.opacity == null ? 1 : Math.max(0.05, Math.min(1, a.opacity));
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      // 先描一圈深色再畫本體。紅箭頭壓在紅色印章上就是看不見 —— 跟文字的外框同一個理由，
+      // 差別是這裡不給使用者調：標註的重點是「看得到」，不是好不好看。
+      const path = (c) => {
+        c.beginPath();
+        if (a.kind === 'arrow') {
+          c.moveTo(x1, y1);
+          c.lineTo(x2, y2);
+        } else {
+          c.rect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1));
+        }
+      };
+      const stroke = (color, width) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        path(ctx);
+        ctx.stroke();
+      };
+
+      if (a.halo !== false) stroke('rgba(0,0,0,0.45)', lw * 2);
+      stroke(a.color || DEFAULT_MARK_COLOR, lw);
+
+      if (a.kind === 'arrow') {
+        // 箭頭大小跟著線寬走，但不能超過箭身的一半 —— 短箭頭整支都是頭的話，
+        // 使用者拖出來的那一段方向感就沒了
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        const head = Math.min(lw * 4.5, len * 0.5);
+        const ang = Math.atan2(y2 - y1, x2 - x1);
+        const wing = (sign) => ({
+          x: x2 - head * Math.cos(ang + (sign * Math.PI) / 7),
+          y: y2 - head * Math.sin(ang + (sign * Math.PI) / 7),
+        });
+        const a1 = wing(1);
+        const a2 = wing(-1);
+        const headPath = (c) => {
+          c.beginPath();
+          c.moveTo(a1.x, a1.y);
+          c.lineTo(x2, y2);
+          c.lineTo(a2.x, a2.y);
+        };
+        if (a.halo !== false) {
+          ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+          ctx.lineWidth = lw * 2;
+          headPath(ctx);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = a.color || DEFAULT_MARK_COLOR;
+        ctx.lineWidth = lw;
+        headPath(ctx);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    return canvas;
+  }
+
+  /**
    * 轉圖的時候裁切框要跟著轉，不然「轉一下」會讓已經裁好的範圍飄到別的地方。
    * delta 是順時針角度（90 的倍數）。
    */
@@ -705,6 +801,11 @@
   /** 在指定方框內畫圖：contain 等比縮入（可能留白）、cover 裁切填滿 */
   /** 沒有動過的取景 —— 剛好填滿、對齊中心 */
   const DEFAULT_FIT = { zoom: 1, x: 0.5, y: 0.5 };
+
+  // 標註的預設外觀。紅色是因為文件多半是黑字白底，紅色不會跟內容混在一起；
+  // 線寬相對短邊，A4 掃描與手機拍的照片畫出來的粗細才是同一個感覺。
+  const DEFAULT_MARK_COLOR = '#e5322d';
+  const DEFAULT_MARK_WIDTH = 0.006;
 
   function isDefaultFit(fit) {
     if (!fit) return true;
@@ -1257,6 +1358,9 @@
     flipFit,
     filterOf,
     applyRedactions,
+    drawAnnotations,
+    DEFAULT_MARK_COLOR,
+    DEFAULT_MARK_WIDTH,
     drawTexts,
     drawSignatures,
     fitBox,
