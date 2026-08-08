@@ -9,6 +9,28 @@
 
 ---
 
+## 2026/08/07 — 標註工具 M1（箭頭 / 方框）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | 標註工具 M1。**不是 `main` 的 `roadmap[0]`** —— 第一項（即時取景 M2）昨晚已經做在 PR #49，還開著沒合併，所以往下拿一項，跟 8/05、8/03 兩次的處置一致 |
+| 分支 | `claude/nightly-annotate-shapes`（從 `origin/main` 長出來） |
+| PR | 見分支上的草稿 PR |
+| 開場先做的事 | **PR #49 的 CI 追完才開新題。** 昨晚那個 session 在 PR #49 留言說「Actions 一個 run 都沒建立」，我先驗了一次：整個 repo 最後一個 workflow run 停在 08/06 09:20Z，#49 推上來（08/06 19:35Z）之後 34 小時都沒有新的 run。用 `actions_run_trigger(run_workflow, android.yml, main)` 手動觸發 → **立刻就跑起來了**，代表 Actions 已經恢復、當時是暫時性的。照昨晚留的建議推一個空 commit 到 `claude/nightly-auto-shutter`，`CI` / `Android App` 兩個 workflow 都正常觸發，**#49 六個檢查全綠**（Android build 4 分 28 秒），只差合併 |
+| 結果 | 完成，v3.23.0。`static/js/image-local.js` 新增 `drawAnnotations()`（箭頭 + 方框），`renderItem()` 的順序變成 裁切 → 打碼 → **標註**。介面新增 `StudioAnnotator` 與工具列的「✎ 標註」。**順手把拖框手勢抽成共用的 `useDragBoxes`**，打碼與標註真的走同一份程式 |
+| 三個決定 | ①**存起點 → 終點，不是矩形**。方框從哪個角拖都一樣，但箭頭有方向，壓成 `x/y/w/h` 就把「指哪邊」丟掉了；方框自己從兩點推回矩形，成本比反過來低得多。②**深色暈邊**，理由跟文字的外框一樣（紅箭頭壓在紅色印章上就是看不見），但不給使用者調 —— 標註的重點是看得到。③**標註排在打碼之後**，指著「這裡要改」的箭頭被馬賽克吃掉就白畫了；有一則 pytest 直接比對兩個呼叫在原始碼裡的先後 |
+| 共用手勢的分寸 | 抽出來的是**手勢**（`useDragBoxes` 只回報「從哪裡拖到哪裡」），不是外觀 —— 形狀怎麼存、怎麼畫留給呼叫端。這是刻意的：兩邊要畫的東西差很多，硬要共用外觀會把兩邊都綁死；但手勢一模一樣，各抄一份的話改了一邊忘了另一邊，使用者會發現「打碼點得掉、標註點不掉」。pytest 用 `studio.count("= useDragBoxes({") == 2` 把這件事釘住 |
+| 測試 | +29。引擎 15（圖片 71 → 86）、介面 13（90 → 103）、pytest 接線守門 1（277 → 278 passed）。全綠 —— pytest 278 passed + 3 skipped、瀏覽器 **404** 項（圖片 86 / 介面 103 / 簽名 52 / 文件 51 / 掃描 34 / 取景 32 / 位址 25 / 頁面 21）|
+| Mutation 檢查 | 拿掉箭頭的頭 → 2 條紅；拿掉暈邊 → 1 條紅；把標註畫到打碼之前 → 1 條紅；拿掉共用手勢的「點一下移除」→ 1 條紅（順帶發現：**打碼自己的「點一下移除」原本沒有測試**，現在至少共用的那條路徑被蓋到了）|
+| 兩個寫測試踩到的坑 | ①**箭頭的頭不能用「點數」量**。測試畫布短邊只有 200px，預設線寬 0.006 算出來是 1.5px 的線、7px 的箭頭，頭跟尾在取樣格裡差不到兩倍。改成量**垂直高度**（靠近箭尖那一段比箭身高），這也才是「箭頭有沒有頭」真正在問的事。②**同色疊同色不會「完全沒有差異」** —— alpha 合成有捨入誤差，關掉暈邊之後仍有 262 個位元組不同。改成數「有沒有變暗」（暈邊的作用就是那圈深色），關掉暈邊時是乾淨的 0 |
+| 刻意沒做 | ①**`drawTexts` 改陣列（拆成 M1b）** —— 原本 TODO 把它跟 M1 綁在一起，但引擎那一側**早就吃陣列了**，卡住的純粹是 `studio.jsx`：`text` 是一個 state 物件、`textLayer` 固定包成 `[text]`。要做的是圖層清單 + 新增 / 刪除 + 把面板上十幾個滑桿改成操作「選中那一層」，跟箭頭 / 方框沒有相依，混在一起一個晚上做不完。②標註的線寬滑桿（資料結構已經吃 `width`，現在加是憑空猜）。③旋轉時讓標註跟著走 —— **打碼從 v3.12.0 就有同一個問題**，兩個一起處理才合理，已寫進「後續工作」|
+| CI | **全綠。** `test (3.10)` / `test (3.11)` / `Android App / build`（4 分 39 秒，含新增的標註測試）/ GitGuardian ✅。**踩到一個坑**：分支有 PR 時 `push` 與 `pull_request` 會各觸發一次同樣的 CI，這次 `push` 那一份的 `test (3.10)` 卡在 `Install CJK fonts`（apt）超過 10 分鐘不動 —— 同一個 commit 在 `pull_request` 那一份早就綠了，所以是 runner 的 apt 鏡像卡住，不是程式。處置：`cancel_workflow_run` 之後 `rerun_workflow_run`，重跑 67 秒就過。下次遇到「只有一份卡住、另一份綠」直接這樣做，不用查程式 |
+| 版本號 | **用 3.23.0** —— 開工時 PR #49 已經佔用 3.22.0 但還沒合併，兩邊都從 `main`（3.21.0）長出來 |
+| 合併衝突預告 | 這條分支跟 #49 都從 `ce63ac6` 長出來，會衝突的檔案：`main.py`（取 3.23.0）、`STATUS.yaml`（`roadmap` 兩項都要移除 —— #49 移即時取景 M2、這條移標註工具 M1，`recent_changes` 依實際合併順序串起來、`key_metrics` 取兩邊測試數的**聯集**）、`docs/TODO.md`（這次的 Phase 22 依合併順序改編號成 **23**，兩張表的新列都留著）、`docs/ROUTINE_LOG.md`、`README.md`、`docs/ARCHITECTURE.md`、`docs/ANDROID.md`。處理方式跟 8/05 那次一樣 |
+| 環境注意事項 | 沿用前幾筆，都還有效：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx`（版本號會變，先 `ls /opt/pw-browsers/` 確認）②`pip install -r requirements.txt` 之後補 `pip install cffi pytest`，加 `--timeout 120` ③`python tests/generate_test_forms.py` 會改到有進版控的 fixture，提交前 `git checkout -- tests/fixtures/forms/` ④跑 `test:studio` 前要先 `python3 scripts/build_mobile.py --offline`。**新增一條**：`mcp__github__actions_list` 的輸出很大（180 筆 run ≈ 390KB）會超過工具回傳上限，加 `resource_id` 指定 workflow 也一樣 —— 直接讀它落地的那個檔案用 `python3 -c "import json..."` 挑欄位比較快 |
+| 合併結果 | **#49 在這條分支開好 PR 之後就被合併了**（`bbaa597`），所以當晚就把 `origin/main` merge 回這條分支、照上面那列預告的方式解掉衝突：`main.py` / `version.properties` 取 3.23.0、`STATUS.yaml` 的 `roadmap` 兩項都移除並換上 M1b、`docs/TODO.md` 的 Phase 22 改編號成 **23**（#49 先進 main 就是 22）、兩張表與兩則變更日誌都留著、測試數取聯集。合併後整套測試重跑一次確認沒有互相打架 |
+| 下一步 | 做 `roadmap[0]`：**標註工具 M1b：`drawTexts` 改陣列**。具體怎麼動：`static/js/studio.jsx` 的 `const [text, setText] = stUseState(STUDIO_TEXT_DEFAULT)` 改成 `texts` 陣列 + 一個 `activeText` 索引；`textLayer`（現在是 `text.text.trim() ? [{...text, ...SPOTS[text.spot]}] : null`）改成 map 整個陣列；`sheet === 'text'` 那個面板最上面加一排圖層 chip（「文字 1 / 文字 2 / ＋」）與刪除鈕，底下十幾個 `setText({ ...text, xxx })` 統一改成寫回 `texts[activeText]`。引擎完全不用動（`drawTexts` 從一開始就吃陣列）。測試補在 `npm run test:studio`：兩段文字同時出現在成品上、切換圖層改到的是對的那一層、刪掉中間那層剩下的不會跑位。做完把 `STATUS.yaml` 的 `roadmap` 那一項移除、`docs/TODO.md`「標註工具」的 M1b 打勾 |
+
 ## 2026/08/06 — 即時取景 M2（框穩了自己拍）
 
 | 項目 | 內容 |

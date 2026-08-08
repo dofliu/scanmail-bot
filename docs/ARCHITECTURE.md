@@ -80,7 +80,7 @@ ScanMail+ 是一個文件掃描郵寄平台，另外整合了一整套媒體 / �
 
 | 檔案 | 行數 | 做什麼 |
 |------|------|------|
-| `image-local.js` | ~1280 | 縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 裁切 / 打碼 / 濾鏡 / 文字 / 格子取景（裁切框與取景都會跟著旋轉走：`rotateRect` / `rotateFit`）|
+| `image-local.js` | ~1390 | 縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 裁切 / 打碼 / 標註 / 濾鏡 / 文字 / 格子取景（裁切框與取景都會跟著旋轉走：`rotateRect` / `rotateFit`）|
 | `scan-lite.js` | ~1040 | 文件邊界偵測（梯度導向 Hough）+ 透視校正（WebGL）+ 拍攝品質診斷（`assess()`：低信心時說得出反光 / 過暗 / 太遠）|
 | `scan-live.js` | ~390 | 即時取景：`getUserMedia` 取流 + 節流跑 `scan-lite` 偵測 + 平滑角點 + 全解析度快門 + 框穩了自動按快門 |
 | `sign-lite.js` | ~590 | 簽名模型（向量筆畫）、去白底匯入、PDF 路徑輸出、簽名庫的持久化 |
@@ -208,7 +208,8 @@ SMScanLite.detect()        梯度導向 Hough → 候選四邊形 → v5 評分�
 SMScanLite.warp()          WebGL 逐像素反推來源座標
      │                     輸出尺寸用 Zhang–He 法反推真實寬高比
      ▼
-renderItem()               旋轉 / 翻轉 / 濾鏡 / 裁切 / 打碼（每次狀態變動都重跑）
+renderItem()               旋轉 / 翻轉 / 濾鏡 / 裁切 / 打碼 / 標註（每次狀態變動都重跑）
+     │                     標註排在打碼之後 —— 疊上去的東西不該被遮蓋吃掉
      │
      ▼
 composeToCanvas()          layoutBoxes() 算版面 → drawCell() 逐格繪製（含取景）

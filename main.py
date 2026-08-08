@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ScanMail+",
     description="智慧文件處理平台 — 掃描郵寄 + 多媒體工具",
-    version="3.22.0",
+    version="3.23.0",
     lifespan=lifespan,
 )
 

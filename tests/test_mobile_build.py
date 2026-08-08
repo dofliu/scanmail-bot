@@ -283,8 +283,33 @@ def test_free_crop_is_a_full_screen_editor():
     assert "setCropping(true)" in studio, "裁切沒有進入獨立畫面"
     # 離開裁切後 canvas 是新的 DOM 元素，不重畫會停在瀏覽器預設的空白畫布。
     # 每個全螢幕模式都要列進相依 —— 打碼、拉正、簽名都一樣。
-    assert ("[items, layout, frame, sel, cropping, redacting, deskewing, signing, "
-            "text, stamps, signatures]") in studio
+    assert ("[items, layout, frame, sel, cropping, redacting, annotating, deskewing, "
+            "signing, text, stamps, signatures]") in studio
+
+
+def test_annotations_share_the_redaction_gesture():
+    """標註跟打碼的手勢一模一樣 —— 拖出一個框新增、點一下移除。
+
+    共用的是**手勢**不是外觀：`useDragBoxes` 只回報「從哪裡拖到哪裡」，
+    形狀怎麼存、怎麼畫留給呼叫端。兩邊各自複製一份的話，改了一邊忘了另一邊，
+    使用者會發現「打碼點得掉、標註點不掉」。
+    """
+    studio = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "function useDragBoxes(" in studio
+    # 打碼與標註都要真的走同一個 hook，不是各自實作一份
+    # `= useDragBoxes({` 只數呼叫端，不會把定義本身算進來
+    assert studio.count("= useDragBoxes({") == 2, "打碼與標註沒有共用同一套拖框手勢"
+    assert "function StudioAnnotator(" in studio
+    assert "setAnnotating(true)" in studio, "標註沒有進入獨立畫面"
+
+    engine = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    assert "function drawAnnotations(" in engine
+    # 箭頭存的是起點 → 終點而不是 x/y/w/h：正規化成矩形就把方向丟掉了
+    for field in ("x1", "y1", "x2", "y2"):
+        assert field in engine, f"標註少了 {field}，箭頭就沒有方向了"
+    # 標註要疊在打碼**之上** —— 指著「這裡要改」的箭頭被馬賽克吃掉就白畫了
+    order = engine.index("applyRedactions(cropped")
+    assert order < engine.index("drawAnnotations(redacted"), "標註畫在打碼之前，會被遮蓋吃掉"
 
 
 def test_images_convert_to_pdf_losslessly():

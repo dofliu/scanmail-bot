@@ -156,7 +156,7 @@ await page.waitForTimeout(400);
 
 labels = await barLabels();
 check('點圖片後工具列換成圖片操作',
-  ['左轉', '右轉', '裁切', '打碼', '調整', '完成'].every((l) => labels.some((x) => x.includes(l))),
+  ['左轉', '右轉', '裁切', '打碼', '標註', '調整', '完成'].every((l) => labels.some((x) => x.includes(l))),
   labels.join(','));
 check('圖片模式下不顯示拼貼操作',
   !labels.some((x) => x.includes('版面')), labels.join(','));
@@ -401,6 +401,117 @@ check('復原把最後一塊拿掉',
   await page.locator('.m-screen').innerText());
 await page.locator('button:has-text("取消")').click();
 await page.waitForTimeout(400);
+
+// ── 標註（箭頭 / 方框）─────────────────────────────────
+// 「畫布上有幾個不是原圖那兩塊純色的點」—— 標註畫進成品沒有，看這個就知道。
+// 用前後相比而不是絕對值：選取用的虛線框在兩次取樣裡都在，相減就抵掉了。
+const offColour = () => page.evaluate(() => {
+  const c = document.querySelector('canvas');
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  const near = (i, r, g, b) => Math.abs(d[i] - r) < 12 && Math.abs(d[i + 1] - g) < 12 && Math.abs(d[i + 2] - b) < 12;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    if (!near(i, 192, 57, 43) && !near(i, 41, 128, 185)) n++;
+  }
+  return n;
+});
+const beforeMark = await offColour();
+
+await page.locator('button:has-text("標註")').click();
+await page.waitForTimeout(400);
+check('標註是獨立畫面，列出兩種形狀與顏色',
+  (await page.locator('.chip').allInnerTexts()).join(',').includes('方框') &&
+  (await page.locator('.chip').allInnerTexts()).join(',').includes('箭頭') &&
+  (await page.locator('input[type=color]').count()) === 1 &&
+  (await barLabels()).some((x) => x.includes('全清')),
+  (await page.locator('.chip').allInnerTexts()).join(','));
+
+check('預設是方框，提示說的是拖一個框',
+  /在要框的地方拖一個框/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await page.locator('.chip:has-text("箭頭")').click();
+await page.waitForTimeout(200);
+check('換成箭頭之後，提示改說方向',
+  /從要指的地方往箭頭方向拖/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+await page.locator('.chip:has-text("方框")').click();
+await page.waitForTimeout(200);
+
+const markBox = await page.locator('canvas').boundingBox();
+const dragMark = async (x1, y1, x2, y2) => {
+  await page.mouse.move(markBox.x + markBox.width * x1, markBox.y + markBox.height * y1);
+  await page.mouse.down();
+  await page.mouse.move(markBox.x + markBox.width * x2, markBox.y + markBox.height * y2, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(350);
+};
+
+await dragMark(0.2, 0.2, 0.6, 0.6);
+check('拖一個框就標一筆，並顯示已標數量',
+  /已標 1 筆/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await dragMark(0.65, 0.2, 0.9, 0.5);
+check('可以疊第二筆（標註不是一次只能有一個）',
+  /已標 2 筆/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await page.locator('button:has-text("復原")').click();
+await page.waitForTimeout(300);
+check('復原只拿掉最後一筆',
+  /已標 1 筆/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+// 點在既有的那一筆上（不拖）→ 拿掉它。跟打碼是同一個手勢。
+await page.mouse.click(markBox.x + markBox.width * 0.4, markBox.y + markBox.height * 0.4);
+await page.waitForTimeout(350);
+check('點一下既有的標註就拿掉（跟打碼同一套手勢）',
+  /在要框的地方拖一個框/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await dragMark(0.2, 0.2, 0.6, 0.6);
+await dragMark(0.65, 0.2, 0.9, 0.5);
+await page.locator('button:has-text("全清")').click();
+await page.waitForTimeout(300);
+check('全清把整組拿掉',
+  /在要框的地方拖一個框/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+// 取消要真的不留東西 —— 標好了才按取消是很容易寫錯的那條路
+await dragMark(0.2, 0.2, 0.6, 0.6);
+await page.locator('button:has-text("取消")').click();
+await page.waitForTimeout(450);
+check('按取消不會把標註留在圖上',
+  Math.abs((await offColour()) - beforeMark) < 40,
+  `取消前 ${beforeMark} 點、取消後 ${await offColour()} 點`);
+check('取消後工具列上的標註沒有被點亮',
+  !(await page.evaluate(() => Array.from(document.querySelectorAll('button'))
+    .some((b) => b.innerText.includes('標註') && b.style.background.includes('mint-wash')))),
+  '取消後標註仍然亮著');
+
+await page.locator('button:has-text("標註")').click();
+await page.waitForTimeout(400);
+await dragMark(0.2, 0.2, 0.6, 0.6);
+await page.locator('button:has-text("套用")').click();
+await page.waitForTimeout(500);
+const afterMark = await offColour();
+check('按套用之後，標註真的畫進主預覽',
+  afterMark > beforeMark + 100, `套用前 ${beforeMark} 點、套用後 ${afterMark} 點`);
+check('圖上有標註時，工具列的標註會亮起來',
+  await page.evaluate(() => Array.from(document.querySelectorAll('button'))
+    .some((b) => b.innerText.includes('標註') && b.style.background.includes('mint-wash'))),
+  '標註沒有亮起來');
+
+// 再開一次，剛才那一筆要還在（存進 item 而不是元件的暫時狀態）
+await page.locator('button:has-text("標註")').click();
+await page.waitForTimeout(400);
+check('再開一次，先前的標註還在',
+  /已標 1 筆/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+await page.locator('button:has-text("全清")').click();
+await page.locator('button:has-text("套用")').click();
+await page.waitForTimeout(450);
 
 // ── 調整 ────────────────────────────────────────────────
 await page.locator('button:has-text("調整")').click();

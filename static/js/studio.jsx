@@ -63,6 +63,16 @@ const STUDIO_REDACT_STYLES = [
   { id: 'fill',   label: '塗黑' },
 ];
 
+// 標註的兩種形狀。方框排第一 —— 「這一區」比「這一點」常用
+const STUDIO_MARK_KINDS = [
+  { id: 'box',   label: '方框' },
+  { id: 'arrow', label: '箭頭' },
+];
+
+// 標註的顏色。紅色排第一（文件多半是黑字白底，紅色不會跟內容混在一起），
+// 其餘三個是給「同一張圖上要分兩件事」用的
+const STUDIO_MARK_INKS = ['#e5322d', '#1f6feb', '#e8a317', '#1f7a4d'];
+
 // 文字的位置用九宮格挑，不用拖的 —— 手機上拖字很難對齊，按一下就定位快多了
 const STUDIO_TEXT_SPOTS = [
   { x: 0.06, y: 0.10, align: 'left' },   { x: 0.5, y: 0.10, align: 'center' },   { x: 0.94, y: 0.10, align: 'right' },
@@ -139,10 +149,10 @@ function LayoutIcon({ preset }) {
   );
 }
 
-function ColorRow({ value, onChange }) {
+function ColorRow({ value, onChange, inks }) {
   return (
     <div className="row" style={{ gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-      {STUDIO_SWATCHES.map((c) => (
+      {(inks || STUDIO_SWATCHES).map((c) => (
         <button key={c} onClick={() => onChange(c)}
           style={{
             width: '28px', height: '28px', borderRadius: '50%', background: c,
@@ -350,6 +360,69 @@ function StudioCropper({ item, onApply, onCancel }) {
   );
 }
 
+/** 拖曳的起點 → 終點推回矩形。方框從哪個角開始拖都要得到同一塊。 */
+function studioRectOf(d) {
+  return {
+    x: Math.min(d.x1, d.x2), y: Math.min(d.y1, d.y2),
+    w: Math.abs(d.x2 - d.x1), h: Math.abs(d.y2 - d.y1),
+  };
+}
+
+/**
+ * 打碼與標註共用的拖框手勢。
+ *
+ * 兩邊的操作完全一樣 —— **拖**出一個框就新增一筆、**點**在既有的一筆上就把它拿掉 ——
+ * 差別只在畫出來長什麼樣。所以抽出來的是手勢本身，不是外觀：
+ * 這個 hook 只回報「使用者從哪裡拖到哪裡」，形狀怎麼存、怎麼畫由呼叫端決定。
+ *
+ * `draft` 給的是原始的起點 → 終點（`x1,y1,x2,y2`），沒有正規化成矩形 ——
+ * 箭頭需要方向，一旦在這裡壓成 x/y/w/h 就再也還原不回來了。
+ */
+function useDragBoxes({ canvasRef, hitTest, onDrag, onTap, minMove = 0.02 }) {
+  const dragRef = stUseRef(null);
+  const [draft, setDraft] = stUseState(null);
+
+  const clamp = (v) => Math.max(0, Math.min(1, v));
+  const posOf = (e) => {
+    const box = canvasRef.current.getBoundingClientRect();
+    return { x: clamp((e.clientX - box.left) / box.width), y: clamp((e.clientY - box.top) / box.height) };
+  };
+
+  const onPointerDown = (e) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const p = posOf(e);
+    dragRef.current = { start: p, hit: hitTest ? hitTest(p) : -1, moved: false };
+  };
+
+  const onPointerMove = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    e.preventDefault();
+    const p = posOf(e);
+    // 拖不到一點點的距離就當成「點一下」—— 手指按下去本來就會晃個幾像素
+    if (Math.abs(p.x - drag.start.x) < minMove && Math.abs(p.y - drag.start.y) < minMove) return;
+    drag.moved = true;
+    setDraft({ x1: drag.start.x, y1: drag.start.y, x2: p.x, y2: p.y });
+  };
+
+  const onPointerUp = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag) return;
+    if (drag.moved && draft) onDrag(draft);
+    else if (drag.hit >= 0 && onTap) onTap(drag.hit);
+    setDraft(null);
+  };
+
+  return {
+    draft,
+    handlers: {
+      onPointerDown, onPointerMove, onPointerUp, onPointerCancel: onPointerUp,
+    },
+  };
+}
+
 /**
  * 打碼。
  *
@@ -360,10 +433,8 @@ function StudioCropper({ item, onApply, onCancel }) {
  */
 function StudioRedactor({ item, onApply, onCancel }) {
   const canvasRef = stUseRef(null);
-  const dragRef = stUseRef(null);
   const [boxes, setBoxes] = stUseState(() => item.redactions || []);
   const [style, setStyle] = stUseState('mosaic');
-  const [draft, setDraft] = stUseState(null);
 
   stUseEffect(() => {
     const canvas = canvasRef.current;
@@ -374,44 +445,13 @@ function StudioRedactor({ item, onApply, onCancel }) {
     canvas.getContext('2d').drawImage(shown, 0, 0);
   }, [item, boxes]);
 
-  const clamp = (v) => Math.max(0, Math.min(1, v));
-  const posOf = (e) => {
-    const box = canvasRef.current.getBoundingClientRect();
-    return { x: clamp((e.clientX - box.left) / box.width), y: clamp((e.clientY - box.top) / box.height) };
-  };
-
-  const onDown = (e) => {
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const p = posOf(e);
-    const hit = boxes.findIndex((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h);
-    dragRef.current = { start: p, hit, moved: false };
-  };
-
-  const onMove = (e) => {
-    const drag = dragRef.current;
-    if (!drag) return;
-    e.preventDefault();
-    const p = posOf(e);
-    const w = Math.abs(p.x - drag.start.x);
-    const h = Math.abs(p.y - drag.start.y);
-    if (w < 0.02 && h < 0.02) return;
-    drag.moved = true;
-    setDraft({ x: Math.min(p.x, drag.start.x), y: Math.min(p.y, drag.start.y), w, h });
-  };
-
-  const onUp = () => {
-    const drag = dragRef.current;
-    dragRef.current = null;
-    if (!drag) return;
-    if (drag.moved && draft) {
-      setBoxes((prev) => [...prev, { ...draft, style }]);
-    } else if (drag.hit >= 0) {
-      // 沒有拖曳、又點在已經打好的框上 → 拿掉那一塊
-      setBoxes((prev) => prev.filter((_, i) => i !== drag.hit));
-    }
-    setDraft(null);
-  };
+  const { draft, handlers } = useDragBoxes({
+    canvasRef,
+    hitTest: (p) => boxes.findIndex((b) => p.x >= b.x && p.x <= b.x + b.w && p.y >= b.y && p.y <= b.y + b.h),
+    onDrag: (d) => setBoxes((prev) => [...prev, { ...studioRectOf(d), style }]),
+    // 沒有拖曳、又點在已經打好的框上 → 拿掉那一塊
+    onTap: (i) => setBoxes((prev) => prev.filter((_, n) => n !== i)),
+  });
 
   const outline = (b, dashed) => ({
     position: 'absolute',
@@ -429,11 +469,11 @@ function StudioRedactor({ item, onApply, onCancel }) {
         padding: '14px', background: 'var(--paper-2)', overflow: 'hidden',
       }}>
         <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', touchAction: 'none' }}
-          onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onUp}>
+          {...handlers}>
           <canvas ref={canvasRef}
             style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', userSelect: 'none' }}/>
           {boxes.map((b, i) => <div key={i} style={outline(b, true)}/>)}
-          {draft && <div style={outline(draft, false)}/>}
+          {draft && <div style={outline(studioRectOf(draft), false)}/>}
         </div>
       </div>
 
@@ -464,6 +504,111 @@ function StudioRedactor({ item, onApply, onCancel }) {
           borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
         }}>
           <BarBtn ic="✓" label="套用" accent onClick={() => onApply(boxes)}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 標註 —— 箭頭 / 方框。
+ *
+ * 手勢跟打碼是同一套（`useDragBoxes`），連預覽的作法也一樣：畫布上直接顯示
+ * **畫完的樣子**，而不是另外疊一層 DOM 的示意框。理由跟打碼相同 —— 匯出來才發現
+ * 箭頭指歪了就太晚了；差別只在標註是疊上去的，所以拿掉就真的乾淨。
+ *
+ * 進行中的那一筆是例外，用 DOM 畫：每動一格就重跑一次 `renderItem` 太重，
+ * 而且拖到一半的形狀本來就還不算數。
+ */
+function StudioAnnotator({ item, onApply, onCancel }) {
+  const canvasRef = stUseRef(null);
+  const [marks, setMarks] = stUseState(() => item.annotations || []);
+  const [kind, setKind] = stUseState('box');
+  const [color, setColor] = stUseState(STUDIO_MARK_INKS[0]);
+
+  stUseEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const shown = window.SMImageLocal.renderItem({ ...item, annotations: marks }, { usePreview: true });
+    canvas.width = shown.width;
+    canvas.height = shown.height;
+    canvas.getContext('2d').drawImage(shown, 0, 0);
+  }, [item, marks]);
+
+  const { draft, handlers } = useDragBoxes({
+    canvasRef,
+    // 命中範圍往外放一點：細箭頭本身只有幾個像素寬，照著幾何去點根本點不到
+    hitTest: (p) => {
+      const pad = 0.02;
+      return marks.findIndex((m) => {
+        const r = studioRectOf(m);
+        return p.x >= r.x - pad && p.x <= r.x + r.w + pad
+            && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
+      });
+    },
+    onDrag: (d) => setMarks((prev) => [...prev, { kind, ...d, color }]),
+    onTap: (i) => setMarks((prev) => prev.filter((_, n) => n !== i)),
+  });
+
+  // 拖到一半的示意：方框就是方框，箭頭用一條對角線代替（DOM 畫不出箭頭，
+  // 但方向感有了就夠 —— 放開的那一刻畫布上就是真的箭頭）
+  const draftRect = draft ? studioRectOf(draft) : null;
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '14px', background: 'var(--paper-2)', overflow: 'hidden',
+      }}>
+        <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', touchAction: 'none' }}
+          {...handlers}>
+          <canvas ref={canvasRef}
+            style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', userSelect: 'none' }}/>
+          {draftRect && (
+            <div style={{
+              position: 'absolute',
+              left: `${draftRect.x * 100}%`, top: `${draftRect.y * 100}%`,
+              width: `${draftRect.w * 100}%`, height: `${draftRect.h * 100}%`,
+              border: `1.5px ${kind === 'arrow' ? 'dashed' : 'solid'} ${color}`,
+              boxShadow: '0 0 0 1px rgba(0,0,0,0.45)',
+              pointerEvents: 'none', boxSizing: 'border-box',
+            }}/>
+          )}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 12px 4px', flexShrink: 0 }}>
+        <div className="row" style={{ gap: '6px', alignItems: 'center' }}>
+          {STUDIO_MARK_KINDS.map((k) => (
+            <button key={k.id} className={`chip ${kind === k.id ? 'on' : ''}`}
+              style={{ flexShrink: 0 }} onClick={() => setKind(k.id)}>{k.label}</button>
+          ))}
+          <span style={{ fontSize: '11px', color: 'var(--ink-3)', marginLeft: 'auto' }}>
+            {marks.length
+              ? `已標 ${marks.length} 筆 · 點一下可移除`
+              : (kind === 'arrow' ? '從要指的地方往箭頭方向拖' : '在要框的地方拖一個框')}
+          </span>
+        </div>
+        <div style={{ marginTop: '6px' }}>
+          <ColorRow value={color} onChange={setColor} inks={STUDIO_MARK_INKS}/>
+        </div>
+      </div>
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
+          <BarBtn ic="✕" label="取消" onClick={onCancel}/>
+          <BarBtn ic="⟲" label="復原" disabled={!marks.length}
+            onClick={() => setMarks((prev) => prev.slice(0, -1))}/>
+          <BarBtn ic="🗑" label="全清" disabled={!marks.length} onClick={() => setMarks([])}/>
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="✓" label="套用" accent onClick={() => onApply(marks)}/>
         </div>
       </div>
     </div>
@@ -1260,6 +1405,7 @@ function StudioEditor() {
   const [busy, setBusy] = stUseState('');
   const [cropping, setCropping] = stUseState(false);
   const [redacting, setRedacting] = stUseState(false);
+  const [annotating, setAnnotating] = stUseState(false);
   const [deskewing, setDeskewing] = stUseState(false);
   const [camera, setCamera] = stUseState(false);   // 即時取景（全螢幕）
   const [swapFrom, setSwapFrom] = stUseState(-1);   // 交換模式：等著點第二張
@@ -1316,7 +1462,7 @@ function StudioEditor() {
     }
     // cropping / redacting / deskewing / signing 也要列進來 —— 離開全螢幕編輯器後
     // canvas 是新的 DOM 元素，不重畫就會停在瀏覽器給的預設 300×150 空白畫布。
-  }, [items, layout, frame, sel, cropping, redacting, deskewing, signing, text, stamps, signatures]);
+  }, [items, layout, frame, sel, cropping, redacting, annotating, deskewing, signing, text, stamps, signatures]);
 
   const addFiles = async (files) => {
     if (!files || !files.length) return;
@@ -1827,6 +1973,14 @@ function StudioEditor() {
     );
   }
 
+  if (annotating && current) {
+    return (
+      <StudioAnnotator item={current}
+        onCancel={() => setAnnotating(false)}
+        onApply={(marks) => { patch({ annotations: marks }); setAnnotating(false); }}/>
+    );
+  }
+
   if (deskewing && current) {
     return (
       <StudioDeskew item={current}
@@ -1949,6 +2103,8 @@ function StudioEditor() {
                 onClick={() => { setSheet(null); setDeskewing(true); }}/>
               <BarBtn ic="⛶" label="裁切" onClick={() => { setSheet(null); setCropping(true); }}/>
               <BarBtn ic="▩" label="打碼" onClick={() => { setSheet(null); setRedacting(true); }}/>
+              <BarBtn ic="✎" label="標註" on={!!current.annotations?.length}
+                onClick={() => { setSheet(null); setAnnotating(true); }}/>
               <BarBtn ic="🎚" label="調整" on={sheet === 'adjust'}
                 onClick={() => setSheet(sheet === 'adjust' ? null : 'adjust')}/>
               <BarBtn ic="🗑" label="刪除" onClick={remove}/>
@@ -2713,9 +2869,11 @@ function Studio() {
 
 Object.assign(window, {
   Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages,
-  StudioCropper, StudioRedactor, StudioDeskew, StudioCamera, DocPreview,
+  StudioCropper, StudioRedactor, StudioAnnotator, StudioDeskew, StudioCamera, DocPreview,
   SignaturePad, SignaturePlacer, SignatureSheet, useSignatures,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,
-  STUDIO_REDACT_STYLES, STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT, STUDIO_SIGN_INKS,
+  STUDIO_REDACT_STYLES, STUDIO_MARK_KINDS, STUDIO_MARK_INKS,
+  STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT, STUDIO_SIGN_INKS,
+  useDragBoxes, studioRectOf,
 });
