@@ -85,6 +85,17 @@ const STUDIO_TEXT_DEFAULT = {
   stroke: 0.08, opacity: 1, spot: 7, tile: false, rotate: -30, gap: 0.12,
 };
 
+// 文字圖層的上限。不是引擎的限制（它吃多少畫多少）—— 是面板上那排圖層 chip
+// 在 390px 寬的手機上排得下幾顆，再多就要捲，反而找不到自己要改的那一層。
+const STUDIO_TEXT_MAX = 6;
+
+/** 圖層 chip 上的字：有內容就顯示內容的開頭，還沒打字就顯示「文字 N」 */
+function studioTextLabel(t, i) {
+  const first = String(t.text == null ? '' : t.text).trim().split('\n')[0].trim();
+  if (!first) return t.tile ? '浮水印' : `文字 ${i + 1}`;
+  return first.length > 5 ? `${first.slice(0, 5)}…` : first;
+}
+
 // 簽名的墨色。深藍排第一 —— 實體簽名筆多半是藍的，跟印刷的黑字分得開，
 // 一眼就看得出是後來簽上去的。紅色是給關防用的。
 const STUDIO_SIGN_INKS = ['#1a2b4a', '#111111', '#1f5f3f', '#b23b3b'];
@@ -1413,7 +1424,10 @@ function StudioEditor() {
   const [signing, setSigning] = stUseState(null);
   const [stamps, setStamps] = stUseState([]);
   const [signatures, reloadSignatures] = useSignatures();
-  const [text, setText] = stUseState(STUDIO_TEXT_DEFAULT);
+  // 文字是**一疊圖層**，不是一段字 —— 標題、日期、浮水印各要自己的字級與位置。
+  // 引擎（drawTexts）從一開始就吃陣列，卡住的一直是這裡。
+  const [texts, setTexts] = stUseState([STUDIO_TEXT_DEFAULT]);
+  const [activeText, setActiveText] = stUseState(0);
   const [layout, setLayout] = stUseState({
     preset: 'vertical', direction: 'vertical', columns: 0, fill: 'contain',
     gap: 0, bgColor: '#ffffff', normalize: true,
@@ -1429,9 +1443,29 @@ function StudioEditor() {
 
   const multi = items.length > 1;
   const current = sel >= 0 ? items[sel] : null;
-  const textLayer = text.text.trim()
-    ? [{ ...text, ...(text.tile ? {} : STUDIO_TEXT_SPOTS[text.spot]) }]
-    : null;
+  // 面板下面那十幾個滑桿改的一律是「選中的那一層」
+  const text = texts[activeText] || STUDIO_TEXT_DEFAULT;
+  const patchText = (p) => setTexts(texts.map((t, i) => (i === activeText ? { ...t, ...p } : t)));
+  const addTextLayer = () => {
+    if (texts.length >= STUDIO_TEXT_MAX) return;
+    setTexts([...texts, STUDIO_TEXT_DEFAULT]);
+    setActiveText(texts.length);
+  };
+  // 永遠留一層 —— 全刪光的話面板上沒有東西可以編輯，使用者會以為文字功能壞了
+  const removeTextLayer = () => {
+    if (texts.length <= 1) {
+      setTexts([STUDIO_TEXT_DEFAULT]);
+      setActiveText(0);
+      return;
+    }
+    setTexts(texts.filter((_, i) => i !== activeText));
+    setActiveText(Math.max(0, activeText - 1));
+  };
+  // 沒打字的圖層不畫。`rotate: 0` 是刻意的：角度是浮水印才有的設定（面板上也只有
+  // 平鋪時才出現那根滑桿），但預設值 -30 會跟著物件一路傳到引擎，讓一般文字莫名歪掉。
+  const textLayer = texts
+    .filter((t) => String(t.text == null ? '' : t.text).trim())
+    .map((t) => (t.tile ? { ...t } : { ...t, ...STUDIO_TEXT_SPOTS[t.spot], rotate: 0 }));
   // 存的是簽名 id，畫的時候才對回簽名本體 —— 簽名被刪掉時不會留下壞掉的圖層
   const signLayer = stamps
     .map((s) => ({ ...s, sig: signatures.find((x) => x.id === s.sigId) }))
@@ -1462,7 +1496,7 @@ function StudioEditor() {
     }
     // cropping / redacting / deskewing / signing 也要列進來 —— 離開全螢幕編輯器後
     // canvas 是新的 DOM 元素，不重畫就會停在瀏覽器給的預設 300×150 空白畫布。
-  }, [items, layout, frame, sel, cropping, redacting, annotating, deskewing, signing, text, stamps, signatures]);
+  }, [items, layout, frame, sel, cropping, redacting, annotating, deskewing, signing, texts, stamps, signatures]);
 
   const addFiles = async (files) => {
     if (!files || !files.length) return;
@@ -1846,14 +1880,27 @@ function StudioEditor() {
 
     text: (
       <StudioSheet title={text.tile ? '浮水印' : '文字'} onClose={() => setSheet(null)}>
+        {/* 圖層清單 —— 一張圖上常常要疊好幾段字（標題 ＋ 日期 ＋ 浮水印），
+            每一段的字級、顏色、位置都不一樣，所以下面所有設定都是改「選中的那一層」 */}
+        <div className="row" style={{ gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+          {texts.map((t, i) => (
+            <button key={i} data-testid={`text-layer-${i}`}
+              className={`chip ${i === activeText ? 'on' : ''}`}
+              onClick={() => setActiveText(i)}>{studioTextLabel(t, i)}</button>
+          ))}
+          {texts.length < STUDIO_TEXT_MAX && (
+            <button className="chip" data-testid="text-layer-add"
+              onClick={addTextLayer}>＋ 加一層</button>
+          )}
+        </div>
+
         <textarea className="input" rows="2" placeholder="要疊上去的文字（可換行）"
-          value={text.text} onChange={(e) => setText({ ...text, text: e.target.value })}
+          value={text.text} onChange={(e) => patchText({ text: e.target.value })}
           style={{ width: '100%', marginBottom: '10px', resize: 'vertical' }}/>
 
         <label className="row" style={{ alignItems: 'center', gap: '8px', fontSize: '13px', marginBottom: '10px' }}>
           <input type="checkbox" checked={text.tile}
-            onChange={(e) => setText({
-              ...text,
+            onChange={(e) => patchText({
               tile: e.target.checked,
               // 浮水印要淡才不會壓過內容；一般文字則該是實心的
               opacity: e.target.checked
@@ -1870,7 +1917,7 @@ function StudioEditor() {
               display: 'grid', gridTemplateColumns: 'repeat(3, 34px)', gap: '4px', marginBottom: '12px',
             }}>
               {STUDIO_TEXT_SPOTS.map((_, i) => (
-                <button key={i} onClick={() => setText({ ...text, spot: i })}
+                <button key={i} data-testid={`text-spot-${i}`} onClick={() => patchText({ spot: i })}
                   style={{
                     height: '26px', borderRadius: '6px',
                     border: text.spot === i ? '1.5px solid var(--mint-3)' : '1.25px solid var(--line-soft)',
@@ -1884,35 +1931,37 @@ function StudioEditor() {
           <>
             <div className="field-label">角度 {text.rotate}°</div>
             <input type="range" className="slider" min="-90" max="90" step="5" value={text.rotate}
-              onChange={(e) => setText({ ...text, rotate: +e.target.value })}
+              onChange={(e) => patchText({ rotate: +e.target.value })}
               style={{ marginBottom: '10px' }}/>
           </>
         )}
 
         <div className="field-label">字級 {Math.round(text.size * 100)}%</div>
         <input type="range" className="slider" min="2" max="20" value={Math.round(text.size * 100)}
-          onChange={(e) => setText({ ...text, size: +e.target.value / 100 })}
+          onChange={(e) => patchText({ size: +e.target.value / 100 })}
           style={{ marginBottom: '10px' }}/>
 
         <div className="field-label">濃度 {Math.round(text.opacity * 100)}%</div>
         <input type="range" className="slider" min="5" max="100" value={Math.round(text.opacity * 100)}
-          onChange={(e) => setText({ ...text, opacity: +e.target.value / 100 })}
+          onChange={(e) => patchText({ opacity: +e.target.value / 100 })}
           style={{ marginBottom: '10px' }}/>
 
         <div className="field-label">文字顏色</div>
         <div style={{ marginBottom: '10px' }}>
-          <ColorRow value={text.color} onChange={(c) => setText({ ...text, color: c })}/>
+          <ColorRow value={text.color} onChange={(c) => patchText({ color: c })}/>
         </div>
 
         <div className="field-label">外框 {Math.round(text.stroke * 100)}%（壓在淺色底上才看得見）</div>
         <input type="range" className="slider" min="0" max="20" value={Math.round(text.stroke * 100)}
-          onChange={(e) => setText({ ...text, stroke: +e.target.value / 100 })}
+          onChange={(e) => patchText({ stroke: +e.target.value / 100 })}
           style={{ marginBottom: '10px' }}/>
-        {text.stroke > 0 && <ColorRow value={text.strokeColor} onChange={(c) => setText({ ...text, strokeColor: c })}/>}
+        {text.stroke > 0 && <ColorRow value={text.strokeColor} onChange={(c) => patchText({ strokeColor: c })}/>}
 
-        {!!text.text.trim() && (
+        {(!!text.text.trim() || texts.length > 1) && (
           <button className="btn" style={{ width: '100%', marginTop: '12px' }}
-            onClick={() => setText(STUDIO_TEXT_DEFAULT)}>移除文字</button>
+            data-testid="text-layer-remove" onClick={removeTextLayer}>
+            {texts.length > 1 ? '移除這一層' : '移除文字'}
+          </button>
         )}
       </StudioSheet>
     ),
@@ -2117,7 +2166,7 @@ function StudioEditor() {
                 onClick={() => setSheet(sheet === 'frame' ? null : 'frame')}/>
               <BarBtn ic="↔" label="間距" on={sheet === 'gap'}
                 onClick={() => setSheet(sheet === 'gap' ? null : 'gap')}/>
-              <BarBtn ic="Ｔ" label="文字" on={sheet === 'text'}
+              <BarBtn ic="Ｔ" label="文字" on={sheet === 'text' || !!textLayer.length}
                 onClick={() => setSheet(sheet === 'text' ? null : 'text')}/>
               <BarBtn ic="✍" label="簽名" on={sheet === 'sign' || !!stamps.length}
                 onClick={() => setSheet(sheet === 'sign' ? null : 'sign')}/>
@@ -2874,6 +2923,6 @@ Object.assign(window, {
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,
   STUDIO_REDACT_STYLES, STUDIO_MARK_KINDS, STUDIO_MARK_INKS,
-  STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT, STUDIO_SIGN_INKS,
-  useDragBoxes, studioRectOf,
+  STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT, STUDIO_TEXT_MAX, STUDIO_SIGN_INKS,
+  useDragBoxes, studioRectOf, studioTextLabel,
 });
