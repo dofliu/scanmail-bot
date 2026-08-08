@@ -805,21 +805,31 @@ function StudioDeskew({ item, onApply, onCancel, onRevert }) {
  * 疊在上面的 SVG 就能直接吃引擎給的相對座標，不必自己算 cover 裁掉了多少，
  * 跟拉正畫面（StudioDeskew）是同一套畫法。
  *
- * 這一版沒有自動快門 —— 那要先知道「框穩了」的門檻抓多少才算數。
+ * 自動快門預設開著（框穩了就自己拍），「自動」那顆按鈕可以關掉。
+ * 偏好記在模組層的變數裡 —— 這個元件每拍一張就會卸載，用 state 的話每次都會跳回預設。
  */
+let autoShutterPref = true;
+
 function StudioCamera({ onCapture, onCancel }) {
   const videoRef = stUseRef(null);
   const sessionRef = stUseRef(null);
   const [status, setStatus] = stUseState({ starting: true });
   const [live, setLive] = stUseState(null);
   const [shooting, setShooting] = stUseState(false);
+  const [autoOn, setAutoOn] = stUseState(autoShutterPref);
 
   stUseEffect(() => {
     let alive = true;
     (async () => {
       try {
         const session = await window.SMScanLive.start(videoRef.current, {
+          auto: autoShutterPref,
           onResult: (res) => { if (alive) setLive(res); },
+          onAuto: (shot) => {
+            if (!alive) return;
+            setShooting(true);
+            onCapture(shot);
+          },
         });
         // 開相機是非同步的，這中間使用者可能已經按了取消 —— 沒收掉的話相機燈會一直亮著
         if (!alive) { session.stop(); return; }
@@ -843,6 +853,8 @@ function StudioCamera({ onCapture, onCancel }) {
   const shoot = async () => {
     const session = sessionRef.current;
     if (!session || shooting) return;
+    // 手動按下去就別再讓自動快門插隊補一張
+    session.setAuto(false);
     setShooting(true);
     try {
       // capture() 會對這一張重新偵測，所以拉正畫面拿到的框就是照片本身的框
@@ -854,16 +866,31 @@ function StudioCamera({ onCapture, onCancel }) {
     }
   };
 
+  const toggleAuto = () => {
+    const next = !autoOn;
+    autoShutterPref = next;
+    setAutoOn(next);
+    if (sessionRef.current) sessionRef.current.setAuto(next);
+  };
+
   const ratio = (live && live.frame && live.frame.height)
     ? live.frame.width / live.frame.height
     : (status.ratio || 3 / 4);
   const corners = live && live.corners;
   const low = !live || live.low;
+  // 還要幾次「沒動」才會自動拍。倒數用得到，那條穩定度長條也吃這個數字。
+  // steady 已經滿了代表快門已經在跑（自動拍是在同一次偵測裡觸發的），算進 firing
+  const hits = (live && live.steadyHits) || 0;
+  const left = autoOn && live && !low ? Math.max(0, hits - live.steady) : null;
+  const firing = shooting || left === 0;
   const line = status.error ? `⚠ ${status.error}`
     : status.starting ? '啟動相機中…'
-      : !live ? '把文件放進畫面，對準四個角'
-        : low ? '⚠ 還沒抓穩 —— 對準文件，或照下面的建議調整'
-          : '✓ 抓到邊界了 —— 按快門';
+      : firing ? '拍攝中…'
+        : !live ? '把文件放進畫面，對準四個角'
+          : low ? '⚠ 還沒抓穩 —— 對準文件，或照下面的建議調整'
+            : left > 0 && live.steady > 0 ? `✓ 抓到邊界了 —— 穩住 ${left}`
+              : autoOn ? '✓ 抓到邊界了 —— 拿穩就會自動拍，或直接按快門'
+                : '✓ 抓到邊界了 —— 按快門';
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -903,7 +930,31 @@ function StudioCamera({ onCapture, onCancel }) {
       </div>
 
       <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 14px 4px', flexShrink: 0 }}>
-        <div style={{ fontSize: '11.5px', color: low ? 'var(--warn, #b8862d)' : 'var(--ink-3)' }}>{line}</div>
+        <div className="row between" style={{ alignItems: 'center', gap: '8px' }}>
+          <div style={{ fontSize: '11.5px', color: low ? 'var(--warn, #b8862d)' : 'var(--ink-3)' }}>{line}</div>
+          {/*
+            當下的角點位移。給使用者的意義是「手還在動」，
+            但它同時是**唯一**能在真機上把自動快門門檻量出來的東西 ——
+            合成串流不會抖，這個數字要拿真的手持畫面看才有意義（見 scan-live.js 的註解）
+          */}
+          {autoOn && !status.error && live && live.motion != null && (
+            <div data-testid="cam-motion" style={{
+              fontSize: '10.5px', color: 'var(--ink-4, #999)', flexShrink: 0, fontVariantNumeric: 'tabular-nums',
+            }}>位移 {(live.motion * 100).toFixed(1)}%</div>
+          )}
+        </div>
+        {/* 穩定度長條：倒數幾次就填幾格，看得到「快拍了」而不是突然響一聲 */}
+        {autoOn && !status.error && !low && hits > 0 && (
+          <div data-testid="cam-steady" data-steady={live ? live.steady : 0} style={{
+            marginTop: '5px', height: '3px', borderRadius: '2px',
+            background: 'var(--line-soft)', overflow: 'hidden',
+          }}>
+            <div style={{
+              width: `${Math.min(1, (live ? live.steady : 0) / hits) * 100}%`, height: '100%',
+              background: 'var(--mint-4)', transition: 'width 120ms linear',
+            }}/>
+          </div>
+        )}
         {/* 抓不穩的時候才給建議 —— 對準了還在旁邊碎念只是雜訊 */}
         {!status.error && low && live && live.hints && live.hints.length > 0 && (
           <ul style={{
@@ -921,13 +972,14 @@ function StudioCamera({ onCapture, onCancel }) {
       }}>
         <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
           <BarBtn ic="✕" label="取消" onClick={onCancel}/>
+          <BarBtn ic="⏱" label="自動" on={autoOn} disabled={!!status.error} onClick={toggleAuto}/>
         </div>
         <div style={{
           flexShrink: 0, display: 'flex', alignItems: 'center',
           borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
         }}>
-          <BarBtn ic="⦿" label={shooting ? '拍攝中' : '快門'} accent
-            disabled={!!status.error || status.starting || shooting} onClick={shoot}/>
+          <BarBtn ic="⦿" label={firing ? '拍攝中' : '快門'} accent
+            disabled={!!status.error || status.starting || firing} onClick={shoot}/>
         </div>
       </div>
     </div>

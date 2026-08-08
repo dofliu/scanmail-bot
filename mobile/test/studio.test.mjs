@@ -930,8 +930,18 @@ const paperError = (pts) => (!pts || pts.length !== 4 ? 1
   : pts.reduce((sum, p, i) => sum + Math.hypot(p.x - PAPER_REL[i].x, p.y - PAPER_REL[i].y), 0) / 4);
 
 await page.locator('button:has-text("用相機拍一張")').click();
+// 自動快門預設是開的。假相機完全靜止，放著不管的話一秒多就自己拍完、
+// 畫面已經跳回編輯器了 —— 所以先關掉，才驗得到取景畫面本身。
+// 偏好記在模組層，關掉之後下面幾段手動流程都會維持關著（最後再打開來測自動那條路）
+await page.waitForSelector('button:has-text("自動")', { timeout: 5000 });
+check('取景畫面給得出自動快門的開關',
+  (await page.locator('button:has-text("自動")').count()) === 1, (await barLabels()).join(','));
+await page.locator('button:has-text("自動")').click();
 await page.waitForTimeout(1800);
 const liveBox = await polyPoints();
+check('關掉自動快門就不顯示位移讀數（也不會自己拍）',
+  (await page.locator('[data-testid=cam-motion]').count()) === 0
+  && (await page.locator('.m-screen video').count()) === 1, '關掉之後畫面還是變了');
 check('取景畫面出現相機影像', (await page.locator('.m-screen video').count()) === 1, '沒有 video 元素');
 check('取景時就把邊框疊在畫面上', paperError(liveBox) < 0.05,
   `框的平均誤差 ${paperError(liveBox).toFixed(4)}`);
@@ -980,6 +990,41 @@ check('拉正沿用取景時抓到的框，不必重測一次', paperError(seede
 await page.evaluate(() => { window.SMScanLite.detect = window.__realDetect; });
 await page.locator('button:has-text("取消")').click();
 await page.waitForTimeout(300);
+
+// ── 自動快門 ────────────────────────────────────────────
+// 前面把它關掉了（偏好留在模組層），這裡打開來走完整條路：
+// 倒數 → 自己按下快門 → 照片進編輯器，全程沒有人碰過「快門」那顆按鈕
+// 上一段停在「編輯單張」的工具列上，那裡沒有「拍照」—— 先退回拼貼的工具列
+if ((await barLabels()).some((x) => x.includes('完成'))) {
+  await page.locator('button:has-text("完成")').last().click();
+  await page.waitForTimeout(400);
+}
+// 縮圖列只在兩張以上時才出現，所以這裡的 0 就是「手邊只有剛剛手動拍的那一張」
+const imgCount = () => page.locator('.m-screen img').count();
+const imgsBefore = await imgCount();
+await page.locator('button:has-text("拍照")').click();
+await page.waitForTimeout(500);
+await page.locator('button:has-text("自動")').click();
+await page.waitForTimeout(700);
+const armed = await page.locator('.m-screen').innerText();
+check('打開自動快門後，畫面說得出它會自己拍', /自動拍|穩住/.test(armed), armed);
+// 這個讀數不只是給使用者看的 —— 合成串流不會抖，自動快門的門檻只能靠它在真機上量出來
+check('取景時把當下的角點位移顯示出來',
+  (await page.locator('[data-testid=cam-motion]').count()) === 1,
+  await page.locator('.m-screen').innerText());
+check('倒數期間有一條穩定度長條',
+  (await page.locator('[data-testid=cam-steady]').count()) === 1,
+  await page.locator('.m-screen').innerText());
+
+await page.waitForTimeout(3000);
+check('框穩住之後不必按快門，相機自己收掉了',
+  (await page.locator('.m-screen video').count()) === 0
+  && (await barLabels()).some((x) => x.includes('拍照')),
+  (await barLabels()).join(','));
+// 縮圖列冒出來＝手邊變成兩張（手動拍的 + 自動拍的），全程沒有人按過快門
+check('自動拍的那張真的進了編輯器',
+  imgsBefore === 0 && (await imgCount()) === 2,
+  `${imgsBefore} → ${await imgCount()}`);
 
 const realErrors = pageErrors.filter((e) => !/favicon/i.test(e) && !/status of 404/.test(e));
 check('全程沒有 JS 錯誤', realErrors.length === 0, realErrors.join(' | '));

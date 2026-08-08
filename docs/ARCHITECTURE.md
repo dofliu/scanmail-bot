@@ -82,7 +82,7 @@ ScanMail+ 是一個文件掃描郵寄平台，另外整合了一整套媒體 / �
 |------|------|------|
 | `image-local.js` | ~1390 | 縮放 / 轉檔 / 壓縮 / 拼接 / 旋轉 / 裁切 / 打碼 / 標註 / 濾鏡 / 文字 / 格子取景（裁切框與取景都會跟著旋轉走：`rotateRect` / `rotateFit`）|
 | `scan-lite.js` | ~1040 | 文件邊界偵測（梯度導向 Hough）+ 透視校正（WebGL）+ 拍攝品質診斷（`assess()`：低信心時說得出反光 / 過暗 / 太遠）|
-| `scan-live.js` | ~290 | 即時取景：`getUserMedia` 取流 + 節流跑 `scan-lite` 偵測 + 平滑角點 + 全解析度快門 |
+| `scan-live.js` | ~390 | 即時取景：`getUserMedia` 取流 + 節流跑 `scan-lite` 偵測 + 平滑角點 + 全解析度快門 + 框穩了自動按快門 |
 | `sign-lite.js` | ~590 | 簽名模型（向量筆畫）、去白底匯入、PDF 路徑輸出、簽名庫的持久化 |
 | `pdf-lite.js` | ~990 | PDF 物件解析器：讀 xref / 展開物件串流 / 挑頁重組 / 蓋章 |
 | `pdf-write.js` | ~520 | PDF 產生器（Type0 內嵌字型、影像 XObject） |
