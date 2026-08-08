@@ -14,12 +14,12 @@
  *      一路排隊到畫面卡死。取樣也先縮到 GRAB_WIDTH，不用 1080p 全解析度去掃。
  *   3. **平滑**：手持一定會抖，逐幀的框會跳。用 EMA 收斂，但**移動幅度大就直接跟上** ——
  *      平滑的代價是延遲，鏡頭真的移開時延遲比抖動更難看。
+ *   4. **自動快門**：框連續幾次都沒怎麼動、而且信心夠，就自己按下去。
+ *      量的是**平滑前**的 rawCorners —— 平滑後的角點本來就會趨近不動，
+ *      拿它算穩定度等於在量自己的濾波器，不是在量手。
  *
  * 角點一律用**相對座標（0..1）**對外，跟取樣解析度、顯示尺寸都無關，
  * 呼叫端要畫在多大的畫面上都不必換算（studio.jsx 的疊框、拉正畫面都吃這個格式）。
- *
- * 這一版**不做自動快門**（框穩了自動拍）—— 那是下一步，需要先有這一層跑穩，
- * 才量得出「穩定」的門檻該抓多少。
  *
  * 離線版可用：完全在裝置上跑，不碰後端、不引外部資源。
  */
@@ -31,6 +31,15 @@
   const SMOOTH = 0.45;       // EMA 係數：新的一次結果佔的比重
   const SNAP = 0.10;         // 角點平均位移超過畫面的 10% 就不平滑，直接跟上
   const READY_TIMEOUT = 4000;
+
+  // ── 自動快門的兩個數字 ────────────────────────────────────
+  // 手持的抖動疊上偵測本身的角點雜訊，兩者在這裡分不開，量到的是合起來的值。
+  // 1.2% 是「一張 640 寬的取樣上，四個角平均動不到 8px」，
+  // **這是估的，不是量出來的** —— 合成串流完全不會抖（位移恆為 0），
+  // 在它上面調不出有意義的門檻。所以取景畫面會把當下的位移百分比顯示出來，
+  // 拿真機手持看幾秒就知道實際範圍落在哪，再回來改這兩個數字。
+  const STEADY_MOVE = 0.012;   // 角點平均位移低於畫面的這個比例，算「這一次沒動」
+  const STEADY_HITS = 3;       // 連續這麼多次沒動才按快門（× INTERVAL ≈ 1 秒）
 
   /** 相機錯誤的原名對使用者沒有意義，換成「接下來能做什麼」 */
   const CAMERA_ERRORS = {
@@ -153,6 +162,19 @@
     }));
   }
 
+  /**
+   * 兩次偵測之間的平均角點位移（相對單位）。自動快門就是看這個數字。
+   *
+   * 沒有上一次時回 `null` 而不是 0 —— 「還不知道」跟「完全沒動」是兩件事，
+   * 回 0 的話第一次偵測就會被算成一次「穩定」，等於白白少數一拍。
+   */
+  function cornerMotion(prev, next) {
+    if (!prev || prev.length !== 4 || !next || next.length !== 4) return null;
+    let moved = 0;
+    for (let i = 0; i < 4; i++) moved += Math.hypot(next[i].x - prev[i].x, next[i].y - prev[i].y);
+    return moved / 4;
+  }
+
   /** 對一張畫布跑偵測，回傳相對座標的結果 */
   function detectOn(source, width, height) {
     const res = window.SMScanLite.detect(source);
@@ -171,8 +193,9 @@
    *
    * @param {HTMLVideoElement} video 顯示用的 video 元素（呼叫端自己放進畫面）
    * @param {object} opts onResult / onError / interval / grabWidth / smooth /
-   *                     facingMode / stream（測試用：直接給一條現成的串流）
-   * @returns {Promise<object>} session：`stop()` / `capture()` / `latest()`
+   *                     facingMode / stream（測試用：直接給一條現成的串流）/
+   *                     auto（自動快門，預設關）/ onAuto / steadyMove / steadyHits
+   * @returns {Promise<object>} session：`stop()` / `capture()` / `latest()` / `setAuto()`
    */
   async function start(video, opts = {}) {
     if (!video) throw new Error('要有一個 <video> 元素才能取景');
@@ -184,6 +207,9 @@
     const alpha = opts.smooth == null ? SMOOTH : opts.smooth;
     const onResult = typeof opts.onResult === 'function' ? opts.onResult : null;
     const onError = typeof opts.onError === 'function' ? opts.onError : null;
+    const onAuto = typeof opts.onAuto === 'function' ? opts.onAuto : null;
+    const steadyMove = opts.steadyMove == null ? STEADY_MOVE : opts.steadyMove;
+    const steadyHits = Math.max(1, opts.steadyHits == null ? STEADY_HITS : opts.steadyHits);
 
     video.srcObject = stream;
     video.muted = true;
@@ -202,8 +228,38 @@
     let stopped = false;
     let latest = null;
     let smoothed = null;
+    let prevRaw = null;
+    let steady = 0;
     let frames = 0;
     let errors = 0;
+    let auto = !!opts.auto;
+    let firing = false;   // 自動快門正在跑，別再排第二張
+
+    /**
+     * 這一次偵測算不算「沒動」。
+     *
+     * 抓不準的時候一律歸零 —— 沒把握的框本來就會飄，
+     * 它「連續三次都在同一個地方」多半是連續三次都抓錯同一個東西。
+     */
+    const updateSteady = (res, motion) => {
+      if (res.low || motion == null || motion > steadyMove) steady = 0;
+      else steady += 1;
+    };
+
+    /** 框穩了就自己按下去。拍完就解除，一次取景只會自動拍一張 */
+    const maybeAutoShoot = () => {
+      if (!auto || firing || stopped || steady < steadyHits) return;
+      firing = true;
+      auto = false;
+      capture().then((shot) => {
+        if (stopped) return;
+        if (onAuto) onAuto({ ...shot, auto: true });
+      }).catch((e) => {
+        // 自動快門失敗就退回手動 —— 使用者還在取景畫面上，按鈕仍然按得到
+        steady = 0;
+        if (onError) onError(e);
+      }).then(() => { firing = false; });
+    };
 
     const tick = () => {
       timer = null;
@@ -213,6 +269,9 @@
         const shot = video.readyState >= 2 ? grabFrame(video, grab, grabWidth) : null;
         if (shot) {
           const res = detectOn(shot.canvas, shot.width, shot.height);
+          const motion = cornerMotion(prevRaw, res.corners);
+          prevRaw = res.corners;
+          updateSteady(res, motion);
           smoothed = smoothCorners(smoothed, res.corners, alpha, SNAP);
           frames += 1;
           latest = {
@@ -220,10 +279,16 @@
             corners: smoothed,
             rawCorners: res.corners,
             frame: { width: shot.sourceWidth, height: shot.sourceHeight },
+            motion,
+            steady,
+            steadyHits,
+            stable: steady >= steadyHits,
+            auto,
             ms: Date.now() - t0,
             at: t0,
           };
           if (onResult) onResult(latest);
+          maybeAutoShoot();
         }
       } catch (e) {
         errors += 1;
@@ -282,9 +347,17 @@
       };
     }
 
+    /** 開 / 關自動快門。關掉的同時把計數歸零，重開才不會沿用剛剛那幾次 */
+    function setAuto(on) {
+      auto = !!on;
+      steady = 0;
+      return auto;
+    }
+
     function stop() {
       if (stopped) return;
       stopped = true;
+      auto = false;
       if (timer) clearTimeout(timer);
       timer = null;
       // 不關掉軌道的話，相機燈會一直亮著、電也一直吃 —— session 接手了這條串流就要負責收
@@ -297,17 +370,24 @@
       stream,
       capture,
       stop,
+      setAuto,
       latest: () => latest,
       get running() { return !stopped; },
       get frames() { return frames; },
       get errors() { return errors; },
+      get auto() { return auto; },
+      get steady() { return steady; },
+      get steadyHits() { return steadyHits; },
     };
   }
 
   window.SMScanLive = {
-    GRAB_WIDTH, INTERVAL, SMOOTH, SNAP, CAMERA_ERRORS,
+    GRAB_WIDTH, INTERVAL, SMOOTH, SNAP, STEADY_MOVE, STEADY_HITS, CAMERA_ERRORS,
     isSupported, start,
     // 測試用
-    _internals: { openStream, waitForFrame, grabFrame, smoothCorners, relCorners, detectOn, cameraMessage },
+    _internals: {
+      openStream, waitForFrame, grabFrame, smoothCorners, cornerMotion,
+      relCorners, detectOn, cameraMessage,
+    },
   };
 })();

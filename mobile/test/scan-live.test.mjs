@@ -10,9 +10,14 @@
  *      所以驗兩次偵測之間真的隔了 interval，而不是每幀都跑
  *   3. **收得乾不乾淨**：stop() 之後軌道要 ended、不能再有回呼 ——
  *      漏收的話相機燈會一直亮著，使用者只會覺得這個 App 在偷拍
+ *   4. **自動快門拍不拍**：靜止的畫面要拍、一直在動的不能拍、抓不準的不能拍，
+ *      而且拍到一半被收掉時那張照片不能事後才冒出來
  *
  * 另外驗快門：拍下來的是**全解析度**的那一張（不是偵測用的縮圖），
  * 而且回傳的框是對這張重新測過的 —— 拉正畫面才不會「拍完框就變了」。
+ *
+ * **自動快門這一段的時間都用輪詢而不是固定秒數**：偵測是同步的，機器忙的時候
+ * 一次可能久上好幾倍，等固定秒數紅的會是 CI 的負載而不是這個功能。
  *
  * 執行：cd mobile && npm run test:live
  */
@@ -396,6 +401,249 @@ check('取樣縮到指定寬度並維持比例', grab.size && grab.size[0] === 6
 check('取樣記得原始解析度（快門要用）', grab.source && grab.source[0] === 800, JSON.stringify(grab.source));
 // 一秒三次的迴圈每次都 new 一塊畫布，GC 會一直有事做
 check('取樣重複使用同一塊畫布', grab.sameCanvas === true, '每次都換新畫布');
+
+// ── 穩定度 ────────────────────────────────────────────────
+const motion = await page.evaluate(() => {
+  const { cornerMotion } = window.SMScanLive._internals;
+  const a = [{ x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 }, { x: 0.9, y: 0.9 }, { x: 0.1, y: 0.9 }];
+  const nudged = a.map((p) => ({ x: p.x + 0.01, y: p.y }));
+  const oneCorner = a.map((p, i) => (i === 0 ? { x: p.x, y: p.y + 0.04 } : p));
+  return {
+    none: cornerMotion(null, a),
+    same: cornerMotion(a, a),
+    nudged: cornerMotion(a, nudged),
+    oneCorner: cornerMotion(a, oneCorner),
+  };
+});
+// 「還不知道」跟「完全沒動」是兩件事 —— 回 0 的話第一次偵測就會被算成一次穩定
+check('第一次偵測的位移是「還不知道」而不是 0', motion.none === null, JSON.stringify(motion.none));
+check('完全沒動時位移是 0', motion.same === 0, JSON.stringify(motion.same));
+check('整體平移多少，位移就是多少', Math.abs(motion.nudged - 0.01) < 1e-9, JSON.stringify(motion.nudged));
+// 只有一個角在飄的框一樣不該算穩 —— 平均之後仍要看得到那個位移
+check('只有一個角在動也算得出來', Math.abs(motion.oneCorner - 0.01) < 1e-9, JSON.stringify(motion.oneCorner));
+
+// ── 自動快門 ──────────────────────────────────────────────
+/**
+ * 靜止的假相機 → 應該自己按下快門。
+ *
+ * 順便驗「拍完就解除」：一次取景只能自動拍一張，否則使用者還沒反應過來
+ * 就已經連拍了五張同樣的紙。
+ */
+const auto = await page.evaluate(async () => {
+  const cam = window.fakeCamera({ corners: window.PAPER });
+  const video = window.newVideo();
+  const shots = [];
+  const results = [];
+  const session = await window.SMScanLive.start(video, {
+    stream: cam.stream, interval: 150, auto: true, steadyHits: 3,
+    onResult: (r) => results.push({ motion: r.motion, steady: r.steady, stable: r.stable, auto: r.auto }),
+    onAuto: (shot) => shots.push({ at: Date.now(), corners: shot.corners, auto: shot.auto, size: shot.file.size }),
+  });
+  // 等它自己拍，不是等一個固定的秒數 —— 機器忙的時候一次偵測可能久到
+  // 2.5 秒內湊不滿 4 次，那樣紅的是 CI 的負載不是這個功能
+  const deadline = Date.now() + 8000;
+  while (!shots.length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  await new Promise((r) => setTimeout(r, 900));   // 再看一下會不會連拍第二張
+  const out = {
+    count: shots.length,
+    first: shots[0] || null,
+    stillArmed: session.auto,
+    detections: results.length,
+    firstMotion: results[0] ? results[0].motion : 'missing',
+    hitAt: results.findIndex((r) => r.stable) + 1,
+    errors: session.errors,
+  };
+  session.stop();
+  cam.close();
+  video.remove();
+  return out;
+});
+check('框穩住之後自動拍了一張', auto.count === 1, `拍了 ${auto.count} 張`);
+check('自動拍的那張帶著框，也標明是自動拍的',
+  auto.first && auto.first.auto === true && cornerError(auto.first.corners) < 0.03 && auto.first.size > 1000,
+  JSON.stringify({ auto: auto.first?.auto, err: cornerError(auto.first?.corners).toFixed(4) }));
+// 第一次偵測沒有「上一次」可以比，不能白送一次穩定
+check('第一次偵測不算一次「沒動」', auto.firstMotion === null, JSON.stringify(auto.firstMotion));
+check('要連續 3 次沒動才拍（不是一偵測到就拍）', auto.hitAt >= 4, `第 ${auto.hitAt} 次就滿了`);
+check('拍完就解除，不會連拍', auto.stillArmed === false && auto.count === 1,
+  JSON.stringify({ auto: auto.stillArmed, count: auto.count }));
+check('自動快門過程中沒有偵測失敗', auto.errors === 0, `errors=${auto.errors}`);
+
+/**
+ * 一直在動的畫面 → 不該拍。
+ *
+ * 紙的位置是**跟著偵測走**的，不是掛在 setInterval 上：偵測是同步的、會把
+ * UI 執行緒整段吃掉，計時器在那段時間根本不會跑，用時間驅動的話兩次偵測之間
+ * 實際只移動了幾個像素（第一版就是這樣，位移只有一半超過門檻，最後還是自動拍了）。
+ * 每偵測完一次就把紙挪到另一個定點（32px ≈ 畫面的 4%），
+ * 每一次偵測都確實走了門檻 1.2% 的三倍以上。門檻用預設值 —— 這條測的正是預設值擋不擋得住。
+ */
+const moving = await page.evaluate(async () => {
+  const cam = window.fakeCamera({ corners: window.PAPER });
+  const video = window.newVideo();
+  const shots = [];
+  const seen = [];
+  let n = 0;
+  const session = await window.SMScanLive.start(video, {
+    stream: cam.stream, interval: 250, auto: true, steadyHits: 3,
+    onResult: (r) => {
+      seen.push({ motion: r.motion, steady: r.steady, low: r.low });
+      n += 1;
+      cam.move(window.PAPER.map((p) => ({ x: p.x + (n % 2 ? 32 : 0), y: p.y })));
+    },
+    onAuto: (shot) => shots.push(shot),
+  });
+  await new Promise((r) => setTimeout(r, 3000));
+  const out = {
+    count: shots.length,
+    detections: seen.length,
+    maxSteady: seen.reduce((m, r) => Math.max(m, r.steady), 0),
+    moved: seen.filter((r) => r.motion != null && r.motion > window.SMScanLive.STEADY_MOVE).length,
+    measured: seen.filter((r) => r.motion != null).length,
+    stillArmed: session.auto,
+  };
+  session.stop();
+  cam.close();
+  video.remove();
+  return out;
+});
+check('畫面一直在動就不會自動拍', moving.count === 0, `還是拍了 ${moving.count} 張`);
+// 容許一次沒動到：假相機的重畫要等 captureStream 取樣，機器忙的時候
+// 偶爾會有一幀還沒換過來。連續兩次沒動就會累出穩定計數，下一條就會抓到
+check('（對照）測資真的在動，位移確實超過門檻',
+  moving.measured >= 5 && moving.moved >= moving.measured - 1,
+  JSON.stringify({ moved: moving.moved, measured: moving.measured }));
+check('動的期間穩定計數被歸零，累不到門檻',
+  moving.maxSteady < 3 && moving.stillArmed === true, `最高累到 ${moving.maxSteady}`);
+
+/** 沒開自動快門就完全不該碰快門，即使畫面一動也不動 */
+const manual = await page.evaluate(async () => {
+  const cam = window.fakeCamera({ corners: window.PAPER });
+  const video = window.newVideo();
+  const shots = [];
+  const session = await window.SMScanLive.start(video, {
+    stream: cam.stream, interval: 150, steadyHits: 2, onAuto: (s) => shots.push(s),
+  });
+  const settle = Date.now() + 5000;
+  while (session.steady < 3 && Date.now() < settle) await new Promise((r) => setTimeout(r, 50));
+  const offCount = shots.length;
+  const steadyWhileOff = session.steady;
+  // 中途打開 → 從頭數起，然後才拍
+  session.setAuto(true);
+  const steadyAfterArm = session.steady;
+  const deadline = Date.now() + 8000;
+  while (!shots.length && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  const onCount = shots.length;
+  const out = { offCount, onCount, steadyWhileOff, steadyAfterArm };
+  session.stop();
+  cam.close();
+  video.remove();
+  return out;
+});
+check('沒開自動快門就不會自己拍', manual.offCount === 0, `拍了 ${manual.offCount} 張`);
+// 穩定度一直在算（介面要顯示），只是沒人按快門
+check('關著的時候穩定度照樣在算', manual.steadyWhileOff > 0, `steady=${manual.steadyWhileOff}`);
+check('中途打開時計數歸零，不沿用剛剛那幾次', manual.steadyAfterArm === 0, `steady=${manual.steadyAfterArm}`);
+check('打開之後就會自動拍', manual.onCount === 1, `拍了 ${manual.onCount} 張`);
+
+/** 抓不準的框不該自動拍 —— 連續三次抓錯同一個東西也是「很穩」 */
+const lowConf = await page.evaluate(async () => {
+  const cam = window.fakeCamera({ corners: null });   // 只有桌面，沒有紙
+  const video = window.newVideo();
+  const shots = [];
+  const seen = [];
+  const session = await window.SMScanLive.start(video, {
+    stream: cam.stream, interval: 150, auto: true, steadyHits: 3,
+    onResult: (r) => seen.push({ low: r.low, motion: r.motion, steady: r.steady }),
+    onAuto: (s) => shots.push(s),
+  });
+  await new Promise((r) => setTimeout(r, 3000));
+  const out = {
+    count: shots.length,
+    detections: seen.length,
+    lows: seen.filter((r) => r.low).length,
+    maxSteady: seen.reduce((m, r) => Math.max(m, r.steady), 0),
+    stillMotion: seen.filter((r) => r.motion != null && r.motion <= 0.001).length,
+  };
+  session.stop();
+  cam.close();
+  video.remove();
+  return out;
+});
+check('抓不準的時候不自動拍，即使框完全沒動',
+  lowConf.count === 0 && lowConf.lows === lowConf.detections && lowConf.detections >= 3,
+  JSON.stringify({ count: lowConf.count, lows: lowConf.lows, n: lowConf.detections }));
+check('（對照）這個場景的框確實是穩的，擋下來的是信心不是位移',
+  lowConf.stillMotion >= 2 && lowConf.maxSteady === 0,
+  JSON.stringify({ still: lowConf.stillMotion, maxSteady: lowConf.maxSteady }));
+
+/**
+ * **拍到一半被收掉**：使用者按了取消、或元件卸載，這時自動快門的 `capture()`
+ * 可能還在等 `toBlob`。照片不能在那之後還冒出來 —— 取景畫面早就不在了，
+ * 那張照片會直接掉進一個沒人接的地方，是最難查的那種 bug。
+ *
+ * 時機不能靠猜：把 `toBlob` 延後 400ms 回呼，讓「拍攝中」這個狀態長到能穩定命中，
+ * 再在 steady 剛滿的當下 stop()。
+ */
+const afterStop = await page.evaluate(async () => {
+  const cam = window.fakeCamera({ corners: window.PAPER });
+  const video = window.newVideo();
+  const shots = [];
+  const realToBlob = HTMLCanvasElement.prototype.toBlob;
+  HTMLCanvasElement.prototype.toBlob = function (cb, ...rest) {
+    realToBlob.call(this, (b) => setTimeout(() => cb(b), 400), ...rest);
+  };
+  const session = await window.SMScanLive.start(video, {
+    stream: cam.stream, interval: 100, auto: true, steadyHits: 3, onAuto: (s) => shots.push(s),
+  });
+  // 等到自動快門真的被觸發（steady 滿了、auto 跟著解除）再收掉
+  const deadline = Date.now() + 4000;
+  while (session.auto && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+  const triggered = !session.auto;
+  const atStop = shots.length;
+  session.stop();
+  await new Promise((r) => setTimeout(r, 1200));
+  HTMLCanvasElement.prototype.toBlob = realToBlob;
+  const out = { triggered, atStop, after: shots.length, auto: session.auto };
+  cam.close();
+  video.remove();
+  return out;
+});
+check('（前提）自動快門確實被觸發了，測的是拍到一半被收掉',
+  afterStop.triggered === true && afterStop.atStop === 0, JSON.stringify(afterStop));
+check('拍到一半被收掉，照片不會事後才冒出來', afterStop.after === 0, JSON.stringify(afterStop));
+check('停掉的同時解除自動快門', afterStop.auto === false, JSON.stringify(afterStop.auto));
+
+/** 拍不出來（例如畫布輸出失敗）要退回手動，不能整個取景卡死在「正在拍」 */
+const autoFail = await page.evaluate(async () => {
+  const cam = window.fakeCamera({ corners: window.PAPER });
+  const video = window.newVideo();
+  const errs = [];
+  const shots = [];
+  const realToBlob = HTMLCanvasElement.prototype.toBlob;
+  HTMLCanvasElement.prototype.toBlob = function (cb) { cb(null); };
+  const session = await window.SMScanLive.start(video, {
+    stream: cam.stream, interval: 150, auto: true, steadyHits: 3,
+    onAuto: (s) => shots.push(s), onError: (e) => errs.push(e.message),
+  });
+  await new Promise((r) => setTimeout(r, 2000));
+  HTMLCanvasElement.prototype.toBlob = realToBlob;
+  // 退回手動：按鈕還按得動
+  let manualOk = false;
+  try {
+    const shot = await session.capture();
+    manualOk = shot.file.size > 1000;
+  } catch (e) { manualOk = false; }
+  const out = { errs: errs.length, first: errs[0] || null, shots: shots.length, manualOk, running: session.running };
+  session.stop();
+  cam.close();
+  video.remove();
+  return out;
+});
+check('自動快門失敗時報一次錯，不會靜靜地什麼都沒發生',
+  autoFail.errs === 1 && autoFail.shots === 0, JSON.stringify(autoFail));
+check('自動快門失敗之後取景還活著，手動快門照樣拍得出來',
+  autoFail.running === true && autoFail.manualOk === true, JSON.stringify(autoFail));
 
 check('過程中沒有 JS 例外', pageErrors.length === 0, pageErrors.join(' | '));
 
