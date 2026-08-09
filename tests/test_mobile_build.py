@@ -284,7 +284,24 @@ def test_free_crop_is_a_full_screen_editor():
     # 離開裁切後 canvas 是新的 DOM 元素，不重畫會停在瀏覽器預設的空白畫布。
     # 每個全螢幕模式都要列進相依 —— 打碼、拉正、簽名都一樣。
     assert ("[items, layout, frame, sel, cropping, redacting, annotating, deskewing, "
-            "signing, text, stamps, signatures]") in studio
+            "signing, texts, stamps, signatures]") in studio
+
+
+def test_text_is_a_stack_of_layers_not_one_string():
+    """一張圖要疊得下不只一段字 —— 標題、日期、浮水印各有各的字級與位置。
+
+    引擎的 `drawTexts` 從一開始就吃陣列，卡住的一直是這裡：`studio.jsx` 把
+    唯一那個文字物件固定包成 `[text]`。這幾條釘住「面板改的是選中的那一層」，
+    以免哪天又被改回單一物件。
+    """
+    studio = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "const [texts, setTexts]" in studio, "文字要存成陣列"
+    assert "const [activeText, setActiveText]" in studio, "沒有「現在編輯哪一層」"
+    # 所有滑桿都要走 patchText（寫回選中的那一層），不能再有人直接覆蓋整包文字
+    assert "const patchText = " in studio
+    assert "setText({" not in studio, "還有滑桿在覆蓋整個文字物件，不是寫回單一圖層"
+    # 角度是浮水印才有的設定：預設值 -30 若跟著一般文字傳進引擎，字會莫名歪掉
+    assert "STUDIO_TEXT_SPOTS[t.spot], rotate: 0" in studio, "一般文字沒有把浮水印的角度清掉"
 
 
 def test_annotations_share_the_redaction_gesture():

@@ -636,6 +636,165 @@ check('移除文字之後面板回到空的',
 await page.locator('.pill:has-text("完成")').click();
 await page.waitForTimeout(200);
 
+// ── 文字圖層（一張圖疊得下好幾段字）──────────────────────
+// 標題、日期、浮水印各要自己的字級與位置，所以文字存的是一疊圖層。
+// 這一段量的是**成品**：三段字有沒有同時畫上去、改設定改到的是不是選中的那一層、
+// 刪掉中間那層之後另外兩層會不會跟著跑位。
+await page.locator('button:has-text("文字")').click();
+await page.waitForTimeout(300);
+check('文字面板一開始只有一層，並提供加一層',
+  (await page.locator('[data-testid=text-layer-0]').count()) === 1 &&
+  (await page.locator('[data-testid=text-layer-1]').count()) === 0 &&
+  (await page.locator('[data-testid=text-layer-add]').count()) === 1,
+  await page.locator('.m-screen').innerText());
+
+// 還沒有任何文字的畫面拿來當基準，後面每一次都跟它相減 —— 底下是拼貼，
+// 直接數顏色分不出「哪些點是字」，相減才數得準。
+await page.evaluate(() => {
+  const c = document.querySelector('canvas');
+  window.__textBase = Uint8ClampedArray.from(
+    c.getContext('2d').getImageData(0, 0, c.width, c.height).data);
+});
+const inkBands = () => page.evaluate(() => {
+  const c = document.querySelector('canvas');
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  const b = window.__textBase;
+  const out = { top: 0, mid: 0, bottom: 0 };
+  for (let y = 0; y < c.height; y++) {
+    for (let x = 0; x < c.width; x++) {
+      const i = (y * c.width + x) * 4;
+      if (Math.abs(d[i] - b[i]) + Math.abs(d[i + 1] - b[i + 1]) + Math.abs(d[i + 2] - b[i + 2]) < 30) continue;
+      if (y < c.height * 0.32) out.top++;
+      else if (y > c.height * 0.68) out.bottom++;
+      else out.mid++;
+    }
+  }
+  return out;
+});
+const fillLayer = async (s, spotIdx) => {
+  await page.locator('textarea').fill(s);
+  await page.locator(`[data-testid=text-spot-${spotIdx}]`).click();
+  await page.waitForTimeout(450);
+};
+// 滑桿不能用 fill（Playwright 不讓 range 打字），要走原生 setter 才叫得動 React
+const setSlider = (idx, value) => page.evaluate(({ idx, value }) => {
+  const el = document.querySelectorAll('input[type=range]')[idx];
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  setter.call(el, String(value));
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}, { idx, value });
+
+await fillLayer('上面這段', 1);
+const oneLayer = await inkBands();
+check('第一層畫在挑的位置上（上方）',
+  oneLayer.top > 40 && oneLayer.mid < 20 && oneLayer.bottom < 20, JSON.stringify(oneLayer));
+
+await page.locator('[data-testid=text-layer-add]').click();
+await page.waitForTimeout(250);
+check('加一層之後多一顆 chip，而且新的那一層是空白的',
+  (await page.locator('[data-testid=text-layer-1]').count()) === 1 &&
+  (await page.locator('textarea').inputValue()) === '',
+  await page.locator('textarea').inputValue());
+
+await fillLayer('中間這段', 4);
+await page.locator('[data-testid=text-layer-add]').click();
+await page.waitForTimeout(250);
+await fillLayer('下面這段', 7);
+const threeLayers = await inkBands();
+check('三段文字同時出現在成品上（不是後面那段蓋掉前面那段）',
+  threeLayers.top > 40 && threeLayers.mid > 40 && threeLayers.bottom > 40,
+  JSON.stringify(threeLayers));
+
+await page.locator('[data-testid=text-layer-1]').click();
+await page.waitForTimeout(250);
+check('切到哪一層，面板顯示的就是那一層的內容',
+  (await page.locator('textarea').inputValue()) === '中間這段',
+  await page.locator('textarea').inputValue());
+
+// 把選中那層的字級拉大 —— 只有中間那段該變粗，上下兩段不能跟著動
+await setSlider(0, 16);
+await page.waitForTimeout(500);
+const bigger = await inkBands();
+check('改設定只改到選中的那一層',
+  bigger.mid > threeLayers.mid * 1.3 &&
+  Math.abs(bigger.top - threeLayers.top) < threeLayers.top * 0.1 &&
+  Math.abs(bigger.bottom - threeLayers.bottom) < threeLayers.bottom * 0.1,
+  `${JSON.stringify(threeLayers)} → ${JSON.stringify(bigger)}`);
+
+await page.locator('[data-testid=text-layer-remove]').click();
+await page.waitForTimeout(500);
+const removedMid = await inkBands();
+check('刪掉中間那層，另外兩層留在原地',
+  removedMid.mid < 20 &&
+  Math.abs(removedMid.top - threeLayers.top) < threeLayers.top * 0.1 &&
+  Math.abs(removedMid.bottom - threeLayers.bottom) < threeLayers.bottom * 0.1,
+  `${JSON.stringify(threeLayers)} → ${JSON.stringify(removedMid)}`);
+check('刪掉之後 chip 少一顆，並選回前一層',
+  (await page.locator('[data-testid=text-layer-2]').count()) === 0 &&
+  (await page.locator('textarea').inputValue()) === '上面這段',
+  await page.locator('textarea').inputValue());
+
+// 只留一層，量「一般文字是不是水平的」——「角度」是浮水印才有的設定
+// （面板上也只有平鋪時才出現那根滑桿），但它的預設值 -30 曾經跟著物件
+// 一路傳進引擎，讓一般文字整段歪掉。
+await page.locator('[data-testid=text-layer-1]').click();
+await page.locator('[data-testid=text-layer-remove]').click();
+await page.waitForTimeout(400);
+await fillLayer('文字文字文字文字文字', 4);
+const tilt = await page.evaluate(() => {
+  const c = document.querySelector('canvas');
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  const b = window.__textBase;
+  const pts = [];
+  let x0 = 1e9; let x1 = -1;
+  for (let y = 0; y < c.height; y++) {
+    for (let x = 0; x < c.width; x++) {
+      const i = (y * c.width + x) * 4;
+      if (Math.abs(d[i] - b[i]) + Math.abs(d[i + 1] - b[i + 1]) + Math.abs(d[i + 2] - b[i + 2]) < 30) continue;
+      pts.push([x, y]);
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+    }
+  }
+  if (pts.length < 50) return { n: pts.length, gap: 1 };
+  const span = x1 - x0;
+  const meanY = (a) => a.reduce((s, p) => s + p[1], 0) / a.length;
+  const left = pts.filter((p) => p[0] < x0 + span * 0.25);
+  const right = pts.filter((p) => p[0] > x1 - span * 0.25);
+  return { n: pts.length, gap: Math.abs(meanY(left) - meanY(right)) / c.height };
+});
+check('一般文字是水平的（浮水印的角度不會跟著跑到它身上）',
+  tilt.n > 50 && tilt.gap < 0.03, JSON.stringify(tilt));
+
+// 上限是面板排得下幾顆 chip，不是引擎的限制
+for (let i = 0; i < 6; i++) {
+  if (await page.locator('[data-testid=text-layer-add]').count()) {
+    await page.locator('[data-testid=text-layer-add]').click();
+    await page.waitForTimeout(120);
+  }
+}
+check('圖層有上限，滿了就不再提供加一層',
+  (await page.locator('[data-testid=text-layer-5]').count()) === 1 &&
+  (await page.locator('[data-testid=text-layer-6]').count()) === 0 &&
+  (await page.locator('[data-testid=text-layer-add]').count()) === 0,
+  `chip 數 ${await page.locator('.m-screen .chip').count()}`);
+
+// 一路刪回去 —— 最後一層刪掉是「清空這一層」，面板永遠有東西可以編輯
+for (let i = 0; i < 8; i++) {
+  if (!(await page.locator('[data-testid=text-layer-remove]').count())) break;
+  await page.locator('[data-testid=text-layer-remove]').click();
+  await page.waitForTimeout(150);
+}
+await page.waitForTimeout(400);
+const cleared = await inkBands();
+check('全部移除之後，畫面回到完全沒有文字的樣子',
+  (await page.locator('[data-testid=text-layer-1]').count()) === 0 &&
+  (await page.locator('textarea').inputValue()) === '' &&
+  cleared.top < 20 && cleared.mid < 20 && cleared.bottom < 20,
+  JSON.stringify(cleared));
+await page.locator('.pill:has-text("完成")').click();
+await page.waitForTimeout(200);
+
 // ── 簽名 / 印章 ──────────────────────────────────────────
 await page.evaluate(() => localStorage.removeItem('sm.signatures'));
 await page.locator('button:has-text("簽名")').click();

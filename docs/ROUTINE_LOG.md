@@ -9,6 +9,23 @@
 
 ---
 
+## 2026/08/08 — 標註工具 M1b（文字改成一疊圖層）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[0]`：文字一次只放得下一段。**開工時沒有 open PR**（#49 / #50 都已合併），所以這次是乾淨地接 `roadmap[0]`，沒有版本號要閃 |
+| 分支 | `claude/nightly-text-layers`（從 `origin/main` `a47f575` 長出來） |
+| PR | 見分支上的草稿 PR |
+| 結果 | 完成，v3.24.0。`static/js/studio.jsx`：`text`（單一 state 物件）→ `texts` 陣列 + `activeText` 索引；面板最上面一排圖層 chip（「文字 1 / 內部文件 / ＋ 加一層」）；十幾個滑桿統一走 `patchText()` 寫回選中的那一層。**引擎一行都沒動** —— `drawTexts()` 從第一版就吃陣列，卡的一直是介面。全綠 —— pytest 279 passed + 3 skipped、瀏覽器 **446** 項（介面 114 / 圖片 86 / 取景 56 / 簽名 52 / 文件 51 / 掃描 34 / 位址 25 / 頁面 21）|
+| 三個決定 | ①**永遠留一層** —— 刪到最後一層是「清空這一層」而不是刪掉；一層都沒有的話面板上沒有東西可以編輯，使用者看到的是「文字功能壞了」。②**上限 6 層**，理由寫在程式註解裡：不是引擎的限制，是 390px 寬的手機上那排 chip 排得下幾顆，再多要捲反而找不到自己要改的那一層。③**chip 上顯示該層文字的開頭**，還沒打字才退回「文字 N」—— 六顆一模一樣的「文字 N」等於沒有標籤 |
+| 順手修掉一個看得見的錯 | `rotate` 是浮水印才有的設定（面板上也只有平鋪時才出現那根滑桿），但預設值 `-30` 一直跟著文字物件傳進引擎 —— 也就是說**一般文字從以前到現在都是歪 30 度畫上去的**。非平鋪的圖層現在明確帶 `rotate: 0`。這不是推論：把修正拿掉重跑測試，量到的字左右兩端高度差是畫布高的 **27%**（`gap: 0.273`）|
+| 測試 | +12。介面 11（103 → 114）、pytest 接線守門 1（278 → 279）。**測的是成品不是 state**：把「還沒有文字」的畫布存成基準，之後每次都跟它相減，再分上 / 中 / 下三段數點 —— 三段字同時出現、改滑桿只動到選中那層、刪掉中間那層另外兩層留在原地，三件事都由像素回答。底圖是拼貼，直接數顏色分不出哪些點是字，相減才數得準 |
+| Mutation 檢查 | 只畫選中的那一層 → 3 條紅；`patchText` 改成寫進每一層 → 5 條紅；拿掉 `rotate: 0` → 2 條紅 |
+| 兩個寫測試踩到的坑 | ①**滑桿不能用 `fill()`** —— Playwright 不讓 `input[type=range]` 打字。要走 `HTMLInputElement.prototype` 的原生 value setter 再 `dispatchEvent(new Event('input'))`，React 才收得到。②**九宮格的位置鈕沒有文字**，選不到；順手加了 `data-testid="text-spot-N"`（圖層 chip 與刪除鈕也各有一個） |
+| 刻意沒做 | ①**一般文字的角度滑桿** —— 引擎本來就吃 `rotate`，但九宮格定位本來就是為了「按一下就對齊」，現在加是憑空猜。②**圖層排序**（疊在後面的畫在上面，順序＝新增順序）。兩項都寫進「後續工作」|
+| 環境注意事項 | 沿用前幾筆，都還有效：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx`（先 `ls /opt/pw-browsers/` 確認版本號；這次 `chromium` 與 `chromium_headless_shell-1194` 也在，要挑 `chromium-1194/chrome-linux/chrome`）②`pip install -r requirements.txt` 之後補 `pip install cffi pytest`，加 `--timeout 120` ③改完版本號要跑一次 `python scripts/build_mobile.py`（`version.properties` 要對得上 `main.py`）④`python tests/generate_test_forms.py` 會改到有進版控的 fixture，提交前 `git checkout -- tests/fixtures/forms/` ⑤跑 `test:studio` 前要先 `python scripts/build_mobile.py --offline`。**新增一條**：`npm ci` 會把 `mobile/package-lock.json` 最上面的 `version` 改成跟 `package.json` 一致（3.5.0 → 3.15.0），跟這個增量無關，提交前 `git checkout -- mobile/package-lock.json` |
+| 下一步 | 做 `roadmap[0]`：**標註工具 M2：螢光筆 / 手寫**。多圖層在 M1b 已經打開，`drawAnnotations()`（v3.23.0）也已經是陣列 + `useDragBoxes` 共用手勢。具體怎麼動：`static/js/image-local.js` 的 `drawAnnotations()` 加兩種 `kind` —— `highlight`（半透明粗筆畫、`globalCompositeOperation = 'multiply'` 才不會把底下的字蓋掉）與 `pen`（自由手繪，存的是一串點而不是兩個點，所以 `useDragBoxes` 這次接不上，要另外收 `onPointerMove` 的軌跡）；`StudioAnnotator` 的 `.chip` 那一排加上這兩種。**先做螢光筆**：它跟現有的「拖一個框」手勢一樣，一個晚上做得完；手寫要另外一套取樣 + 平滑（可以參考 `sign-lite.js` 的畫筆），適合再拆一個晚上。測試補在 `npm run test:image`（引擎：螢光筆下面的字還看得見 —— 量同一個點在疊之前 / 之後都不是純色）與 `npm run test:studio`（介面：拖一筆、換色、復原）|
+
 ## 2026/08/07 — 標註工具 M1（箭頭 / 方框）
 
 | 項目 | 內容 |

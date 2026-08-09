@@ -214,6 +214,8 @@ renderItem()               旋轉 / 翻轉 / 濾鏡 / 裁切 / 打碼 / 標註�
      ▼
 composeToCanvas()          layoutBoxes() 算版面 → drawCell() 逐格繪製（含取景）
      │                     → drawTexts() → drawSignatures()
+     │                     文字是一疊圖層（最多 6 層），面板改的是選中的那一層；
+     │                     角度只有平鋪的浮水印有，一般文字一律水平
      ▼
 imagesToPdf()              JPEG 原始位元組直接嵌進 /DCTDecode，畫質完全不掉
      │
