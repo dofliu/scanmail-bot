@@ -496,6 +496,190 @@ check('沒有大小的那一筆不留痕跡', marks.dotPainted === 0, `改了 ${
 check('空的標註陣列原樣返回、不動畫布', marks.emptySame, JSON.stringify(marks.emptySame));
 check('陣列裡混到 null 不會整批失敗', marks.nullSafe, JSON.stringify(marks.nullSafe));
 
+// ── 螢光筆 / 手寫 ────────────────────────────────────────
+// 螢光筆的每一個判準都是「字還讀不讀得到」，所以量的是**特定像素的顏色**，
+// 不是「有沒有被改到」—— 半透明疊色跟 multiply 都會改到像素，差別在字變成什麼顏色。
+console.log('\n螢光筆 / 手寫');
+
+const pens = await page.evaluate(() => {
+  const L = window.SMImageLocal;
+  const white = (w, h) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const x = c.getContext('2d');
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, w, h);
+    return c;
+  };
+  const dataOf = (cv) => cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+  const at = (cv, x, y) => {
+    const d = cv.getContext('2d').getImageData(x, y, 1, 1).data;
+    return [d[0], d[1], d[2]];
+  };
+  const marked = (cv) => {
+    const d = dataOf(cv);
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      if (d[i] !== 255 || d[i + 1] !== 255 || d[i + 2] !== 255) n++;
+    }
+    return n;
+  };
+  // 帶子的左右兩端落在哪一欄 —— 平頭與圓頭的差別就在這裡
+  const spanX = (cv) => {
+    const d = dataOf(cv);
+    let left = -1; let right = -1;
+    for (let x = 0; x < cv.width; x++) {
+      for (let y = 0; y < cv.height; y++) {
+        const i = (y * cv.width + x) * 4;
+        if (d[i] !== 255 || d[i + 1] !== 255 || d[i + 2] !== 255) {
+          if (left < 0) left = x;
+          right = x;
+          break;
+        }
+      }
+    }
+    return [left, right];
+  };
+  // 某一欄最上面被畫到的那一列 —— 「帶子有沒有歪」與「轉角有沒有被切掉」都看它
+  const topAt = (cv, x) => {
+    const d = dataOf(cv);
+    for (let y = 0; y < cv.height; y++) {
+      const i = (y * cv.width + x) * 4;
+      if (d[i] !== 255 || d[i + 1] !== 255 || d[i + 2] !== 255) return y;
+    }
+    return -1;
+  };
+
+  const out = {};
+
+  // 假裝一行字：六個黑方塊，中間留空隙。螢光筆從頭刷到尾
+  const line = white(400, 200);
+  const lc = line.getContext('2d');
+  lc.fillStyle = '#000000';
+  for (let i = 0; i < 6; i++) lc.fillRect(60 + i * 40, 92, 24, 16);
+  L.drawAnnotations(line, [{ kind: 'highlight', x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5 }]);
+  out.onLetter = at(line, 70, 100);   // 字身上
+  out.onGap = at(line, 92, 100);      // 兩個字中間的白底
+
+  // 乾淨白底上只有一條螢光帶：暈邊、平頭、粗細都在這一張上量
+  const clean = white(400, 200);
+  L.drawAnnotations(clean, [{ kind: 'highlight', x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5 }]);
+  const cd = dataOf(clean);
+  let dark = 0;
+  for (let i = 0; i < cd.length; i += 4) {
+    if (cd[i] < 100 && cd[i + 1] < 100 && cd[i + 2] < 100) dark++;
+  }
+  out.hiDark = dark;
+  out.hiSpan = spanX(clean);
+
+  // 扶正：拖歪 2.9°（< 8°）—— 兩端的上緣要落在同一列
+  const tilted = white(400, 200);
+  L.drawAnnotations(tilted, [{ kind: 'highlight', x1: 0.1, y1: 0.46, x2: 0.9, y2: 0.54 }]);
+  out.snapTop = [topAt(tilted, 60), topAt(tilted, 340)];
+
+  // 拖歪 20.6°（> 8°）—— 這是真的想斜著畫，照拖的角度畫
+  const slanted = white(400, 200);
+  L.drawAnnotations(slanted, [{ kind: 'highlight', x1: 0.1, y1: 0.2, x2: 0.9, y2: 0.8 }]);
+  out.slantTop = [topAt(slanted, 60), topAt(slanted, 340)];
+
+  // 同樣歪 2.9°，但明講不要扶正
+  const raw = white(400, 200);
+  L.drawAnnotations(raw, [{ kind: 'highlight', x1: 0.1, y1: 0.46, x2: 0.9, y2: 0.54, snap: false }]);
+  out.rawTop = [topAt(raw, 60), topAt(raw, 340)];
+
+  // 疊在一起：紅箭頭 + 藍螢光筆。螢光筆若畫在箭頭之上，紅 × 藍 ≈ 黑，箭頭就被染掉了。
+  // 陣列順序刻意把螢光筆放在後面 —— 要證明的正是「排在後面也要先畫」
+  const stack = white(400, 200);
+  L.drawAnnotations(stack, [
+    { kind: 'arrow', x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5, width: 0.02, color: '#e5322d' },
+    { kind: 'highlight', x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5, width: 0.12, color: '#0000ff' },
+  ]);
+  const sd = dataOf(stack);
+  let red = 0;
+  let blue = 0;
+  for (let i = 0; i < sd.length; i += 4) {
+    if (sd[i] > 180 && sd[i + 1] < 90 && sd[i + 2] < 90) red++;
+    if (sd[i] < 90 && sd[i + 2] > 180) blue++;
+  }
+  out.stackRed = red;
+  out.stackBlue = blue;
+
+  // 手寫：兩個點就是一條線
+  const pen2 = white(400, 200);
+  L.drawAnnotations(pen2, [{ kind: 'pen', points: [[0.1, 0.5], [0.9, 0.5]], width: 0.02 }]);
+  out.penMid = topAt(pen2, 200);
+  out.penPainted = marked(pen2);
+
+  // 三個點的尖角：走中點二次曲線的話頂點會被切掉，直接連折線則會頂到 0.1 的高度
+  const corner = white(400, 400);
+  L.drawAnnotations(corner, [{
+    kind: 'pen', points: [[0.1, 0.9], [0.5, 0.1], [0.9, 0.9]], width: 0.004,
+  }]);
+  out.penApex = topAt(corner, 200);
+
+  // 暈邊：同色底上仍看得見（跟箭頭同一個道理）
+  const red2 = document.createElement('canvas');
+  red2.width = 200; red2.height = 200;
+  const rx = red2.getContext('2d');
+  rx.fillStyle = '#e5322d'; rx.fillRect(0, 0, 200, 200);
+  L.drawAnnotations(red2, [{ kind: 'pen', points: [[0.2, 0.5], [0.8, 0.5]], width: 0.02 }]);
+  const rd = rx.getImageData(0, 0, 200, 200).data;
+  let darker = 0;
+  for (let i = 0; i < rd.length; i += 4) if (rd[i] < 180) darker++;
+  out.penHalo = darker;
+
+  // 點不夠兩個 = 還不是一條線，不留痕跡
+  const tiny = white(400, 200);
+  L.drawAnnotations(tiny, [
+    { kind: 'pen', points: [[0.5, 0.5]] },
+    { kind: 'pen', points: [] },
+    { kind: 'pen' },
+  ]);
+  out.penTiny = marked(tiny);
+
+  // 相對座標：換一個尺寸的畫布，落點的比例要一樣
+  const small = white(200, 100);
+  L.drawAnnotations(small, [{ kind: 'highlight', x1: 0.1, y1: 0.5, x2: 0.9, y2: 0.5 }]);
+  out.smallSpan = spanX(small);
+
+  return out;
+});
+
+const rgbNear = (got, want, tol) => got.every((v, i) => Math.abs(v - want[i]) <= tol);
+
+check('螢光筆蓋過去，字仍然是黑的（multiply 不是半透明疊色）',
+  rgbNear(pens.onLetter, [0, 0, 0], 12),
+  `字身上量到 rgb(${pens.onLetter.join(',')})`);
+check('螢光筆真的上了色 —— 字跟字之間的白底變成螢光色',
+  rgbNear(pens.onGap, [255, 225, 77], 12),
+  `空隙量到 rgb(${pens.onGap.join(',')})`);
+check('螢光筆沒有暈邊（一圈黑框就不是螢光筆了）',
+  pens.hiDark === 0, `量到 ${pens.hiDark} 個深色點`);
+check('螢光筆是平頭 —— 不會從拖曳的兩端多蓋出半個帶寬',
+  pens.hiSpan[0] >= 39 && pens.hiSpan[0] <= 41 && pens.hiSpan[1] >= 358 && pens.hiSpan[1] <= 360,
+  `帶子落在 ${pens.hiSpan[0]}–${pens.hiSpan[1]} 欄（拖的是 40–360）`);
+check('拖歪幾度會扶正 —— 兩端的上緣同高',
+  pens.snapTop[0] >= 0 && pens.snapTop[0] === pens.snapTop[1],
+  `左端 ${pens.snapTop[0]}、右端 ${pens.snapTop[1]}`);
+check('歪超過門檻就照拖的角度畫，不硬扶正',
+  Math.abs(pens.slantTop[0] - pens.slantTop[1]) > 100,
+  `左端 ${pens.slantTop[0]}、右端 ${pens.slantTop[1]}`);
+check('明講 snap:false 就不扶正',
+  Math.abs(pens.rawTop[0] - pens.rawTop[1]) > 8,
+  `左端 ${pens.rawTop[0]}、右端 ${pens.rawTop[1]}`);
+check('螢光筆一律畫在其他標註底下 —— 箭頭不會被染色',
+  pens.stackRed > 200 && pens.stackBlue > 200,
+  `紅 ${pens.stackRed} 點、藍 ${pens.stackBlue} 點`);
+check('手寫兩個點就是一條線', pens.penPainted > 500 && pens.penMid > 80 && pens.penMid < 120,
+  `畫到 ${pens.penPainted} 點、中央上緣在第 ${pens.penMid} 列`);
+check('手寫是平滑曲線不是折線 —— 尖角被切掉',
+  pens.penApex > 100, `頂點畫到第 ${pens.penApex} 列（折線會頂到 40 附近）`);
+check('手寫也有暈邊，同色底上看得見', pens.penHalo > 300, `${pens.penHalo} 個深色點`);
+check('點不夠兩個的手寫不留痕跡', pens.penTiny === 0, `改了 ${pens.penTiny} 點`);
+check('螢光筆的座標也是相對的',
+  pens.smallSpan[0] >= 19 && pens.smallSpan[0] <= 21
+  && pens.smallSpan[1] >= 178 && pens.smallSpan[1] <= 180,
+  `帶子落在 ${pens.smallSpan[0]}–${pens.smallSpan[1]} 欄`);
+
 const marksItem = await page.evaluate(async () => {
   const L = window.SMImageLocal;
   const c = document.createElement('canvas');

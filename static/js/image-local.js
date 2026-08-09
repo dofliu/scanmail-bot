@@ -662,7 +662,8 @@
   }
 
   /**
-   * 標註 —— 箭頭與方框。「這裡要改」「這欄請填」，把話講在圖上比另外打一段字清楚。
+   * 標註 —— 箭頭 / 方框 / 螢光筆 / 手寫。「這裡要改」「這欄請填」，
+   * 把話講在圖上比另外打一段字清楚。
    *
    * 跟打碼的差別是**可逆**：打碼直接把像素改掉、拿掉就回不去了，標註只是疊一筆在上面。
    * 但兩者在介面上共用同一套拖框手勢，所以座標也刻意用同一套 0–1 相對值，
@@ -673,6 +674,10 @@
    * 這件唯一重要的事丟掉了。方框自己從兩點推回矩形，成本比反過來低得多。
    *
    * 線寬相對短邊，跟文字的字級同一套慣例。
+   *
+   * 螢光筆與手寫（v3.25.0）沿用同一個陣列與同一套相對座標，只是各自需要的東西不同：
+   * 螢光筆仍然是一段拖曳（`x1,y1,x2,y2`），手寫存的是**點的序列**（`points`）——
+   * 一條手寫的線本來就不是兩個端點描述得完的。
    */
   function drawAnnotations(canvas, annotations) {
     if (!annotations || !annotations.length) return canvas;
@@ -682,8 +687,14 @@
     const H = canvas.height;
     const unit = Math.min(W, H);
 
-    for (const a of annotations) {
-      if (!a) continue;
+    // 螢光筆一律先畫。它是用 multiply 疊上去的「底色」—— 排在箭頭後面的話會把
+    // 箭頭一起染色（紅箭頭疊上黃螢光就變成橘的），那不是使用者畫過的東西。
+    const ordered = annotations.filter((a) => a && a.kind === 'highlight')
+      .concat(annotations.filter((a) => a && a.kind !== 'highlight'));
+
+    for (const a of ordered) {
+      if (a.kind === 'highlight') { strokeHighlight(ctx, a, W, H, unit); continue; }
+      if (a.kind === 'pen') { strokePen(ctx, a, W, H, unit); continue; }
       const x1 = (a.x1 == null ? 0 : a.x1) * W;
       const y1 = (a.y1 == null ? 0 : a.y1) * H;
       const x2 = (a.x2 == null ? 0 : a.x2) * W;
@@ -754,6 +765,96 @@
   }
 
   /**
+   * 螢光筆。
+   *
+   * 跟「畫一條半透明色帶」的差別在合成模式：半透明疊色會連黑字一起洗淡（字變灰），
+   * **multiply 只讓亮的地方染上顏色，黑字仍然是黑的** —— 螢光筆的重點是畫過去還讀得到。
+   * 也因為這樣它不需要暈邊：暈邊是為了讓細線在同色背景上不消失，
+   * 在螢光帶四周圍一圈黑框只會變成一個奇怪的色塊。
+   */
+  function strokeHighlight(ctx, a, W, H, unit) {
+    let x1 = (a.x1 == null ? 0 : a.x1) * W;
+    let y1 = (a.y1 == null ? 0 : a.y1) * H;
+    let x2 = (a.x2 == null ? 0 : a.x2) * W;
+    let y2 = (a.y2 == null ? 0 : a.y2) * H;
+    if (Math.abs(x2 - x1) < 1 && Math.abs(y2 - y1) < 1) return;
+
+    // 扶正：拖過一行字的手一定會歪幾度，歪掉的帶子會從行首切到行尾的半個字高。
+    // 兩端取中線而不是就其中一端，帶子才會停在使用者拖的那個高度上。
+    if (a.snap !== false) {
+      const tol = Math.tan((HIGHLIGHT_SNAP_DEG * Math.PI) / 180);
+      const dx = Math.abs(x2 - x1);
+      const dy = Math.abs(y2 - y1);
+      if (dy <= dx * tol) { const my = (y1 + y2) / 2; y1 = my; y2 = my; }
+      else if (dx <= dy * tol) { const mx = (x1 + x2) / 2; x1 = mx; x2 = mx; }
+    }
+
+    ctx.save();
+    ctx.filter = 'none';
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.globalAlpha = a.opacity == null ? 1 : Math.max(0.05, Math.min(1, a.opacity));
+    // 平頭。真的螢光筆就是平的，而圓頭會從拖曳的兩端各多蓋出半個帶寬 ——
+    // 蓋到下一個字上，等於使用者標到了他沒有標的東西。
+    ctx.lineCap = 'butt';
+    ctx.strokeStyle = a.color || DEFAULT_HIGHLIGHT_COLOR;
+    ctx.lineWidth = Math.max(2, (a.width == null ? DEFAULT_HIGHLIGHT_WIDTH : a.width) * unit);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
+   * 手寫。
+   *
+   * 點存成 `[x, y]` 而不是 `{x, y}`：一筆手寫是幾百個點，而它每次預覽都要重畫一遍。
+   * 抽稀在**擷取的時候**就做掉（介面那一側），這裡拿到的已經是要畫的那些點。
+   *
+   * 走的是「以原始點為控制點、以相鄰兩點的中點為端點」的二次曲線 ——
+   * 直接連折線在手機上看得出鋸齒。`sign-lite.js` 的 `walk()` 是同一套走法，
+   * 但它要同時餵 canvas 與 PDF 兩個後端所以抽象成事件；這裡只畫 canvas，
+   * 為了六行共用而讓圖片引擎相依於簽名引擎並不划算 —— 簽名引擎沒載入時
+   * `drawSignatures()` 是安靜地不畫，那對簽名是對的，對「使用者剛剛畫下的那一筆」不是。
+   */
+  function strokePen(ctx, a, W, H, unit) {
+    const pts = a.points;
+    if (!pts || pts.length < 2) return;
+    const n = pts.length;
+    const px = (i) => pts[i][0] * W;
+    const py = (i) => pts[i][1] * H;
+
+    const path = (c) => {
+      c.beginPath();
+      c.moveTo(px(0), py(0));
+      if (n === 2) { c.lineTo(px(1), py(1)); return; }
+      for (let i = 1; i < n - 1; i++) {
+        c.quadraticCurveTo(px(i), py(i), (px(i) + px(i + 1)) / 2, (py(i) + py(i + 1)) / 2);
+      }
+      // 最後一段直接收到終點，不然筆畫會短一截
+      c.quadraticCurveTo(px(n - 2), py(n - 2), px(n - 1), py(n - 1));
+    };
+
+    const lw = Math.max(1.5, (a.width == null ? DEFAULT_MARK_WIDTH : a.width) * unit);
+    ctx.save();
+    ctx.filter = 'none';
+    ctx.globalAlpha = a.opacity == null ? 1 : Math.max(0.05, Math.min(1, a.opacity));
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (a.halo !== false) {
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = lw * 2;
+      path(ctx);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = a.color || DEFAULT_MARK_COLOR;
+    ctx.lineWidth = lw;
+    path(ctx);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
    * 轉圖的時候裁切框要跟著轉，不然「轉一下」會讓已經裁好的範圍飄到別的地方。
    * delta 是順時針角度（90 的倍數）。
    */
@@ -806,6 +907,13 @@
   // 線寬相對短邊，A4 掃描與手機拍的照片畫出來的粗細才是同一個感覺。
   const DEFAULT_MARK_COLOR = '#e5322d';
   const DEFAULT_MARK_WIDTH = 0.006;
+  // 螢光筆自己一組預設。黃色是因為它靠 multiply 疊上去 —— 越淡的顏色越不會蓋掉字，
+  // 而帶寬要接近一行字的高度才蓋得滿，所以是線寬的好幾倍而不是同一個值。
+  const DEFAULT_HIGHLIGHT_COLOR = '#ffe14d';
+  const DEFAULT_HIGHLIGHT_WIDTH = 0.036;
+  // 拖過一行字，手一定會歪個幾度。歪掉的螢光帶會從行首切到行尾的半個字高，
+  // 所以近乎水平 / 垂直的就扶正；超過這個角度視為「真的想斜著畫」，照拖的角度畫。
+  const HIGHLIGHT_SNAP_DEG = 8;
 
   function isDefaultFit(fit) {
     if (!fit) return true;
@@ -1361,6 +1469,9 @@
     drawAnnotations,
     DEFAULT_MARK_COLOR,
     DEFAULT_MARK_WIDTH,
+    DEFAULT_HIGHLIGHT_COLOR,
+    DEFAULT_HIGHLIGHT_WIDTH,
+    HIGHLIGHT_SNAP_DEG,
     drawTexts,
     drawSignatures,
     fitBox,

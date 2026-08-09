@@ -329,6 +329,41 @@ def test_annotations_share_the_redaction_gesture():
     assert order < engine.index("drawAnnotations(redacted"), "標註畫在打碼之前，會被遮蓋吃掉"
 
 
+def test_highlighter_multiplies_and_goes_underneath():
+    """螢光筆的兩個要害都不是「有沒有畫出來」，而是「畫成什麼樣」。
+
+    一是合成模式：`multiply` 只讓亮的地方染色，黑字仍然是黑的；換成一般的半透明
+    疊色會把字一起洗淡，那就變成「畫一條色帶蓋住重點」。二是順序：它是底色，
+    排在箭頭之後畫會把箭頭一起染色（紅箭頭疊黃螢光變成橘的）。
+
+    兩件事都測得出畫面，這裡守的是**接線**——改壞了單元測試會紅，但先在這裡說清楚
+    為什麼不能改。
+    """
+    engine = _strip_comments((JS / "image-local.js").read_text(encoding="utf-8"))
+    assert "function strokeHighlight(" in engine
+    assert "'multiply'" in engine, "螢光筆沒有用 multiply，字會被一起洗淡"
+    # 螢光筆先進畫的佇列，其餘的接在後面
+    assert "kind === 'highlight')\n      .concat(" in engine, "螢光筆沒有排在其他標註之前畫"
+    # 手寫存的是整條軌跡；兩個端點描述不了一條手寫的線
+    assert "function strokePen(" in engine
+    assert "a.points" in engine, "手寫沒有存軌跡"
+
+
+def test_freehand_thins_points_while_capturing():
+    """抽稀要在**擷取的時候**做掉，不是畫的時候才處理。
+
+    `pointermove` 一秒進來幾十次，原封不動收下來的每一個點，之後每一次預覽都要
+    再畫一遍 —— 一張圖上寫幾個字就足以讓即時預覽開始卡。上限則是防呆：
+    畫得再久，一筆的資料量也不會無限長大。
+    """
+    studio = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "trace = false" in studio, "拖框手勢沒有軌跡模式，手寫只會拿到起點終點"
+    assert "minStep" in studio and "maxPoints" in studio, "軌跡沒有抽稀或沒有上限"
+    # 螢光筆與一般筆的顏色分開記：螢光黃當箭頭看不見，一般紅當螢光筆蓋掉內容
+    assert "STUDIO_HIGHLIGHT_INKS" in studio
+    assert "const [hiColor, setHiColor]" in studio, "螢光筆沒有自己的顏色"
+
+
 def test_images_convert_to_pdf_losslessly():
     """PDF 的 /DCTDecode 吃的就是 JPEG 原始位元組，照片可以完全不重新編碼。"""
     writer = _strip_comments((JS / "pdf-write.js").read_text(encoding="utf-8"))
