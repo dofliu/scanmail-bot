@@ -63,15 +63,22 @@ const STUDIO_REDACT_STYLES = [
   { id: 'fill',   label: '塗黑' },
 ];
 
-// 標註的兩種形狀。方框排第一 —— 「這一區」比「這一點」常用
+// 標註的四種筆。方框排第一 —— 「這一區」比「這一點」常用；
+// 螢光筆與手寫排在後面，它們是「補充」，指出位置的仍然是前兩種
 const STUDIO_MARK_KINDS = [
-  { id: 'box',   label: '方框' },
-  { id: 'arrow', label: '箭頭' },
+  { id: 'box',       label: '方框', hint: '在要框的地方拖一個框' },
+  { id: 'arrow',     label: '箭頭', hint: '從要指的地方往箭頭方向拖' },
+  { id: 'highlight', label: '螢光筆', hint: '沿著要標的那一行拖過去' },
+  { id: 'pen',       label: '手寫', hint: '直接在圖上寫字或畫圈' },
 ];
 
 // 標註的顏色。紅色排第一（文件多半是黑字白底，紅色不會跟內容混在一起），
 // 其餘三個是給「同一張圖上要分兩件事」用的
 const STUDIO_MARK_INKS = ['#e5322d', '#1f6feb', '#e8a317', '#1f7a4d'];
+
+// 螢光筆另外一組。它是 multiply 疊上去的 —— 深色會把字一起壓黑，
+// 所以這一排全部是亮色；同一支紅筆的紅色拿來當螢光筆會直接蓋掉內容
+const STUDIO_HIGHLIGHT_INKS = ['#ffe14d', '#8df5a8', '#9fd8ff', '#ffb0d8'];
 
 // 文字的位置用九宮格挑，不用拖的 —— 手機上拖字很難對齊，按一下就定位快多了
 const STUDIO_TEXT_SPOTS = [
@@ -380,6 +387,27 @@ function studioRectOf(d) {
 }
 
 /**
+ * 一筆標註佔了哪一塊 —— 點一下要拿掉哪一筆，靠的是這個。
+ *
+ * 手寫沒有起點終點可以框，只能從所有的點推外接矩形；其餘三種就是拖曳的兩點。
+ * 這裡刻意只回**外接矩形**而不是沿著筆跡判斷：一筆手寫的凹處點下去也算命中，
+ * 比起「照著幾何算，結果細細一條線點十次點不到」，寧可寬鬆。
+ */
+function studioMarkRect(m) {
+  if (m && m.points && m.points.length) {
+    let x0 = 1; let y0 = 1; let x1 = 0; let y1 = 0;
+    for (const pt of m.points) {
+      if (pt[0] < x0) x0 = pt[0];
+      if (pt[0] > x1) x1 = pt[0];
+      if (pt[1] < y0) y0 = pt[1];
+      if (pt[1] > y1) y1 = pt[1];
+    }
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  return studioRectOf(m);
+}
+
+/**
  * 打碼與標註共用的拖框手勢。
  *
  * 兩邊的操作完全一樣 —— **拖**出一個框就新增一筆、**點**在既有的一筆上就把它拿掉 ——
@@ -388,8 +416,14 @@ function studioRectOf(d) {
  *
  * `draft` 給的是原始的起點 → 終點（`x1,y1,x2,y2`），沒有正規化成矩形 ——
  * 箭頭需要方向，一旦在這裡壓成 x/y/w/h 就再也還原不回來了。
+ *
+ * `trace` 打開的是手寫要的那一種：同一個手勢，但記下的是**整條軌跡**而不是兩個端點，
+ * `draft` 換成 `{ points }`。點一下拿掉舊的那一筆兩邊完全一樣，所以還是同一個 hook。
  */
-function useDragBoxes({ canvasRef, hitTest, onDrag, onTap, minMove = 0.02 }) {
+function useDragBoxes({
+  canvasRef, hitTest, onDrag, onTap, minMove = 0.02, trace = false, minStep = 0.004,
+  maxPoints = 400,
+}) {
   const dragRef = stUseRef(null);
   const [draft, setDraft] = stUseState(null);
 
@@ -403,7 +437,10 @@ function useDragBoxes({ canvasRef, hitTest, onDrag, onTap, minMove = 0.02 }) {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = posOf(e);
-    dragRef.current = { start: p, hit: hitTest ? hitTest(p) : -1, moved: false };
+    dragRef.current = {
+      start: p, hit: hitTest ? hitTest(p) : -1, moved: false,
+      points: trace ? [[p.x, p.y]] : null,
+    };
   };
 
   const onPointerMove = (e) => {
@@ -411,18 +448,34 @@ function useDragBoxes({ canvasRef, hitTest, onDrag, onTap, minMove = 0.02 }) {
     if (!drag) return;
     e.preventDefault();
     const p = posOf(e);
-    // 拖不到一點點的距離就當成「點一下」—— 手指按下去本來就會晃個幾像素
-    if (Math.abs(p.x - drag.start.x) < minMove && Math.abs(p.y - drag.start.y) < minMove) return;
+    if (drag.points) {
+      // 抽稀就在這裡做掉：pointermove 一秒進來幾十次，原封不動收下來的每一個點，
+      // 之後每一次預覽都要再畫一遍。上限是防呆 —— 畫得再久也不會無限長大。
+      const last = drag.points[drag.points.length - 1];
+      if ((Math.abs(p.x - last[0]) >= minStep || Math.abs(p.y - last[1]) >= minStep)
+        && drag.points.length < maxPoints) {
+        drag.points.push([p.x, p.y]);
+      }
+    }
+    // 拖不到一點點的距離就當成「點一下」—— 手指按下去本來就會晃個幾像素。
+    // 一旦認定在拖就不再回頭看：畫一個圈會繞回起點附近，那不是「其實沒有拖」。
+    if (!drag.moved
+      && Math.abs(p.x - drag.start.x) < minMove && Math.abs(p.y - drag.start.y) < minMove) return;
     drag.moved = true;
-    setDraft({ x1: drag.start.x, y1: drag.start.y, x2: p.x, y2: p.y });
+    setDraft(drag.points
+      ? { points: drag.points.slice() }
+      : { x1: drag.start.x, y1: drag.start.y, x2: p.x, y2: p.y });
   };
 
   const onPointerUp = () => {
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
-    if (drag.moved && draft) onDrag(draft);
-    else if (drag.hit >= 0 && onTap) onTap(drag.hit);
+    // 軌跡直接拿 ref 上那一份而不是 draft：state 慢一拍，最後幾個點會掉
+    if (drag.moved) {
+      const final = drag.points ? { points: drag.points.slice() } : draft;
+      if (final) onDrag(final);
+    } else if (drag.hit >= 0 && onTap) onTap(drag.hit);
     setDraft(null);
   };
 
@@ -522,20 +575,28 @@ function StudioRedactor({ item, onApply, onCancel }) {
 }
 
 /**
- * 標註 —— 箭頭 / 方框。
+ * 標註 —— 方框 / 箭頭 / 螢光筆 / 手寫。
  *
  * 手勢跟打碼是同一套（`useDragBoxes`），連預覽的作法也一樣：畫布上直接顯示
  * **畫完的樣子**，而不是另外疊一層 DOM 的示意框。理由跟打碼相同 —— 匯出來才發現
  * 箭頭指歪了就太晚了；差別只在標註是疊上去的，所以拿掉就真的乾淨。
  *
- * 進行中的那一筆是例外，用 DOM 畫：每動一格就重跑一次 `renderItem` 太重，
- * 而且拖到一半的形狀本來就還不算數。
+ * 進行中的那一筆是例外，疊一層 SVG 畫：每動一格就重跑一次 `renderItem` 太重，
+ * 而且拖到一半的形狀本來就還不算數。SVG 而不是 DOM 方框，是因為現在有四種筆 ——
+ * 手寫根本沒有方框可以畫，而箭頭本來拿一條虛線對角線代替，方向感也只是勉強看得出來。
+ *
+ * **筆的顏色分兩組記。** 螢光筆是 multiply 疊上去的，一支紅筆的紅色當螢光筆會直接
+ * 蓋掉內容；反過來，挑了螢光黃之後箭頭也跟著變黃就更看不到了。
  */
 function StudioAnnotator({ item, onApply, onCancel }) {
   const canvasRef = stUseRef(null);
   const [marks, setMarks] = stUseState(() => item.annotations || []);
   const [kind, setKind] = stUseState('box');
   const [color, setColor] = stUseState(STUDIO_MARK_INKS[0]);
+  const [hiColor, setHiColor] = stUseState(STUDIO_HIGHLIGHT_INKS[0]);
+  const isHi = kind === 'highlight';
+  const ink = isHi ? hiColor : color;
+  const setInk = isHi ? setHiColor : setColor;
 
   stUseEffect(() => {
     const canvas = canvasRef.current;
@@ -548,22 +609,68 @@ function StudioAnnotator({ item, onApply, onCancel }) {
 
   const { draft, handlers } = useDragBoxes({
     canvasRef,
+    trace: kind === 'pen',
     // 命中範圍往外放一點：細箭頭本身只有幾個像素寬，照著幾何去點根本點不到
     hitTest: (p) => {
       const pad = 0.02;
       return marks.findIndex((m) => {
-        const r = studioRectOf(m);
+        const r = studioMarkRect(m);
         return p.x >= r.x - pad && p.x <= r.x + r.w + pad
             && p.y >= r.y - pad && p.y <= r.y + r.h + pad;
       });
     },
-    onDrag: (d) => setMarks((prev) => [...prev, { kind, ...d, color }]),
+    onDrag: (d) => setMarks((prev) => [...prev, { kind, ...d, color: ink }]),
     onTap: (i) => setMarks((prev) => prev.filter((_, n) => n !== i)),
   });
 
-  // 拖到一半的示意：方框就是方框，箭頭用一條對角線代替（DOM 畫不出箭頭，
-  // 但方向感有了就夠 —— 放開的那一刻畫布上就是真的箭頭）
-  const draftRect = draft ? studioRectOf(draft) : null;
+  // 畫布現在顯示成多大 —— 螢光帶的粗細與扶正角度都要照這個算，
+  // 示意才會跟放開手之後畫出來的那一筆落在同一個地方
+  const dispBox = () => {
+    const el = canvasRef.current;
+    const b = el && el.getBoundingClientRect();
+    return b && b.width ? b : { width: 1, height: 1 };
+  };
+
+  // 螢光筆的扶正在引擎裡（`strokeHighlight`），示意這邊要套同一條規則 ——
+  // 不然拖的時候看到斜的、放開變成平的。角度用顯示尺寸換算，跟引擎在像素空間算的是同一件事
+  const snapped = (d) => {
+    if (!isHi) return d;
+    const b = dispBox();
+    const tol = Math.tan((window.SMImageLocal.HIGHLIGHT_SNAP_DEG * Math.PI) / 180);
+    const dx = Math.abs(d.x2 - d.x1) * b.width;
+    const dy = Math.abs(d.y2 - d.y1) * b.height;
+    if (dy <= dx * tol) { const m = (d.y1 + d.y2) / 2; return { ...d, y1: m, y2: m }; }
+    if (dx <= dy * tol) { const m = (d.x1 + d.x2) / 2; return { ...d, x1: m, x2: m }; }
+    return d;
+  };
+
+  // 拖到一半的示意。四種筆各畫各的，但都只是「還沒算數」的那一筆 ——
+  // 放開的那一刻畫布上就是引擎畫的真品
+  const draftShape = () => {
+    if (!draft) return null;
+    const common = {
+      fill: 'none', stroke: ink, strokeLinecap: 'round', strokeLinejoin: 'round',
+      vectorEffect: 'non-scaling-stroke',
+    };
+    if (draft.points) {
+      return <polyline {...common} strokeWidth="3"
+        points={draft.points.map((pt) => `${pt[0] * 100},${pt[1] * 100}`).join(' ')}/>;
+    }
+    if (kind === 'arrow') {
+      return <line {...common} strokeWidth="2"
+        x1={draft.x1 * 100} y1={draft.y1 * 100} x2={draft.x2 * 100} y2={draft.y2 * 100}/>;
+    }
+    if (isHi) {
+      const d = snapped(draft);
+      const b = dispBox();
+      return <line {...common} strokeLinecap="butt" opacity="0.5"
+        strokeWidth={Math.max(6, Math.min(b.width, b.height) * window.SMImageLocal.DEFAULT_HIGHLIGHT_WIDTH)}
+        x1={d.x1 * 100} y1={d.y1 * 100} x2={d.x2 * 100} y2={d.y2 * 100}/>;
+    }
+    const r = studioRectOf(draft);
+    return <rect {...common} strokeWidth="2"
+      x={r.x * 100} y={r.y * 100} width={r.w * 100} height={r.h * 100}/>;
+  };
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -575,15 +682,14 @@ function StudioAnnotator({ item, onApply, onCancel }) {
           {...handlers}>
           <canvas ref={canvasRef}
             style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', userSelect: 'none' }}/>
-          {draftRect && (
-            <div style={{
-              position: 'absolute',
-              left: `${draftRect.x * 100}%`, top: `${draftRect.y * 100}%`,
-              width: `${draftRect.w * 100}%`, height: `${draftRect.h * 100}%`,
-              border: `1.5px ${kind === 'arrow' ? 'dashed' : 'solid'} ${color}`,
-              boxShadow: '0 0 0 1px rgba(0,0,0,0.45)',
-              pointerEvents: 'none', boxSizing: 'border-box',
-            }}/>
+          {draft && (
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none"
+              style={{
+                position: 'absolute', left: 0, top: 0, width: '100%', height: '100%',
+                pointerEvents: 'none', overflow: 'visible',
+              }}>
+              {draftShape()}
+            </svg>
           )}
         </div>
       </div>
@@ -597,11 +703,12 @@ function StudioAnnotator({ item, onApply, onCancel }) {
           <span style={{ fontSize: '11px', color: 'var(--ink-3)', marginLeft: 'auto' }}>
             {marks.length
               ? `已標 ${marks.length} 筆 · 點一下可移除`
-              : (kind === 'arrow' ? '從要指的地方往箭頭方向拖' : '在要框的地方拖一個框')}
+              : (STUDIO_MARK_KINDS.find((k) => k.id === kind) || STUDIO_MARK_KINDS[0]).hint}
           </span>
         </div>
         <div style={{ marginTop: '6px' }}>
-          <ColorRow value={color} onChange={setColor} inks={STUDIO_MARK_INKS}/>
+          <ColorRow value={ink} onChange={setInk}
+            inks={isHi ? STUDIO_HIGHLIGHT_INKS : STUDIO_MARK_INKS}/>
         </div>
       </div>
 
@@ -2922,7 +3029,7 @@ Object.assign(window, {
   SignaturePad, SignaturePlacer, SignatureSheet, useSignatures,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,
-  STUDIO_REDACT_STYLES, STUDIO_MARK_KINDS, STUDIO_MARK_INKS,
+  STUDIO_REDACT_STYLES, STUDIO_MARK_KINDS, STUDIO_MARK_INKS, STUDIO_HIGHLIGHT_INKS,
   STUDIO_TEXT_SPOTS, STUDIO_TEXT_DEFAULT, STUDIO_TEXT_MAX, STUDIO_SIGN_INKS,
-  useDragBoxes, studioRectOf, studioTextLabel,
+  useDragBoxes, studioRectOf, studioMarkRect, studioTextLabel,
 });

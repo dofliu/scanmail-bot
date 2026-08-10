@@ -419,12 +419,12 @@ const beforeMark = await offColour();
 
 await page.locator('button:has-text("標註")').click();
 await page.waitForTimeout(400);
-check('標註是獨立畫面，列出兩種形狀與顏色',
-  (await page.locator('.chip').allInnerTexts()).join(',').includes('方框') &&
-  (await page.locator('.chip').allInnerTexts()).join(',').includes('箭頭') &&
+const markChips = (await page.locator('.chip').allInnerTexts()).join(',');
+check('標註是獨立畫面，四種筆與顏色都在',
+  ['方框', '箭頭', '螢光筆', '手寫'].every((k) => markChips.includes(k)) &&
   (await page.locator('input[type=color]').count()) === 1 &&
   (await barLabels()).some((x) => x.includes('全清')),
-  (await page.locator('.chip').allInnerTexts()).join(','));
+  markChips);
 
 check('預設是方框，提示說的是拖一個框',
   /在要框的地方拖一個框/.test(await page.locator('.m-screen').innerText()),
@@ -509,6 +509,111 @@ await page.waitForTimeout(400);
 check('再開一次，先前的標註還在',
   /已標 1 筆/.test(await page.locator('.m-screen').innerText()),
   await page.locator('.m-screen').innerText());
+await page.locator('button:has-text("全清")').click();
+await page.locator('button:has-text("套用")').click();
+await page.waitForTimeout(450);
+
+// ── 標註：螢光筆 / 手寫 ─────────────────────────────────
+// 螢光筆與手寫共用前面那一套手勢，所以這裡不重測「拖了會不會新增」，
+// 測的是**它們跟方框箭頭不一樣的地方**：另一組顏色、軌跡而不是兩個端點、
+// 以及拖到一半的示意有沒有跟著換。
+console.log('\n標註：螢光筆 / 手寫');
+
+const beforePen = await offColour();
+await page.locator('button:has-text("標註")').click();
+await page.waitForTimeout(400);
+
+// 色票是 ColorRow 的圓鈕。「現在挑的是哪一色」直接問那個 input[type=color] ——
+// 它的 value 就是元件手上的顏色，比從邊框粗細反推可靠
+const inkList = () => page.evaluate(() => Array.from(document.querySelectorAll('button'))
+  .filter((b) => b.style.borderRadius === '50%')
+  .map((b) => getComputedStyle(b).backgroundColor));
+const pickedInk = () => page.locator('input[type=color]').inputValue();
+
+const penInks = await inkList();
+await page.locator('.chip:has-text("螢光筆")').click();
+await page.waitForTimeout(250);
+const hiInks = await inkList();
+
+check('切到螢光筆換一組亮色色票（深色會把字一起壓黑）',
+  hiInks.includes('rgb(255, 225, 77)') && !hiInks.includes('rgb(229, 50, 45)')
+  && penInks.includes('rgb(229, 50, 45)'),
+  `螢光筆 ${hiInks.join('/')}；一般筆 ${penInks.join('/')}`);
+check('螢光筆的提示說的是沿著一行拖過去',
+  /沿著要標的那一行拖過去/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+// 提示要趁還沒標任何一筆的時候問 —— 標了之後那一格顯示的是「已標 N 筆」
+await page.locator('.chip:has-text("手寫")').click();
+await page.waitForTimeout(250);
+check('手寫的提示說的是直接寫',
+  /直接在圖上寫字或畫圈/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await page.locator('.chip:has-text("螢光筆")').click();
+await page.waitForTimeout(250);
+// 換一個螢光色，等一下要驗它不會傳染給箭頭
+await page.locator('button[style*="border-radius: 50%"]').nth(1).click();
+await page.waitForTimeout(200);
+const hiPicked = await pickedInk();
+
+await dragMark(0.15, 0.4, 0.85, 0.42);
+check('螢光筆拖一條就標一筆',
+  /已標 1 筆/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await page.locator('.chip:has-text("箭頭")').click();
+await page.waitForTimeout(250);
+check('螢光色不會傳染給其他筆 —— 兩組顏色分開記',
+  (await pickedInk()) === '#e5322d' && hiPicked !== '#e5322d',
+  `箭頭現在是 ${await pickedInk()}、螢光筆挑的是 ${hiPicked}`);
+
+// 手寫：拖一條有轉折的軌跡。存下來的是整條線，不是起點跟終點
+await page.locator('.chip:has-text("手寫")').click();
+await page.waitForTimeout(250);
+
+const penPath = [[0.2, 0.75], [0.35, 0.6], [0.5, 0.8], [0.65, 0.6], [0.8, 0.75]];
+await page.mouse.move(markBox.x + markBox.width * penPath[0][0], markBox.y + markBox.height * penPath[0][1]);
+await page.mouse.down();
+for (const [x, y] of penPath.slice(1)) {
+  await page.mouse.move(markBox.x + markBox.width * x, markBox.y + markBox.height * y, { steps: 5 });
+}
+// 還沒放開 —— 示意這時候要是一條折線，不是一個方框
+const draftShape = await page.evaluate(() => {
+  const svg = document.querySelector('.m-screen svg');
+  if (!svg || !svg.firstElementChild) return null;
+  const line = svg.querySelector('polyline');
+  return {
+    tag: svg.firstElementChild.tagName,
+    pts: line ? line.getAttribute('points').split(' ').length : 0,
+  };
+});
+await page.mouse.up();
+await page.waitForTimeout(350);
+
+check('手寫拖到一半的示意是軌跡本身（polyline，不是外接方框）',
+  draftShape && draftShape.tag === 'polyline' && draftShape.pts > 5,
+  JSON.stringify(draftShape));
+check('放開手就多一筆（螢光筆那條還在）',
+  /已標 2 筆/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+// 點在手寫的外接框裡面 —— 那一筆的筆跡在這個點上是凹進去的，
+// 「照著幾何算」會點不到，外接矩形才點得到
+await page.mouse.click(markBox.x + markBox.width * 0.5, markBox.y + markBox.height * 0.68);
+await page.waitForTimeout(350);
+check('點一下手寫的範圍就拿掉那一筆（外接矩形命中，不是照筆跡）',
+  /已標 1 筆/.test(await page.locator('.m-screen').innerText()),
+  await page.locator('.m-screen').innerText());
+
+await page.locator('button:has-text("套用")').click();
+await page.waitForTimeout(500);
+const afterPen = await offColour();
+check('螢光筆真的畫進主預覽',
+  afterPen > beforePen + 100, `套用前 ${beforePen} 點、套用後 ${afterPen} 點`);
+
+await page.locator('button:has-text("標註")').click();
+await page.waitForTimeout(400);
 await page.locator('button:has-text("全清")').click();
 await page.locator('button:has-text("套用")').click();
 await page.waitForTimeout(450);
