@@ -575,6 +575,230 @@ function StudioRedactor({ item, onApply, onCancel }) {
 }
 
 /**
+ * 圖片轉文字。
+ *
+ * 引擎（`ocr-lite.js`）從 v3.26.0 就在了，但只有「掃描型 PDF」那一條路走得到 ——
+ * 手上一張拍好的發票想把金額挖出來，得先包成 PDF 再轉檔，荒謬。這一頁就是入口。
+ *
+ * 跟打碼 / 標註**不一樣的地方**：這是唯讀工具。它不改圖，所以沒有「套用」，
+ * 只有「複製」。也因為這樣它不回傳任何東西給 `patch()`。
+ *
+ * 三個決定：
+ *
+ *   1. **裁切是從全解析度那張裁，不是從畫布上那張。** 畫布是 `usePreview` 的縮圖，
+ *      框住發票上一行金額在上面可能只有幾十個像素 —— 資訊在縮圖的時候就丟掉了，
+ *      之後怎麼放大都補不回來。`SMOcrLite.crop()` 收到的一律是
+ *      `renderItem(item)`（沒有 usePreview）的輸出。
+ *   2. **一次只有一個框。** 打碼可以疊很多塊，但「讀哪裡」只有一個答案；
+ *      拖第二次就是換地方，不是加一塊。沒有框 = 整張。
+ *   3. **開進來就先讀整張。** 使用者按下「轉文字」就是要文字，再讓他多按一次
+ *      沒有意義。代價是網頁版第一次會現載 6MB 的引擎，所以載入本身也回報進度。
+ *
+ * 「只要數字」是引擎的 `digits` 模式。它**不是過濾器** —— tesseract 會把每個字
+ * 硬塞成最接近的白名單字元（`INVOICE` 會變成 `0`），所以介面上要講清楚它的用途是
+ * 「框住一格金額」而不是「順便濾掉雜字」。那個模式的 `confidence` 一律回 0，
+ * 所以信心只在全字集模式顯示。
+ */
+function StudioReader({ item, onClose }) {
+  const canvasRef = stUseRef(null);
+  const fullRef = stUseRef(null);
+  const runRef = stUseRef(0);
+  const [region, setRegion] = stUseState(null);
+  const [mode, setMode] = stUseState('text');
+  const [busy, setBusy] = stUseState(null);
+  const [result, setResult] = stUseState(null);
+  const [error, setError] = stUseState(null);
+
+  // 畫布顯示的是預覽尺寸；辨識用的全解析度那張另外留一份，不要每次重畫都重算
+  stUseEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const shown = window.SMImageLocal.renderItem(item, { usePreview: true });
+    canvas.width = shown.width;
+    canvas.height = shown.height;
+    canvas.getContext('2d').drawImage(shown, 0, 0);
+    fullRef.current = null;   // 圖換了，全解析度那張要重算
+  }, [item]);
+
+  const read = stUseCallback(async (nextRegion, nextMode) => {
+    const run = ++runRef.current;
+    const stale = () => runRef.current !== run;
+    setError(null);
+    setResult(null);
+    try {
+      if (!window.SMOcrLite?.available) {
+        throw new Error('這個版本沒有帶 OCR 引擎');
+      }
+      // 引擎第一次要抓 6MB（網頁版是現載的）。沒有這一句，使用者會盯著
+      // 一個不動的進度條好幾秒，不知道是當掉還是在忙。
+      if (!window.SMOcrLite.running) {
+        setBusy({ percent: 5, message: '載入 OCR 引擎…' });
+        await window.SMOcrLite.ready();
+        if (stale()) return;
+      }
+      setBusy({ percent: 15, message: '辨識中…' });
+
+      if (!fullRef.current) {
+        fullRef.current = window.SMImageLocal.renderItem(item);
+      }
+      const shot = window.SMOcrLite.crop(fullRef.current, nextRegion);
+      const out = await window.SMOcrLite.recognize(shot, {
+        mode: nextMode,
+        onProgress: (frac) => {
+          if (!stale()) setBusy({ percent: 15 + Math.round(frac * 85), message: '辨識中…' });
+        },
+      });
+      if (stale()) return;
+      setResult({ ...out, width: shot.width, height: shot.height });
+    } catch (e) {
+      if (!stale()) setError(e.message || String(e));
+    } finally {
+      if (!stale()) setBusy(null);
+    }
+  }, [item]);
+
+  // 開進來就讀整張
+  stUseEffect(() => { read(null, 'text'); }, [read]);
+
+  const { draft, handlers } = useDragBoxes({
+    canvasRef,
+    hitTest: () => -1,
+    // 拖第二次是換地方，不是加一塊 —— 「讀哪裡」只有一個答案
+    onDrag: (d) => { const r = studioRectOf(d); setRegion(r); read(r, mode); },
+    // 點一下（沒有拖）＝ 取消選取，回到整張
+    onTap: () => { setRegion(null); read(null, mode); },
+  });
+
+  const switchMode = (next) => {
+    setMode(next);
+    read(region, next);
+  };
+
+  const copy = async () => {
+    const text = (result?.text || '').trim();
+    if (!text) return;
+    try {
+      // WebView 在 http 下沒有 async clipboard API，退回舊的 execCommand
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        if (!ok) throw new Error('這個瀏覽器不允許程式複製');
+      }
+      window.SMStore?.toast('已複製', 'ok');
+    } catch (e) {
+      window.SMStore?.toast('複製失敗：' + (e.message || e), 'err');
+    }
+  };
+
+  const outline = (b) => ({
+    position: 'absolute',
+    left: `${b.x * 100}%`, top: `${b.y * 100}%`,
+    width: `${b.w * 100}%`, height: `${b.h * 100}%`,
+    border: '1.5px solid var(--mint-3)',
+    boxShadow: '0 0 0 1px rgba(0,0,0,0.45)',
+    pointerEvents: 'none', boxSizing: 'border-box',
+  });
+
+  const text = (result?.text || '').trim();
+
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+      <div style={{
+        flex: 1, minHeight: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '14px', background: 'var(--paper-2)', overflow: 'hidden',
+      }}>
+        <div style={{ position: 'relative', maxWidth: '100%', maxHeight: '100%', touchAction: 'none' }}
+          {...handlers}>
+          <canvas ref={canvasRef}
+            style={{ display: 'block', maxWidth: '100%', maxHeight: '100%', userSelect: 'none' }}/>
+          {region && <div style={outline(region)}/>}
+          {draft && <div style={outline(studioRectOf(draft))}/>}
+        </div>
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--line-soft)', padding: '8px 12px 0', flexShrink: 0 }}>
+        <div className="row" style={{ gap: '6px', alignItems: 'center' }}>
+          <button className={`chip ${mode === 'text' ? 'on' : ''}`} style={{ flexShrink: 0 }}
+            onClick={() => switchMode('text')}>全部文字</button>
+          <button className={`chip ${mode === 'digits' ? 'on' : ''}`} style={{ flexShrink: 0 }}
+            onClick={() => switchMode('digits')}>只要數字</button>
+          <span style={{ fontSize: '11px', color: 'var(--ink-3)', marginLeft: 'auto', textAlign: 'right' }}>
+            {region ? '讀框起來的部分 · 點一下回到整張' : '想只讀一塊就在上面拖一個框'}
+          </span>
+        </div>
+        {mode === 'digits' && (
+          <div style={{ fontSize: '10.5px', color: 'var(--ink-3)', marginTop: '6px', lineHeight: 1.5 }}>
+            只要數字＝把每個字都當成數字讀，不是把文字濾掉 ——
+            所以請框住金額或單號那一格，整張用會讀出一堆亂碼。
+          </div>
+        )}
+      </div>
+
+      {busy && <div style={{ padding: '0 16px' }}><ProgressBar percent={busy.percent} message={busy.message}/></div>}
+
+      {error && (
+        <div style={{ padding: '8px 16px', fontSize: '12px', color: 'var(--warn)' }}>{error}</div>
+      )}
+
+      {!busy && result && (
+        <div style={{
+          padding: '8px 16px 4px', borderTop: '1px solid var(--line-soft)',
+          maxHeight: '30vh', overflowY: 'auto', flexShrink: 0,
+        }}>
+          {text ? (
+            <>
+              <textarea readOnly value={text} rows={Math.min(8, text.split('\n').length + 1)}
+                onFocus={(e) => e.target.select()}
+                style={{
+                  width: '100%', fontSize: '13px', lineHeight: 1.6, resize: 'vertical',
+                  border: '1px solid var(--line-soft)', borderRadius: '8px', padding: '8px',
+                  background: 'var(--paper)', color: 'var(--ink-1)', boxSizing: 'border-box',
+                }}/>
+              <div style={{ fontSize: '10.5px', color: 'var(--ink-3)', marginTop: '4px' }}>
+                {result.lines.length} 行
+                {mode === 'text' && result.confidence
+                  ? ` · 信心 ${Math.round(result.confidence)}` : ''}
+                {result.small ? ' · 這一塊偏小，框大一點會準一些' : ''}
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: '12px', color: 'var(--ink-3)', padding: '4px 0' }}>
+              這一塊讀不出文字 —— 換個範圍，或確認畫面上的字夠大、對比夠明顯。
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="row" style={{
+        borderTop: '1.25px solid var(--line-soft)', background: 'var(--paper)',
+        padding: '4px 4px 10px', alignItems: 'stretch', flexShrink: 0,
+      }}>
+        <div className="row" style={{ flex: 1, minWidth: 0, gap: '2px' }}>
+          <BarBtn ic="✕" label="關閉" onClick={onClose}/>
+          <BarBtn ic="⟳" label="重讀" disabled={!!busy} onClick={() => read(region, mode)}/>
+          <BarBtn ic="⛶" label="整張" disabled={!!busy || !region}
+            onClick={() => { setRegion(null); read(null, mode); }}/>
+        </div>
+        <div style={{
+          flexShrink: 0, display: 'flex', alignItems: 'center',
+          borderLeft: '1px solid var(--line-soft)', paddingLeft: '4px', marginLeft: '2px',
+        }}>
+          <BarBtn ic="⧉" label="複製" accent disabled={!text} onClick={copy}/>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * 標註 —— 方框 / 箭頭 / 螢光筆 / 手寫。
  *
  * 手勢跟打碼是同一套（`useDragBoxes`），連預覽的作法也一樣：畫布上直接顯示
@@ -1525,6 +1749,7 @@ function StudioEditor() {
   const [redacting, setRedacting] = stUseState(false);
   const [annotating, setAnnotating] = stUseState(false);
   const [deskewing, setDeskewing] = stUseState(false);
+  const [reading, setReading] = stUseState(false);
   const [camera, setCamera] = stUseState(false);   // 即時取景（全螢幕）
   const [swapFrom, setSwapFrom] = stUseState(-1);   // 交換模式：等著點第二張
   // null | { mode:'draw' } | { mode:'place', src, aspect }
@@ -2137,6 +2362,10 @@ function StudioEditor() {
     );
   }
 
+  if (reading && current) {
+    return <StudioReader item={current} onClose={() => setReading(false)}/>;
+  }
+
   if (deskewing && current) {
     return (
       <StudioDeskew item={current}
@@ -2261,6 +2490,7 @@ function StudioEditor() {
               <BarBtn ic="▩" label="打碼" onClick={() => { setSheet(null); setRedacting(true); }}/>
               <BarBtn ic="✎" label="標註" on={!!current.annotations?.length}
                 onClick={() => { setSheet(null); setAnnotating(true); }}/>
+              <BarBtn ic="🔤" label="轉文字" onClick={() => { setSheet(null); setReading(true); }}/>
               <BarBtn ic="🎚" label="調整" on={sheet === 'adjust'}
                 onClick={() => setSheet(sheet === 'adjust' ? null : 'adjust')}/>
               <BarBtn ic="🗑" label="刪除" onClick={remove}/>
@@ -3038,7 +3268,7 @@ function Studio() {
 
 Object.assign(window, {
   Studio, StudioEditor, StudioConvert, StudioDocs, StudioPages,
-  StudioCropper, StudioRedactor, StudioAnnotator, StudioDeskew, StudioCamera, DocPreview,
+  StudioCropper, StudioRedactor, StudioAnnotator, StudioReader, StudioDeskew, StudioCamera, DocPreview,
   SignaturePad, SignaturePlacer, SignatureSheet, useSignatures,
   StudioSheet, BarBtn, LayoutIcon, ColorRow,
   STUDIO_LAYOUTS, STUDIO_FRAMES, STUDIO_CROPS, STUDIO_PDF_PAGES, STUDIO_TABS, DOC_TARGETS,
