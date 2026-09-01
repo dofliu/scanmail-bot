@@ -146,7 +146,14 @@ git push -u origin claude/nightly-<主題>
 | [README.md](../README.md) | 新增功能、API 端點數、測試數有變就更新 |
 
 版本號沿用既有慣例：功能增量往 minor 走（v3.15.0 → v3.16.0），修正往 patch 走。
-**唯一來源是 `main.py` 的 `version="x.y.z"`** —— 改那裡就好，
+**唯一來源是 `main.py` 的 `version="x.y.z"`** —— 改完那裡再跑一次
+
+```bash
+python scripts/sync_version.py
+```
+
+它會把 `static/index.html` 的 `?v=` 快取破壞參數與 `mobile/package.json` 一起同步
+（忘了跑也不會安靜地過：pytest 有守門，落後就紅）。
 App 的 versionName / versionCode 由 `scripts/build_mobile.py` 同步（見 ANDROID.md）。
 
 ### 7. 收尾原則

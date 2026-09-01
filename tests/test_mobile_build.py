@@ -72,6 +72,35 @@ def transformed_html():
     return build_mobile.transform_index_html(html, "http://192.168.1.50:8000", "3.4.0")
 
 
+def test_cache_busters_match_the_app_version():
+    """index.html 的 ?v= 從 v3.15.0 之後凍了十幾個版本 —— 快取破壞機制實質失效。
+
+    這一條就是「不准再凍住」：每個 ?v= 都要等於 main.py 的版號。
+    改完版號跑 `python scripts/sync_version.py` 就會同步；忘了跑，這裡會紅。
+    """
+    version = build_mobile.read_version()
+    html = (STATIC / "index.html").read_text(encoding="utf-8")
+    busters = re.findall(r"\?v=(\d+\.\d+\.\d+)", html)
+    # 機制本身要在 —— 全部拿掉也是一種「不會再過期」，但那不是修好
+    assert len(busters) >= 15, f"index.html 只剩 {len(busters)} 個 ?v=，快取破壞被拿掉了？"
+    stale = sorted(set(v for v in busters if v != version))
+    assert not stale, (
+        f"index.html 的 ?v= 落後於 main.py（{version}）：{stale} —— "
+        "請跑 python scripts/sync_version.py"
+    )
+
+
+def test_mobile_package_json_matches_main_py():
+    """package.json 的版號不進 APK，純顯示用 —— 但錯的版號比沒有版號更誤導。"""
+    import json
+    version = build_mobile.read_version()
+    pkg = json.loads((ROOT / "mobile" / "package.json").read_text(encoding="utf-8"))
+    assert pkg["version"] == version, (
+        f"mobile/package.json 是 {pkg['version']}、main.py 是 {version} —— "
+        "請跑 python scripts/sync_version.py"
+    )
+
+
 def test_transform_matches_current_index_html():
     """所有替換規則都必須命中 —— 沒命中就會丟 BuildError。"""
     html = (STATIC / "index.html").read_text(encoding="utf-8")

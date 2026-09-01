@@ -274,6 +274,16 @@ def transform_index_html(html: str, api_base: str, version: str, offline: bool =
     sub(r'<script type="text/babel" src="js/([a-z0-9-]+)\.jsx',
         r'<script src="js/\1.js', "JSX script 標籤", expected=5)
 
+    # 快取破壞參數改成正在打包的版本。static/index.html 由
+    # scripts/sync_version.py 維護、pytest 有守門，理論上進來就是對的 ——
+    # 這裡再寫一次是保險：就算來源凍住了，App 也不會把過期的 ?v= 帶出門。
+    # 不用 sub() 的嚴格計數：script 標籤的數量本來就會隨功能成長。
+    html, n_busters = re.subn(r"\?v=\d+\.\d+\.\d+", f"?v={version}", html)
+    if n_busters < 15:
+        raise BuildError(
+            f"index.html 只剩 {n_busters} 個 ?v= 快取破壞參數 —— 結構可能改了"
+        )
+
     # 執行環境旗標（必須在 js/config.js 之前）
     default_api = api_base.rstrip("/")
     inject = (
