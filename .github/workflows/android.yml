@@ -102,6 +102,11 @@ jobs:
       - name: Test live viewfinder
         working-directory: mobile
         run: npm run test:live
+      # 裝置端 OCR：跑真的 wasm 與真的英文語言包（資產來自 npm ci 裝好的
+      # node_modules），fixture 是現做的掃描型 PDF —— 真的抽不到文字的那種
+      - name: Test on-device OCR
+        working-directory: mobile
+        run: npm run test:ocr
 
       - name: Build web assets for the app
         env:

@@ -50,6 +50,18 @@ VENDOR_FILES = [
     ("react-dom/umd/react-dom.production.min.js", "react-dom.production.min.js"),
     ("pdfjs-dist/build/pdf.min.js", "pdf.min.js"),
     ("pdfjs-dist/build/pdf.worker.min.js", "pdf.worker.min.js"),
+    # ── OCR（裝置端，約 6MB）──
+    # 檔名不能改：core 的 .js 會用**相對於自己**的路徑去載同名的 .wasm，
+    # 兩個檔案必須同名、同目錄。core 挑的是 simd-lstm 版 ——
+    # 打包的語言包是 LSTM 模型，legacy 引擎用不到，帶了就是多 600KB。
+    ("tesseract.js/dist/tesseract.min.js", "tesseract.min.js"),
+    ("tesseract.js/dist/worker.min.js", "tesseract-worker.min.js"),
+    ("tesseract.js-core/tesseract-core-simd-lstm.js", "tesseract-core-simd-lstm.js"),
+    ("tesseract.js-core/tesseract-core-simd-lstm.wasm", "tesseract-core-simd-lstm.wasm"),
+    # 英文語言包。取 4.0.0_best_int（2.9MB）而不是 4.0.0（10.7MB）——
+    # best_int 是同一個 best 模型量化成整數，差 7.8MB 換來的辨識率差距，
+    # 對「發票金額 / 單號 / 日期」這種印刷體來說看不出來。
+    ("@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz", "eng.traineddata.gz"),
 ]
 
 # ── 字型 ──
@@ -247,6 +259,16 @@ def transform_index_html(html: str, api_base: str, version: str, offline: bool =
         "'vendor/pdf.worker.min.js'", "pdf.js worker")
     sub(r'<link href="https://fonts\.googleapis\.com/[^"]+" rel="stylesheet"/>',
         '<link rel="stylesheet" href="vendor/fonts.css"/>', "Google Fonts")
+    sub(r'<script src="https://cdn\.jsdelivr\.net/npm/tesseract\.js@[^"]+"></script>',
+        '<script src="vendor/tesseract.min.js"></script>', "tesseract.js")
+    # 三個 OCR 資產的位址是 JS 字串，不是 src//href 屬性 —— 一個一個換掉，
+    # 漏掉任何一個，離線版都會在使用者按下轉檔的那一刻才去連 CDN 然後失敗。
+    sub(r"worker: 'https://cdn\.jsdelivr\.net/npm/tesseract\.js@[^']+'",
+        "worker: 'vendor/tesseract-worker.min.js'", "OCR worker")
+    sub(r"core: 'https://cdn\.jsdelivr\.net/npm/tesseract\.js-core@[^']+'",
+        "core: 'vendor/tesseract-core-simd-lstm.js'", "OCR wasm core")
+    sub(r"lang: 'https://cdn\.jsdelivr\.net/npm/@tesseract\.js-data/[^']+'",
+        "lang: 'vendor'", "OCR 語言包")
 
     # 已預先編譯，改載入 .js
     sub(r'<script type="text/babel" src="js/([a-z0-9-]+)\.jsx',
@@ -266,11 +288,22 @@ def transform_index_html(html: str, api_base: str, version: str, offline: bool =
     )
     sub(r"<head>\n", inject, "注入 App 執行環境旗標")
 
+    # 屬性上的外部資源。這一條擋得住 <script src>，擋不住寫在 JS 字串裡的網址 ——
+    # 所以下面再掃一次整份檔案。
     remaining = re.findall(r'(?:src|href)="(https?://[^"]+)"', html)
+    # OCR 的三個資產位址就是 JS 字串，pdf.js 的 worker 也是。這些如果沒被換掉，
+    # App 會一路裝到手機上、直到使用者真的用到那個功能才在離線時失敗 ——
+    # 那時候已經來不及了，所以在這裡就攔下來。
+    remaining += [
+        u for u in re.findall(r'https?://[^\s"\'<>]+', html)
+        if any(host in u for host in ("cdn.jsdelivr.net", "cdnjs.cloudflare.com",
+                                      "unpkg.com", "fonts.googleapis.com",
+                                      "fonts.gstatic.com"))
+    ]
     if remaining:
         raise BuildError(
             "改寫後仍有指向外部網站的資源，App 離線時會載入失敗：\n  "
-            + "\n  ".join(remaining)
+            + "\n  ".join(dict.fromkeys(remaining))
         )
     return html
 

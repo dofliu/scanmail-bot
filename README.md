@@ -336,7 +336,11 @@ cd mobile/android && ./gradlew assembleDebug
   而且附了 ToUnicode 對照表，文字可以複製、可以搜尋。
 * **PDF 讀取**：PDF 裡沒有「段落」這種東西，只有一堆帶座標的文字片段。
   靠字級（比內文大就是標題）、行距（跳太多就是新段落）、行首符號還原結構。
-  掃描出來的圖片型 PDF 抽不到文字，會明確告訴你需要 OCR，而不是給一份空白檔。
+  掃描出來的圖片型 PDF 沒有文字可以抽 —— **抽不到文字的那一頁**會改走裝置端 OCR
+  （v3.26.0，英文與數字），認出來的行換算成 PDF 座標之後，跟抽出來的走同一套
+  段落還原，下游分不出這一頁是抽的還是認的。判斷放在每一頁而不是整份文件上，
+  所以「電子檔正文 + 掃描的附件」這種常見組合，附件那幾頁一樣讀得到。
+  中文還沒有（語言包大一個量級，辨識率也不如後端的 PaddleOCR）。
 * **DOCX**：是一包 zip 裝 XML，用瀏覽器內建的 `CompressionStream` 自己拆包打包，
   不必引入額外的函式庫。
 * **照片轉 PDF 不掉畫質**：PDF 的 `/DCTDecode` 濾鏡吃的就是 JPEG 原始位元組，
@@ -549,6 +553,7 @@ npm run test:sign      # 簽名蓋章：把頁面畫出來數墨點，確認落�
 npm run test:scan      # 邊界偵測：合成有標準答案的影像，量角點誤差
 npm run test:config    # 伺服器位址的儲存與救援（每個情境都真的載入一次頁面）
 npm run test:live      # 即時取景：用 canvas.captureStream 當假相機走完整條路
+npm run test:ocr       # 裝置端 OCR：跑真的 wasm 與語言包，fixture 是現做的掃描型 PDF
 npm run test:studio    # 離線版介面（需要先跑過 build_mobile.py --offline）
 
 # 開發模式啟動

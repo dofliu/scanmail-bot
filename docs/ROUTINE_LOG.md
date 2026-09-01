@@ -9,6 +9,30 @@
 
 ---
 
+## 2026/09/01 — 裝置端 OCR M1（數字與英文）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `STATUS.yaml` `roadmap[0]`：裝置端 OCR M1。**開工時沒有 open PR**（#52 已合併），乾淨地接 `roadmap[0]` |
+| 分支 | `claude/mobile-file-management-akeyaf`（從 `origin/main` `7ee4707` 長出來） |
+| PR | [#53](https://github.com/dofliu/scanmail-bot/pull/53)（草稿） |
+| 結果 | 完成，v3.26.0。新引擎 `static/js/ocr-lite.js`（tesseract.js LSTM / WebAssembly）；`doc-local.js` 的 `fromPdf()` 對**抽不到文字的那一頁**改走 OCR。全綠 —— pytest **289 passed + 3 skipped**、瀏覽器 **498** 項（介面 130 / 圖片 99 / 取景 56 / 簽名 52 / 文件 51 / 掃描 34 / OCR 30 / 位址 25 / 頁面 21） |
+| 開工第一件事（上一筆交代的） | **量體積**。worker 111KB + `tesseract.min.js` 63KB + SIMD-LSTM core（`.js` 122KB + `.wasm` 2.87MB）+ 英文語言包 `4.0.0_best_int` 2.9MB = **+6.1MB**。語言包沒取完整的 `4.0.0`（10.7MB）——差 7.8MB，印刷體的金額 / 單號看不出差別。結論是 **M1 不用再拆**：6.1MB 在專案既有的判準內（去背 +15MB、ffmpeg 25–30MB 都是「評估過決定不做」的量級），一個晚上做得完 |
+| 沒有為 OCR 另寫段落還原 | `fromPdf()` 本來就吃「一堆帶座標的行」去還原標題 / 段落 / 項目符號，而 OCR 給的正好是這個。行座標換算成 PDF 的左下原點、單位點之後，下游分不出這一頁是抽出來的還是認出來的 —— 這是整件事最省力的地方 |
+| 判斷放在每一頁 | 不是整份文件。一份 PDF 常常是電子檔正文 + 掃描的附件，整份一起判會讓附件跟以前一樣讀不到。測試把一頁電子檔跟一頁掃描件用 `SMPDFLite.compose` 合成一份，驗 `ocred === [2]` |
+| 一個真的坑 | **tesseract.js 預設把 worker 跑在 `blob:` URL 上**，emscripten 的 `scriptDirectory` 因此是空字串，core 解不出自己 `.wasm` 的相對路徑，直接炸 `Failed to parse URL from tesseract-core-simd-lstm.wasm`。`workerBlobURL: false` 修掉（代價是 worker 必須同源，兩個版本都成立），順便留住比較小的分離式 core（2.87+0.12MB，單檔內嵌版要 3.86MB） |
+| 一個自己嚇自己的 | 本來還多寫了一層「把三個資產位置對 `document.baseURI` 解成絕對網址」，理由是「worker 裡的相對路徑是相對於 worker 自己，`langPath: 'vendor'` 會變成 `vendor/vendor`」。**mutation 測試把那層拿掉，30 條全過** —— 去翻 tesseract.js 的原始碼才看到 `["corePath","workerPath","langPath"].forEach(...new URL(t, window.location.href))`，它自己早就解過了。那層刪掉，但它帶出來的測試留著（harness 刻意掛在 `/app/` 子目錄底下），那個行為哪天變了才會有人知道 |
+| 白名單不是過濾器 | 實測：`tessedit_char_whitelist` 開數字之後，`INVOICE NO. AB-20260901` 出來是 `0.-20260901` —— tesseract 把每個字**硬塞成最接近的白名單字元**，不是丟掉。所以 `digits` 只在呼叫端明講時用，永遠不是預設 |
+| render 寬度：**第一次猜錯，量完改掉** | 原本照「scale 1 的 A4 只有 595px 寬、10pt 內文大寫字高剩 7px」推出 `OCR_RENDER_WIDTH = 2000`。第一版測試想證明「字太小就認不出來」，結果**紅了** —— 合成的字畫到 11px，只要邊緣乾淨 tesseract 照樣全對。改成量真實的那條路（掃描件經過 JPEG、再被 render 縮小），跨五種寬度得到：595px 信心 84 且多讀出一個原文沒有的句點、**1000px 就到頂**（信心 95 全對）、1500/2000px 沒有更準但 2000px 慢一倍（625ms vs 298ms）。最後定 **1600**，並且明講**那是留餘裕、不是量出來的** —— 合成頁面沒有雜點 / 歪斜 / JPEG 壓縮痕跡，而那三樣正是解析度換回來的。數字與重訂的作法寫進註解與 TODO |
+| 測試 | +38。新的 `npm run test:ocr` 30 條（跑**真的** wasm 與語言包，掃描件 fixture 是現做的 canvas → JPEG → `imagesToPdf`，真的沒有文字層）+ 8 條 pytest 接線守門。測試不抄常數，`OCR_RENDER_WIDTH` 直接從 `doc-local.js` 讀出來 |
+| Mutation 檢查（**這次真的有做事**） | 該紅的會紅：拿掉 `workerBlobURL: false` → 整套掛住（引擎起不來，兩條模組檢查過完就停在第一次辨識）；OCR 不再逐頁判斷 → 2 紅；render 寬度改回 595 → 3 紅；`small` 永遠 false → 1 紅。**另外抓出四個當時沒人在守的決定**：①那層多餘的路徑解析（0 紅 → 刪掉）②**座標的上下翻轉**（0 紅）③**`OCR_CAP_RATIO`**（0 紅）④**信心門檻**（0 紅）。後三個補上該有的驗證之後：翻轉 1 紅、`OCR_CAP_RATIO` 1 紅、信心門檻 2 紅 |
+| 補測試時學到的兩件事 | ①**「順序顛倒」用內容或順序的斷言抓不到。** 少了左下原點的翻轉，`fromPdf` 換段落算的 `prev.y - line.y` 一律變成負數，於是整頁黏成一段 —— 但每個字都還在，連順序都沒變（OCR 回傳本來就是由上而下，我沒有再排序過）。真正守得住的斷言是**數有幾段**。②**第一版的段落 fixture 白做了**：那一行以句號收尾，而換段落有兩條規則（行距變大、上一行以句號收尾），句號那條先成立，行距這條根本沒被測到。改成整頁沒有任何一行以句號結束，這條才真的在測行距 |
+| 既有守門測試自己抓到的 | `test_service_worker_caches_all_loaded_scripts` 紅了 —— `static/sw.js` 的預快取清單少了 `js/ocr-lite.js`。沒人提醒，是那條測試自己抓到的 |
+| 順手做的 | 打包後的外部連結檢查本來只掃 `src=` / `href=` 屬性，掃不到寫在 JS 字串裡的網址（pdf.js 的 worker 一直是靠一條專門的替換規則活著）。現在多掃一次整份 HTML 的已知 CDN 網域 —— OCR 的三個位址正好都是 JS 字串 |
+| 環境注意事項 | 沿用前幾筆：①**不要跑 `playwright install`**，用 `PW_CHROMIUM=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm run test:xxx` ②`pip install -r requirements.txt` 之後要補 `pip install cffi pytest`，`pip install` 加 `--timeout 120` ③跑 `npm run test:studio` 前先 `python3 scripts/build_mobile.py --offline` ④**這次多一項**：`npm ci` 之後 `mobile/node_modules` 才會有 tesseract 的三個套件，`npm run test:ocr` 與 `build_mobile.py` 都靠它們 ⑤`tessdata.projectnaptha.com` 在這個容器連不出去（proxy 擋掉），語言包要從 npm 的 `@tesseract.js-data/eng` 拿 |
+| 刻意沒做 | ①**中文（M2）** ——語言包大一個量級、辨識率不如後端 PaddleOCR，要做成使用者自己選要不要下載。②**「圖片轉文字」的入口** —— `SMOcrLite.recognize()` 已經吃任何 canvas，缺的純粹是介面，順手可以把 `digits` 模式一起接出來。③**取消鈕** —— 20 頁的掃描件要十幾秒，進度有了但停不下來。④**轉檔面板的介面測試** —— studio 那 130 條裡一條都沒走到轉檔面板，所以「第 N 頁是 OCR 認的」那則提醒只有 pytest 原始碼守門。四項都寫進「後續工作」 |
+| 下一步 | `roadmap[0]` 換成**裝置端 OCR M2（中文選配）**。M1 的骨架可以直接用：`ocr-lite.js` 的 `LANG` 現在寫死 `'eng'`，要改成可以帶第二個語言；`createWorker` 吃 `['eng','chi_tra']` 這種陣列。**難處不在程式而在語言包怎麼送到裝置上**：`@tesseract.js-data/chi_tra` 的 `4.0.0_best_int` 大約 10MB 級距（開工先量，作法照這次：`npm pack` 之後 `tar tzvf` 看檔案大小），直接打包進 APK 會讓 App 又胖一截，所以應該做成**使用者自己選要不要下載**：離線版沒有網路可以下載，這一點要先想清楚 —— 可能的作法是離線版乾脆不提供中文、或做成另一個「完整語言包」的 APK 變體。另外要先量**中文的辨識率到底差多少**（後端 PaddleOCR 是同一份掃描件的對照組），差太多的話「做成選配」本身就要重新考慮。測試照 `mobile/test/ocr-lite.test.mjs` 那一套加，畫中文要注意容器裡的字型 —— 合成圖用的是 DejaVu Sans，沒有中文字，得換一個有 CJK 的字族 |
+
 ## 2026/08/09 — 標註工具 M2（螢光筆 / 手寫）
 
 | 項目 | 內容 |

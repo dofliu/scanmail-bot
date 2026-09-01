@@ -442,6 +442,76 @@ def test_doc_conversion_is_fully_local():
     assert fetches == ["url || FONT_URL"], f"doc-local.js 有預期外的 fetch：{fetches}"
 
 
+def test_ocr_engine_is_self_contained():
+    """OCR 也是裝置端引擎 —— 不能打後端，資產位置一律由 SM_OCR_PATHS 給。"""
+    source = _strip_comments((JS / "ocr-lite.js").read_text(encoding="utf-8"))
+    for forbidden in ("window.API", "/api/", "SM_CONFIG", "http://", "https://"):
+        assert forbidden not in source, f"ocr-lite.js 不該用到 {forbidden}"
+    for symbol in ("window.SMOcrLite", "SM_OCR_PATHS", "createWorker"):
+        assert symbol in source, f"ocr-lite.js 少了 {symbol}"
+
+
+def test_ocr_worker_is_not_a_blob():
+    """tesseract.js 預設把 worker 包成 blob:，那樣 wasm core 的相對路徑解不出來。"""
+    source = _strip_comments((JS / "ocr-lite.js").read_text(encoding="utf-8"))
+    assert "workerBlobURL: false" in source, \
+        "少了 workerBlobURL: false —— core 會在載自己的 .wasm 時炸 Failed to parse URL"
+
+
+def test_scanned_pdf_pages_fall_back_to_ocr():
+    """判斷要在**每一頁**上做 —— 一份 PDF 可以前面是電子檔、後面附件是掃描的。"""
+    source = (JS / "doc-local.js").read_text(encoding="utf-8")
+    loop = source.index("for (let n = 1; n <= pdf.numPages; n++)")
+    call = source.index("await ocrPage(")
+    end = source.index("const real = lines.filter(Boolean)")
+    assert loop < call < end, "OCR 的分支不在逐頁的迴圈裡"
+    assert "if (!pageLines.length && ocrReady)" in source, \
+        "OCR 應該只在這一頁抽不到任何文字時才跑"
+
+
+def test_ocr_render_width_is_high_enough():
+    """render 太小的話內文字高剩個位數像素，整段掉字（見 npm run test:ocr 的解析度那幾條）。"""
+    source = (JS / "doc-local.js").read_text(encoding="utf-8")
+    m = re.search(r"const OCR_RENDER_WIDTH = (\d+)", source)
+    assert m, "找不到 OCR_RENDER_WIDTH"
+    assert int(m.group(1)) >= 1200, "render 寬度太小，掃描件的內文會認不出來"
+
+
+def test_build_bundles_every_ocr_asset():
+    """少打包任何一個，App 都會在使用者按下轉檔的那一刻才去連 CDN，然後離線失敗。"""
+    names = [dest for _, dest in build_mobile.VENDOR_FILES]
+    for required in ("tesseract.min.js", "tesseract-worker.min.js",
+                     "tesseract-core-simd-lstm.js", "tesseract-core-simd-lstm.wasm",
+                     "eng.traineddata.gz"):
+        assert required in names, f"vendor 少了 {required}"
+    # core 的 .js 是用**相對於自己**的路徑去載同名的 .wasm，兩個檔名不能對不上
+    assert "tesseract-core-simd-lstm.js".removesuffix(".js") == \
+        "tesseract-core-simd-lstm.wasm".removesuffix(".wasm")
+
+
+def test_transformed_html_bundles_the_ocr_assets(transformed_html):
+    """三個位址寫在 JS 字串裡，src/href 那條檢查抓不到 —— 這裡逐一確認換掉了。"""
+    for local in ("vendor/tesseract.min.js", "vendor/tesseract-worker.min.js",
+                  "vendor/tesseract-core-simd-lstm.js", "lang: 'vendor'"):
+        assert local in transformed_html, f"打包後的 index.html 少了 {local}"
+    assert "jsdelivr" not in transformed_html, "還留著 jsdelivr 的網址"
+
+
+def test_doc_panel_says_which_pages_were_ocred():
+    """OCR 的字可能有錯 —— 只說「這份用了 OCR」等於要使用者整份重讀。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "source.doc.ocred && source.doc.ocred.length > 0" in source, \
+        "沒有在有 OCR 頁面時才顯示提醒"
+    assert "source.doc.ocred.join(" in source, "提醒沒有列出是哪幾頁"
+
+
+def test_index_loads_the_ocr_engine_before_doc_local():
+    """doc-local.js 的掃描頁分支會問 window.SMOcrLite，順序反了就永遠是「不可用」。"""
+    html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
+    assert html.index("SM_OCR_PATHS") < html.index("js/ocr-lite.js")
+    assert html.index("js/ocr-lite.js") < html.index("js/doc-local.js")
+
+
 def test_every_input_format_reaches_every_output_format():
     """中間隔一層文件模型，所以格式之間是任意組合，不是寫死的每一對轉換。"""
     source = (JS / "doc-local.js").read_text(encoding="utf-8")
