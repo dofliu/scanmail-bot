@@ -9,6 +9,21 @@
 
 ---
 
+## 2026/09/01（第四筆）— 快取破壞參數重新活過來（v3.28.1）
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | `roadmap[0]`：版號一致性。PR #55 已合併，乾淨地接下一項 |
+| 分支 | `claude/mobile-file-management-akeyaf`（從 `origin/main` `4167573` 重開） |
+| PR | 見分支上的草稿 PR |
+| 結果 | 完成，v3.28.1（修正走 patch）。pytest **306 passed + 3 skipped**（+2），studio 139 全綠（動了 `static/index.html` 所以重打包再跑一次介面測試；其餘引擎測試不讀 index.html，不用重跑） |
+| 修的是機制不是字串 | `static/index.html` 20 個 `?v=` 全凍在 3.15.0（落後十三版）、`mobile/package.json` 同。新 `scripts/sync_version.py`：從 `main.py` 同步、可重複跑、`?v=` 全部消失會直接報錯。兩條 pytest 守門（`test_cache_busters_match_the_app_version`、`test_mobile_package_json_matches_main_py`），錯誤訊息直接寫該跑哪個指令 |
+| 守門先證明會咬 | 順序刻意排成：先 bump `main.py` → 跑守門 → **紅**（重演「安靜凍住」的失敗模式）→ 跑 `sync_version.py` → 綠。同步腳本第二次跑輸出「已經同步…沒有東西要改」（可重複跑驗過） |
+| 打包時的保險 | `build_mobile.py` 的 `transform_index_html` 把每個 `?v=` 再改寫成打包版本（injected 的 capacitor-bridge 加上來源的 20 個 = www 裡 21 個全是 3.28.1）；`?v=` 少於 15 個會拒絕打包 —— 把機制拿掉也是一種「永不過期」，不算修好。這裡刻意**不用** `sub()` 的嚴格計數：script 標籤數量本來就會隨功能成長 |
+| 契約更新 | `docs/DAILY_ROUTINE.md` 版本號那段補上「改完跑 `python scripts/sync_version.py`」 |
+| 環境注意事項 | 沿用前幾筆 |
+| 下一步 | `roadmap[0]` 回到**裝置端 OCR M2（中文選配）**。開工前先做兩個量測（第一筆 ROUTINE_LOG 交代過的）：①`npm pack @tesseract.js-data/chi_tra && tar tzvf` 看語言包實際大小（估 10MB 級距）②拿同一張中文合成掃描件比 tesseract.js 與後端 PaddleOCR 的辨識率，差太多的話「做成選配」這個前提要重想。**離線版沒有網路可下載語言包** —— 可能的結論是離線版不提供中文、或另出一個「完整語言包」APK 變體，要先想清楚再動手。`ocr-lite.js` 的 `LANG` 目前寫死 `'eng'`，`createWorker` 吃 `['eng','chi_tra']` 陣列；合成中文測試圖要換有 CJK 的字族（容器裡 DejaVu 沒有中文字） |
+
 ## 2026/09/01（第三筆）— 圖片轉文字的入口
 
 | 項目 | 內容 |
