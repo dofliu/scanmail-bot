@@ -15,7 +15,7 @@
 |------|------|
 | 主題 | `STATUS.yaml` `roadmap[0]`：裝置端 OCR M1。**開工時沒有 open PR**（#52 已合併），乾淨地接 `roadmap[0]` |
 | 分支 | `claude/mobile-file-management-akeyaf`（從 `origin/main` `7ee4707` 長出來） |
-| PR | 見分支上的草稿 PR |
+| PR | [#53](https://github.com/dofliu/scanmail-bot/pull/53)（草稿） |
 | 結果 | 完成，v3.26.0。新引擎 `static/js/ocr-lite.js`（tesseract.js LSTM / WebAssembly）；`doc-local.js` 的 `fromPdf()` 對**抽不到文字的那一頁**改走 OCR。全綠 —— pytest **289 passed + 3 skipped**、瀏覽器 **498** 項（介面 130 / 圖片 99 / 取景 56 / 簽名 52 / 文件 51 / 掃描 34 / OCR 30 / 位址 25 / 頁面 21） |
 | 開工第一件事（上一筆交代的） | **量體積**。worker 111KB + `tesseract.min.js` 63KB + SIMD-LSTM core（`.js` 122KB + `.wasm` 2.87MB）+ 英文語言包 `4.0.0_best_int` 2.9MB = **+6.1MB**。語言包沒取完整的 `4.0.0`（10.7MB）——差 7.8MB，印刷體的金額 / 單號看不出差別。結論是 **M1 不用再拆**：6.1MB 在專案既有的判準內（去背 +15MB、ffmpeg 25–30MB 都是「評估過決定不做」的量級），一個晚上做得完 |
 | 沒有為 OCR 另寫段落還原 | `fromPdf()` 本來就吃「一堆帶座標的行」去還原標題 / 段落 / 項目符號，而 OCR 給的正好是這個。行座標換算成 PDF 的左下原點、單位點之後，下游分不出這一頁是抽出來的還是認出來的 —— 這是整件事最省力的地方 |
