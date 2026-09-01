@@ -29,6 +29,9 @@ const PORT = 8977;
 const RENDER_WIDTH = Number(
   /const OCR_RENDER_WIDTH = (\d+)/.exec(
     fs.readFileSync(path.join(STATIC, 'js/doc-local.js'), 'utf8'))[1]);
+const MIN_CROP = Number(
+  /const MIN_CROP_WIDTH = (\d+)/.exec(
+    fs.readFileSync(path.join(STATIC, 'js/ocr-lite.js'), 'utf8'))[1]);
 
 /** App 內 vendor/ 底下那五個檔案，檔名跟 scripts/build_mobile.py 打包出來的一致 */
 const VENDOR = {
@@ -410,6 +413,90 @@ const off = await page.evaluate(async () => {
 });
 check('ocr: off 時維持原本那句明確的錯誤', /需要 OCR/.test(off), off);
 
+
+
+// ── 裁一塊區域出來 ──────────────────────────────────────
+// 這是「圖片轉文字」那個介面真正走的路：使用者框住發票上的一行金額，
+// 而那一塊在原圖上可能只有兩三百像素寬。
+const cropped = await page.evaluate(async () => {
+  // 一張低解析度的「手機拍的發票」：整張 500px 寬，字只有 11px
+  const tiny = window.__draw([
+    { text: 'TOTAL 3,982.50 USD', x: 16, y: 30, size: 11 },
+  ], { width: 500, height: 60 });
+  const region = { x: 0.02, y: 0.3, w: 0.55, h: 0.5 };
+
+  // (a) 走 crop()：會放大到 MIN_CROP_WIDTH
+  const up = window.SMOcrLite.crop(tiny, region);
+  const a = await window.SMOcrLite.recognize(up, { mode: 'digits' });
+
+  // (b) 同樣裁一塊，但不放大 —— 對照組
+  const raw = document.createElement('canvas');
+  raw.width = Math.round(region.w * tiny.width);
+  raw.height = Math.round(region.h * tiny.height);
+  const rc = raw.getContext('2d');
+  rc.fillStyle = '#fff';
+  rc.fillRect(0, 0, raw.width, raw.height);
+  rc.drawImage(tiny, region.x * tiny.width, region.y * tiny.height,
+               region.w * tiny.width, region.h * tiny.height, 0, 0, raw.width, raw.height);
+  const b = await window.SMOcrLite.recognize(raw, { mode: 'digits' });
+
+  // (c) 整張（不給 region）
+  const whole = window.SMOcrLite.crop(tiny);
+  return {
+    up: { w: up.width, text: a.text.trim() },
+    raw: { w: raw.width, text: b.text.trim() },
+    whole: { w: whole.width, h: whole.height },
+  };
+});
+check('小塊區域會被放大到 MIN_CROP_WIDTH',
+  cropped.up.w === MIN_CROP, `放大後是 ${cropped.up.w}px`);
+check('放大之後金額讀對了', cropped.up.text.includes('3,982.50'),
+  JSON.stringify(cropped.up.text));
+// **這一條才是 crop() 存在的理由。** 同一塊區域不放大就讀錯：
+// 量到的是 `03.962.50` —— 逗號變句點、8 變 6。放大不會憑空生出資訊，
+// 但 LSTM 吃的是固定高度的條帶，把小字內插到它習慣的尺度確實會準一些。
+check('同一塊不放大就會讀錯（所以放大不是裝飾）',
+  !cropped.raw.text.includes('3,982.50'),
+  `不放大也讀對了：${JSON.stringify(cropped.raw.text)} —— 這條測試就證明不了 crop() 有用`);
+check('不給 region 就是整張', cropped.whole.w >= 500,
+  `整張變成 ${cropped.whole.w}x${cropped.whole.h}`);
+console.log(`    （${cropped.raw.w}px「${cropped.raw.text}」`
+  + ` → ${cropped.up.w}px「${cropped.up.text}」）`);
+
+const edges = await page.evaluate(() => {
+  const c = window.__draw([{ text: 'X', x: 10, y: 40, size: 30 }], { width: 200, height: 60 });
+  const zero = window.SMOcrLite.crop(c, { x: 0.5, y: 0.5, w: 0, h: 0 });
+  const over = window.SMOcrLite.crop(c, { x: 0.9, y: 0.9, w: 2, h: 2 });   // 大半在圖外
+
+  // 透明來源：拉正之後的邊角是透明的，裁到那裡如果不填白底，
+  // 送進去的是「透明」而不是「白紙」，tesseract 在黑底上什麼都讀不到
+  const clear = document.createElement('canvas');
+  clear.width = 300; clear.height = 100;
+  const cc = clear.getContext('2d');
+  cc.fillStyle = '#000000';
+  cc.font = '40px "DejaVu Sans", sans-serif';
+  cc.fillText('AB12', 10, 60);        // 只有字，其餘完全透明
+  const filled = window.SMOcrLite.crop(clear, { x: 0, y: 0, w: 1, h: 1 });
+  const px = filled.getContext('2d').getImageData(0, 0, filled.width, filled.height).data;
+  let transparent = 0;
+  for (let i = 3; i < px.length; i += 4) if (px[i] < 250) transparent++;
+
+  return {
+    zero: { w: zero.width, h: zero.height },
+    over: { w: over.width, h: over.height },
+    srcW: c.width, srcH: c.height,
+    transparent,
+  };
+});
+check('拖出零寬度的框不會炸（手一抖就會發生）',
+  edges.zero.w >= 1 && edges.zero.h >= 1, JSON.stringify(edges.zero));
+// 沒有夾回圖內的話，`w = r.w * sw` 會算出比原圖還大的來源矩形，
+// 裁出來的 canvas 跟著膨脹 —— 多出來的部分是空白，白佔記憶體
+check('框拖到圖外，裁出來的不會比原圖大',
+  edges.over.w <= edges.srcW && edges.over.h <= edges.srcH,
+  `原圖 ${edges.srcW}x${edges.srcH}，裁出 ${edges.over.w}x${edges.over.h}`);
+check('裁出來一定是不透明的（拉正後的邊角是透明的）',
+  edges.transparent === 0, `有 ${edges.transparent} 個透明像素`);
 
 // ── 收尾 ────────────────────────────────────────────────
 check('release() 之後還能再認一次', await page.evaluate(async () => {

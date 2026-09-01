@@ -60,6 +60,26 @@
   /** 只要數字的模式；見上面第 3 點 —— 這不是「過濾」，是「強迫每個字都變成這些字元之一」 */
   const DIGITS = '0123456789.,-/:';
 
+  /**
+   * 送進辨識之前，一塊裁出來的區域至少要有這麼寬（像素）。
+   *
+   * 這是 v3.26.0 那次量出來的同一件事的另一面：整頁 A4 的量測顯示
+   * 乾淨頁面在 1000px 寬到頂（信心 95、全對），595px 會掉到 84。
+   * 裁一小塊出來時風險更大 —— 使用者框住發票上的一行金額，那一塊在原圖上
+   * 可能只有兩三百像素寬，字高剩個位數。
+   *
+   * **放大不會憑空生出資訊**，但 tesseract 的 LSTM 吃的是固定高度的條帶，
+   * 把小字內插放大到它習慣的尺度確實會準一些。這是量出來的，不是想當然 ——
+   * 見 `npm run test:ocr` 的「小塊區域放大之後才讀得出來」那一條。
+   */
+  const MIN_CROP_WIDTH = 1000;
+
+  /** 放大倍率上限。再往上只是讓手機吃一張更大的 canvas，內插也補不出細節 */
+  const MAX_CROP_SCALE = 4;
+
+  /** 一張圖最多這麼多像素（約 4000×3000）—— 手機上再大就有 OOM 的風險 */
+  const MAX_PIXELS = 12e6;
+
   const LANG = 'eng';
 
   let worker = null;
@@ -183,6 +203,45 @@
     };
   }
 
+  /**
+   * 裁一塊區域出來、必要時放大到認得動的尺寸。
+   *
+   * @param source  canvas / image —— **要傳全解析度的那一張**。
+   *                從預覽畫布裁出來的小框只有幾十個像素，怎麼放大都沒用：
+   *                資訊在縮圖的時候就已經丟掉了。
+   * @param region  `{x, y, w, h}`，**相對座標 0..1**（`useDragBoxes` 回傳的格式）。
+   *                傳 null / 省略 = 整張。
+   * @returns canvas，可以直接餵給 `recognize()`
+   */
+  function crop(source, region) {
+    const sw = source.width;
+    const sh = source.height;
+    const r = region || { x: 0, y: 0, w: 1, h: 1 };
+
+    // 夾在圖內，並且保證至少 1px —— 使用者手一抖點出一個零寬度的框是常態
+    const x = Math.max(0, Math.min(1, r.x)) * sw;
+    const y = Math.max(0, Math.min(1, r.y)) * sh;
+    const w = Math.max(1, Math.min(sw - x, r.w * sw));
+    const h = Math.max(1, Math.min(sh - y, r.h * sh));
+
+    let scale = w < MIN_CROP_WIDTH ? Math.min(MAX_CROP_SCALE, MIN_CROP_WIDTH / w) : 1;
+    if (w * h * scale * scale > MAX_PIXELS) {
+      scale = Math.max(1, Math.sqrt(MAX_PIXELS / (w * h)));
+    }
+
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(w * scale));
+    out.height = Math.max(1, Math.round(h * scale));
+    const ctx = out.getContext('2d');
+    // 白底：裁到透明區域（例如拉正之後的邊角）時，黑底會讓 tesseract 什麼都讀不到
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(source, x, y, w, h, 0, 0, out.width, out.height);
+    return out;
+  }
+
   /** 收掉 worker。`ready()` 之後再呼叫會重新開一個 */
   async function release() {
     const w = worker;
@@ -195,7 +254,7 @@
   window.SMOcrLite = {
     get available() { return isSupported(); },
     get running() { return !!worker; },
-    LANG, DIGITS, CONF_FLOOR, MIN_CAP_HEIGHT,
-    ready, recognize, release, paths,
+    LANG, DIGITS, CONF_FLOOR, MIN_CAP_HEIGHT, MIN_CROP_WIDTH,
+    ready, recognize, release, paths, crop,
   };
 })();

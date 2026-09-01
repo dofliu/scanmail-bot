@@ -27,6 +27,11 @@ const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json; charset=utf-8',
   '.png': 'image/png', '.woff2': 'font/woff2',
+  // OCR 的 wasm core 與 PDF 字型。`.wasm` **不是非有不可**：core 走
+  // `WebAssembly.instantiateStreaming`，但它自己有退路（型別不對就
+  // 「falling back to ArrayBuffer instantiation」照樣跑得起來，只是多一行警告）。
+  // 給對的型別是為了走正常那條路，不是為了讓功能能動。
+  '.wasm': 'application/wasm', '.ttf': 'font/ttf',
 };
 
 const server = http.createServer((req, res) => {
@@ -899,6 +904,124 @@ check('全部移除之後，畫面回到完全沒有文字的樣子',
   JSON.stringify(cleared));
 await page.locator('.pill:has-text("完成")').click();
 await page.waitForTimeout(200);
+
+// ── 圖片轉文字 ──────────────────────────────────────────
+// 引擎那一側 npm run test:ocr 已經驗過了，這裡驗的是**介面到引擎接得起來**：
+// 真的按下按鈕、真的跑 wasm、螢幕上真的出現讀到的字。
+// mobile/www/vendor 裡就有打包好的 OCR 資產，所以這條路是完整的、沒有替身。
+console.log('\n圖片轉文字');
+
+// 前面用的測試圖是兩塊純色，沒有字可以讀 —— 換一張有字的進來
+async function makeTextPng(name) {
+  const b64 = await page.evaluate(() => {
+    const c = document.createElement('canvas');
+    c.width = 1000; c.height = 300;
+    const x = c.getContext('2d');
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, c.width, c.height);
+    x.fillStyle = '#000000';
+    x.font = '46px "DejaVu Sans", sans-serif';
+    x.fillText('ACME SUPPLIES LTD', 40, 80);
+    x.font = '40px "DejaVu Sans", sans-serif';
+    x.fillText('TOTAL 3,982.50 USD', 40, 170);
+    x.fillText('DUE 2026-10-15', 40, 240);
+    return c.toDataURL('image/png').split(',')[1];
+  });
+  return { name, mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') };
+}
+
+// 清空再只放一張，畫面上就只有這一張圖 —— 拼貼裡有好幾張的時候，
+// 「點哪一格才選到有字那張」會變成測試自己的問題，跟要驗的東西無關
+await page.locator('button:has-text("清空")').first().click();
+await page.waitForTimeout(400);
+await page.locator('input[type=file]').first().setInputFiles([await makeTextPng('bill.png')]);
+await page.waitForTimeout(1200);
+
+// **單張工具列（裁切 / 打碼 / 標註 / 轉文字）要先選中一張圖才會出現。**
+// 沒選的時候工具列是版面 / 圖框 / 間距那一組，按不到轉文字。
+//
+// 不寫死「點第一個 canvas 的中心」：這一段跑在很多測試之後，畫面上不一定
+// 只有主預覽那一張畫布。逐個試到工具列真的換掉為止，並且把試了幾個回報出來。
+async function selectAnImage() {
+  const b = await page.locator('canvas').first().boundingBox();
+  if (!b) return { ok: false, at: '沒有畫布' };
+  // 不能只點正中央：這一段跑在九百多行測試之後，版面 / 圖框 / 間距都被改過，
+  // 單張圖不保證畫在畫布的中心。掃一個 3x3 的網格，點到圖上為止。
+  for (const fy of [0.5, 0.3, 0.7]) {
+    for (const fx of [0.5, 0.3, 0.7]) {
+      await page.mouse.click(b.x + b.width * fx, b.y + b.height * fy);
+      await page.waitForTimeout(320);
+      if ((await barLabels()).some((l) => l.includes('轉文字'))) {
+        return { ok: true, at: `${fx},${fy}` };
+      }
+    }
+  }
+  return { ok: false, at: '3x3 都不在圖上' };
+}
+const picked = await selectAnImage();
+check('選中圖片之後工具列上有「轉文字」', picked.ok,
+  `${picked.at}：${(await barLabels()).join(' / ').replace(/\n/g, ' ')}`);
+console.log(`    （點在畫布的 ${picked.at} 選中）`);
+
+await page.locator('button:has-text("轉文字")').click();
+// 第一次要載 6MB 的引擎再跑辨識，給它久一點
+await page.waitForFunction(
+  () => /ACME|TOTAL|3,982/.test(document.querySelector('textarea')?.value || ''),
+  null, { timeout: 60000 },
+).catch(() => {});
+const readOut = await page.evaluate(() => document.querySelector('textarea')?.value || '');
+check('開進來就先讀整張，字出現在畫面上',
+  /ACME SUPPLIES/i.test(readOut) && readOut.includes('3,982.50'),
+  JSON.stringify(readOut).slice(0, 200));
+
+const screen = await page.locator('.m-screen').innerText();
+check('唯讀工具：有「複製」、沒有「套用」',
+  /複製/.test(screen) && !/套用/.test(screen), screen.slice(0, 300));
+check('提示是「拖一個框只讀一塊」', /拖一個框/.test(screen), screen.slice(0, 300));
+
+// 框住金額那一行，並切成「只要數字」
+const readBox = await page.locator('canvas').boundingBox();
+await page.mouse.move(readBox.x + readBox.width * 0.03, readBox.y + readBox.height * 0.42);
+await page.mouse.down();
+await page.mouse.move(readBox.x + readBox.width * 0.62, readBox.y + readBox.height * 0.62, { steps: 8 });
+await page.mouse.up();
+await page.waitForTimeout(300);
+await page.locator('button:has-text("只要數字")').click();
+await page.waitForFunction(
+  () => /\d/.test(document.querySelector('textarea')?.value || ''),
+  null, { timeout: 40000 },
+).catch(() => {});
+const digitsOut = await page.evaluate(() => document.querySelector('textarea')?.value || '');
+check('框住金額 + 只要數字 → 讀得到金額', digitsOut.includes('3,982.50'),
+  JSON.stringify(digitsOut).slice(0, 200));
+check('只要數字模式會把它的用途講清楚（它不是過濾器）',
+  /不是把文字濾掉/.test(await page.locator('.m-screen').innerText()),
+  '沒有解釋 digits 模式的行為');
+
+// 回到整張，字要比只框一行的時候多
+await page.locator('button:has-text("全部文字")').click();
+await page.waitForTimeout(300);
+await page.locator('button:has-text("整張")').click();
+await page.waitForFunction(
+  () => /ACME/i.test(document.querySelector('textarea')?.value || ''),
+  null, { timeout: 40000 },
+).catch(() => {});
+const wholeAgain = await page.evaluate(() => document.querySelector('textarea')?.value || '');
+check('按「整張」回到讀整張', /ACME/i.test(wholeAgain) && wholeAgain.length > digitsOut.length,
+  `${JSON.stringify(digitsOut)} → ${JSON.stringify(wholeAgain)}`.slice(0, 220));
+
+await page.locator('button:has-text("關閉")').click();
+await page.waitForTimeout(400);
+check('關閉之後回到編輯畫面，圖沒有被改動',
+  (await barLabels()).some((l) => l.includes('轉文字')),
+  '關閉之後沒有回到工具列');
+
+// 把選取放掉，還原成進來時的狀態（一張圖、沒有選取）——
+// 後面的區段（簽名 / 輸出）用的是「沒選圖」那一組工具列，留著選取會讓它們找不到按鈕
+await page.locator('button:has-text("完成")').first().click();
+await page.waitForTimeout(400);
+check('按完成放掉選取，回到拼貼工具列',
+  (await barLabels()).some((l) => l.includes('簽名')),
+  (await barLabels()).join(' / ').replace(/\n/g, ' '));
 
 // ── 簽名 / 印章 ──────────────────────────────────────────
 await page.evaluate(() => localStorage.removeItem('sm.signatures'));

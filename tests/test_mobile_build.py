@@ -313,9 +313,12 @@ def test_annotations_share_the_redaction_gesture():
     """
     studio = (JS / "studio.jsx").read_text(encoding="utf-8")
     assert "function useDragBoxes(" in studio
-    # 打碼與標註都要真的走同一個 hook，不是各自實作一份
+    # 打碼 / 標註 / 轉文字（v3.28.0 加入）都要真的走同一個 hook，不是各自實作一份。
+    # 真正證明「沒有被複製」的是**定義只有一份**；呼叫端的數量只是記錄有誰在用。
+    assert studio.count("function useDragBoxes(") == 1, "拖框手勢被複製了一份"
     # `= useDragBoxes({` 只數呼叫端，不會把定義本身算進來
-    assert studio.count("= useDragBoxes({") == 2, "打碼與標註沒有共用同一套拖框手勢"
+    assert studio.count("= useDragBoxes({") == 3, \
+        "打碼 / 標註 / 轉文字沒有共用同一套拖框手勢"
     assert "function StudioAnnotator(" in studio
     assert "setAnnotating(true)" in studio, "標註沒有進入獨立畫面"
 
@@ -495,6 +498,37 @@ def test_transformed_html_bundles_the_ocr_assets(transformed_html):
                   "vendor/tesseract-core-simd-lstm.js", "lang: 'vendor'"):
         assert local in transformed_html, f"打包後的 index.html 少了 {local}"
     assert "jsdelivr" not in transformed_html, "還留著 jsdelivr 的網址"
+
+
+def test_reader_crops_from_the_full_resolution_image():
+    """畫布上那張是縮圖。從它裁一小塊出來只有幾十個像素，之後怎麼放大都補不回來。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    start = source.index("function StudioReader(")
+    end = source.index("\nfunction ", start + 10)
+    reader = source[start:end]
+    # 顯示用的那張是預覽；辨識用的那張不能帶 usePreview
+    assert "renderItem(item, { usePreview: true })" in reader, "畫布應該用預覽尺寸畫"
+    assert "renderItem(item)" in reader, "辨識用的應該是全解析度那張（不帶 usePreview）"
+    crop_at = reader.index("SMOcrLite.crop(")
+    full_at = reader.index("fullRef.current = window.SMImageLocal.renderItem(item)")
+    assert full_at < crop_at, "裁切之前要先算出全解析度那張"
+
+
+def test_reader_is_read_only():
+    """轉文字不改圖 —— 所以它沒有「套用」，也不該回傳東西給 patch()。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert "function StudioReader({ item, onClose })" in source, \
+        "StudioReader 不該收 onApply —— 它是唯讀工具"
+    branch = source[source.index("if (reading && current)"):]
+    branch = branch[:branch.index("if (deskewing && current)")]
+    assert "patch(" not in branch, "轉文字的分支不該呼叫 patch()"
+
+
+def test_reader_is_reachable_from_the_image_toolbar():
+    """引擎從 v3.26.0 就在了，缺的一直是這個入口。"""
+    source = (JS / "studio.jsx").read_text(encoding="utf-8")
+    assert 'label="轉文字"' in source, "工具列上少了轉文字"
+    assert "setReading(true)" in source, "轉文字沒有接上 StudioReader"
 
 
 def test_doc_panel_says_which_pages_were_ocred():

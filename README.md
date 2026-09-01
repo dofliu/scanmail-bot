@@ -553,7 +553,7 @@ npm run test:sign      # 簽名蓋章：把頁面畫出來數墨點，確認落�
 npm run test:scan      # 邊界偵測：合成有標準答案的影像，量角點誤差
 npm run test:config    # 伺服器位址的儲存與救援（每個情境都真的載入一次頁面）
 npm run test:live      # 即時取景：用 canvas.captureStream 當假相機走完整條路
-npm run test:ocr       # 裝置端 OCR：跑真的 wasm 與語言包，fixture 是現做的掃描型 PDF
+npm run test:ocr       # 裝置端 OCR：跑真的 wasm 與語言包，fixture 是現做的掃描型 PDF 與低解析度裁切
 npm run test:studio    # 離線版介面（需要先跑過 build_mobile.py --offline）
 
 # 開發模式啟動
