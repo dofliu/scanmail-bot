@@ -9,6 +9,25 @@
 
 ---
 
+## 2026/09/01（第二筆）— 認證邊界：金鑰分離、登入限流、註冊閘門
+
+| 項目 | 內容 |
+|------|------|
+| 主題 | **不是 roadmap 挑的**。使用者問「目前整個專案功能如何、有何建議」，實際翻程式碼之後找到四個文件沒反映出來的認證問題，使用者選了這一項先做。`roadmap[0]`（OCR M2 中文）刻意往後挪 |
+| 分支 | `claude/mobile-file-management-akeyaf`（從 `origin/main` `1b64a53` 重開 —— 前一個 PR #53 已合併，不能疊上去） |
+| PR | 見分支上的草稿 PR |
+| 結果 | 完成，v3.27.0。**完全沒有動到 `static/`**，所以只跑 pytest：**301 passed + 3 skipped**（289 → 301） |
+| 一把金鑰兩件事 | `ENCRYPTION_KEY` 同時加密 SMTP 密碼**與簽發身分 Token**，共用同一把 `sha256(secret)`。Token 改走加標籤的雜湊（`AUTH_KEY_LABEL`，domain separation），兩把位元組不同；另開 `AUTH_SECRET_KEY` 可單獨輪替（把所有人踢下線而不動 SMTP） |
+| 預設金鑰改成致命 | `ENABLE_AUTH=True` ＋ 公開預設金鑰 → **拒絕啟動**（`startup_secret_error()`，lifespan 裡 raise）。那個字串就在 `app/config.py`，任何人都能簽任意 `user_id` 的 Token。警告會被日誌淹掉，而「以為自己有保護」比「知道自己沒保護」危險 |
+| 登入限流：**關鍵在不能重用現成的** | `/api/auth/*` 原本零限流，而八個功能 router 都有 `Depends(rate_limit)`。但**直接套 `rate_limit` 修不了** —— 它用 `X-User-Id` 當 key，那是客戶端自己填的：每猜一次換一個 header 就換到新配額。所以新增 `auth_limiter` + `_client_ip()`，**只認 `request.client.host`、不看任何 header**（五分鐘 10 次）。有一條測試照攻擊的方式走：每次換 `X-User-Id`，仍然要吃到 429 |
+| 註冊閘門 | 原本 `/api/auth/register` 完全開放 —— 認證擋住未登入的人，沒擋住「自己註冊一個」。改成「第一個帳號」或「帶對 `REGISTRATION_TOKEN`」。零設定的代價是「第一個搶到的人就是主人」，所以啟動時把這個窗口還開著明確 log 出來 |
+| 順手修的三件 | ①cookie `Secure` 原本寫死 `False`＋一句「生產環境可設為 True」，改成跟著 scheme 走、`COOKIE_SECURE` 可蓋過 ②「查無此人」約 6ms 就回、密碼錯誤要 68ms（十萬次 PBKDF2）—— 數毫秒就能列舉帳號，現在查無此人也補算一次假雜湊 ③`/health` 的版號寫死 `3.15.0`，改成讀 `app.version` |
+| **Mutation 抓到三條假測試** | 七個 mutation 跑下來，一開始只有四個被咬住。三條沒咬住的**都是同一種錯：對著輔助函式斷言，而不是對著真正用到它的那條路**。①`_get_key() != _auth_key()` 只證明模組算得出兩把鑰匙，不證明 `create_access_token` 用對了那把 → 改成簽一張真 Token、要求 SMTP 那把解不開。②直接呼叫 `_cookie_secure()` 抓不到呼叫點被改回寫死 → 改成讀真正的 `Set-Cookie`。③時間那條**斷言方向錯了** —— 拿掉補算會讓查無此人變**快**（68ms → 6ms），我寫的卻是上界 `< 4 倍`，永遠不會紅 → 改成下界。修完七個全部咬住 |
+| 量出來的數字 | PBKDF2 十萬次在這台機器上 60ms。有補算：HTTP 層 68ms（密碼錯誤）vs 66ms（查無此人），比值 0.965。沒補算：查無此人掉到 ~6ms，比值 0.09 |
+| 環境注意事項 | 這次不需要瀏覽器測試（沒動 `static/`）。`pip install -r requirements.txt` 之後仍要補 `pip install cffi pytest` |
+| 刻意沒做 | ①**Token 撤銷** —— 登出只清 cookie，Token 到期前都有效。要做是 jti 黑名單或 per-user 版本號 ②**帳號層的猜測計數** —— 擋散在很多 IP 的攻擊者，但會變成鎖死別人帳號的騷擾手段，鎖定策略要一起想 ③**`index.html` 的 `?v=3.15.0`** —— 凍了十幾個版本，快取破壞實質失效（ETag 有補救）。三項都寫進「後續工作」 |
+| 下一步 | 使用者原本排的順序裡，第 2 項是**圖片工具的「這張圖轉文字」入口** —— `SMOcrLite.recognize()` 已經吃任何 canvas，缺的純粹是介面，順手把 `digits` 模式接出來（框一格金額只讀數字）。第 3 項是版號一致性（`index.html` 的 `?v=` ＋ 一條測試）。之後才回到 `roadmap[0]` 的 OCR M2 中文。`STATUS.yaml` 的 `roadmap` 已經照這個順序重排過（前兩項插到 OCR M2 前面），`next_milestone` 也跟著換了，所以夜間 routine 直接挑 `roadmap[0]` 就對 |
+
 ## 2026/09/01 — 裝置端 OCR M1（數字與英文）
 
 | 項目 | 內容 |

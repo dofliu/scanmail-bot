@@ -7,7 +7,7 @@ from fastapi import Request, HTTPException, Depends
 from fastapi.security import APIKeyHeader
 
 from app.config import get_settings
-from app.utils.crypto import _get_key
+from app.utils.crypto import _auth_key
 from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ API_KEY_HEADER = APIKeyHeader(name="Authorization", auto_error=False)
 
 def create_access_token(user_id: str, expires_in_seconds: int = 86400) -> str:
     """建立安全的加密身份 Token"""
-    f = Fernet(_get_key())
+    f = Fernet(_auth_key())
     payload = {
         "user_id": user_id,
         "expires_at": time.time() + expires_in_seconds
@@ -32,7 +32,7 @@ def create_access_token(user_id: str, expires_in_seconds: int = 86400) -> str:
 def verify_access_token(token: str) -> Optional[str]:
     """驗證 Token 是否合法且未過期，回傳 user_id"""
     try:
-        f = Fernet(_get_key())
+        f = Fernet(_auth_key())
         decrypted_bytes = f.decrypt(token.encode("utf-8"))
         payload = json.loads(decrypted_bytes.decode("utf-8"))
         

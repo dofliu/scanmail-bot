@@ -1,8 +1,11 @@
 """環境變數與設定管理"""
 from functools import lru_cache
+from typing import Optional
+
 from pydantic_settings import BaseSettings
 
-# 公開的預設加密金鑰 — 僅供開發；正式部署務必以環境變數覆蓋
+# 公開的預設加密金鑰 — 僅供開發；正式部署務必以環境變數覆蓋。
+# 這個字串就在版控裡，所以「還在用預設值」等於「沒有金鑰」。
 DEFAULT_ENCRYPTION_KEY = "scanmail-bot-default-secret-key"
 
 
@@ -37,8 +40,22 @@ class Settings(BaseSettings):
     # CORS — 允許的來源（逗號分隔，預設全開；正式部署請收斂）
     ALLOWED_ORIGINS: str = "*"
 
-    # 加密金鑰
+    # 加密金鑰（SMTP 密碼用）
     ENCRYPTION_KEY: str = DEFAULT_ENCRYPTION_KEY
+
+    # 簽發身分 Token 用的金鑰。留空的話從 ENCRYPTION_KEY 推導（見
+    # app/utils/crypto.py 的 _auth_key），**但推導出來的位元組跟 SMTP 那把不同**。
+    # 單獨設定它的用途是「換一把就把所有人踢下線」，不必動 SMTP 那把。
+    AUTH_SECRET_KEY: str = ""
+
+    # 註冊邀請碼。留空時註冊只開放給**第一個**帳號（見 app/routers/auth.py）；
+    # 設定之後，之後每一次註冊都要帶對這個碼。
+    REGISTRATION_TOKEN: str = ""
+
+    # 登入 Cookie 要不要帶 Secure 旗標。None（預設）＝ 跟著請求的 scheme 走 ——
+    # 寫死 True 會讓內網的 http 部署登不進去，寫死 False 會讓 https 部署的
+    # cookie 裸奔，兩個都不是好預設。
+    COOKIE_SECURE: Optional[bool] = None
 
     @property
     def cors_origins(self) -> list[str]:
