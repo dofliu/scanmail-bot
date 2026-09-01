@@ -53,6 +53,16 @@ class UserModel:
             conn.close()
 
     @staticmethod
+    def count() -> int:
+        """目前有幾個帳號 —— 註冊閘門靠它判斷「這是不是第一個帳號」"""
+        conn = get_connection()
+        try:
+            row = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
+            return int(row["n"] if isinstance(row, dict) or hasattr(row, "keys") else row[0])
+        finally:
+            conn.close()
+
+    @staticmethod
     def get_by_username(username: str) -> Optional[dict]:
         """以使用者名稱取得使用者"""
         conn = get_connection()

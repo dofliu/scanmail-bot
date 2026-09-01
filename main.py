@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.database import init_db
 from app.core.file_manager import cleanup_temp_files
-from app.utils.crypto import is_default_key
+from app.utils.crypto import is_default_key, startup_secret_error
 from app.core.rate_limiter import rate_limit
 from app.core.auth import get_current_user
 from app.routers import scanmail
@@ -45,9 +45,27 @@ async def lifespan(app: FastAPI):
     logger.info("ScanMail+ 啟動中...")
     init_db()
     logger.info("資料庫初始化完成")
+    # 開了認證卻還用公開的預設金鑰 → 直接不讓服務起來。
+    # 那不是「不太理想」而是「認證等於不存在」，警告會被日誌淹掉。
+    fatal = startup_secret_error()
+    if fatal:
+        logger.critical(fatal)
+        raise RuntimeError(fatal)
+
+    # 註冊窗口還開著就講出來 —— 這是一段「第一個註冊的人就是主人」的時間，
+    # 知道它開著才有機會馬上把它用掉，或改設 REGISTRATION_TOKEN 關掉。
+    if get_settings().ENABLE_AUTH:
+        from app.models.user import UserModel
+        if not get_settings().REGISTRATION_TOKEN and UserModel.count() == 0:
+            logger.warning(
+                "目前還沒有任何帳號 —— /api/auth/register 對第一個註冊的人開放。"
+                "請盡快建立自己的帳號，或在 .env 設定 REGISTRATION_TOKEN 改用邀請碼。"
+            )
+
     if is_default_key():
         logger.warning(
-            "ENCRYPTION_KEY 仍為公開預設值 — SMTP 密碼等同未加密。"
+            "ENCRYPTION_KEY 仍為公開預設值 — SMTP 密碼等同未加密，"
+            "而且一旦把 ENABLE_AUTH 打開，身分 Token 也會是可偽造的。"
             "正式部署請在 .env 設定獨立的 ENCRYPTION_KEY。"
         )
 
@@ -94,7 +112,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ScanMail+",
     description="智慧文件處理平台 — 掃描郵寄 + 多媒體工具",
-    version="3.26.0",
+    version="3.27.0",
     lifespan=lifespan,
 )
 
@@ -117,13 +135,16 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok", "service": "ScanMail+", "version": "3.15.0"}
+    return {"status": "ok", "service": "ScanMail+", "version": app.version}
 
 
 # ── API 路由掛載 ──
 
-# 身分驗證路由為公開存取
-app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
+# 身分驗證路由為公開存取（不需要 Token —— 它就是拿 Token 的地方），
+# 但**不是不限流**：/register 與 /login 另外掛了只認來源 IP 的 auth_rate_limit
+# （見 app/core/rate_limiter.py），這裡的 rate_limit 是給 /status、/logout 用的。
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"],
+                   dependencies=[Depends(rate_limit)])
 
 # 功能性路由均需驗證 Token (當 ENABLE_AUTH=True 時)
 app.include_router(scanmail.router, prefix="/api", tags=["scanmail"], dependencies=[Depends(rate_limit), Depends(get_current_user)])
