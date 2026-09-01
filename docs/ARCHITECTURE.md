@@ -86,7 +86,8 @@ ScanMail+ 是一個文件掃描郵寄平台，另外整合了一整套媒體 / �
 | `sign-lite.js` | ~590 | 簽名模型（向量筆畫）、去白底匯入、PDF 路徑輸出、簽名庫的持久化 |
 | `pdf-lite.js` | ~990 | PDF 物件解析器：讀 xref / 展開物件串流 / 挑頁重組 / 蓋章 |
 | `pdf-write.js` | ~520 | PDF 產生器（Type0 內嵌字型、影像 XObject） |
-| `doc-local.js` | ~1120 | PDF / Word / Markdown 互轉，中間隔一層共用文件模型 |
+| `doc-local.js` | ~1210 | PDF / Word / Markdown 互轉，中間隔一層共用文件模型；抽不到文字的 PDF 頁面**逐頁**改走 OCR |
+| `ocr-lite.js` | ~200 | 裝置端 OCR（tesseract.js LSTM，英數）：共用一個 worker、資產位置由 `SM_OCR_PATHS` 給（App 打包在 vendor/、網頁版走 CDN）|
 | `ttf-lite.js` | ~370 | TrueType 解析與子集化（只把用到的字寫進 PDF） |
 | `zip-lite.js` | ~210 | 用瀏覽器內建 CompressionStream 讀寫 zip（DOCX 就是 zip） |
 

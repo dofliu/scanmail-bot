@@ -18,6 +18,18 @@
     window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
   }
 </script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/tesseract.min.js"></script>
+<script>
+  // OCR 引擎的三個資產（worker / wasm core / 英文語言包）。
+  // 加起來約 6MB，所以是**用到才載** —— 這三個位址只是位址，
+  // 真正下載發生在第一次呼叫 SMOcrLite.ready()（掃描型 PDF 才會走到）。
+  // App 版由 scripts/build_mobile.py 換成 vendor/ 底下打包進去的檔案。
+  window.SM_OCR_PATHS = {
+    worker: 'https://cdn.jsdelivr.net/npm/tesseract.js@7.0.0/dist/worker.min.js',
+    core: 'https://cdn.jsdelivr.net/npm/tesseract.js-core@6.1.2/tesseract-core-simd-lstm.js',
+    lang: 'https://cdn.jsdelivr.net/npm/@tesseract.js-data/eng@1.0.0/4.0.0_best_int',
+  };
+</script>
 
 <script>
   // Tweaks defaults
@@ -90,6 +102,7 @@
 <script src="js/scan-live.js?v=3.15.0"></script>
 <script src="js/sign-lite.js?v=3.15.0"></script>
 <script src="js/pdf-lite.js?v=3.15.0"></script>
+<script src="js/ocr-lite.js?v=3.15.0"></script>
 <script src="js/doc-local.js?v=3.15.0"></script>
 <script src="js/api.js?v=3.15.0"></script>
 <script src="js/store.js?v=3.15.0"></script>

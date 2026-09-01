@@ -2618,6 +2618,19 @@ function StudioDocs() {
           {source.file.name} → {targetInfo.label}
           {source.doc.pages ? `（原始 ${source.doc.pages} 頁）` : ''}
         </div>
+        {/* OCR 認出來的字本來就可能有錯，使用者要知道**哪幾頁**該多看一眼 ——
+            只說「這份文件用了 OCR」等於要他整份重讀，跟沒說一樣 */}
+        {source.doc.ocred && source.doc.ocred.length > 0 && (
+          <div style={{
+            fontSize: '11px', color: 'var(--ink-2)', marginBottom: '10px',
+            padding: '7px 9px', borderRadius: '7px',
+            // 半透明的琥珀色，深淺主題都疊得上去；邊框用 --warn 讓它跟著主題走
+            background: 'rgba(196, 138, 58, .12)', borderLeft: '3px solid var(--warn)',
+          }}>
+            🔍 第 {source.doc.ocred.join('、')} 頁沒有文字層，是用 OCR 認出來的 ——
+            金額與單號請再核對一次
+          </div>
+        )}
         <DocPreview doc={source.doc}/>
       </div>
 

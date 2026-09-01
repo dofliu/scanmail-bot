@@ -525,6 +525,8 @@ PDF 的合併、刪頁、抽頁、重排、轉向。
 * **等寬字型** — 程式碼區塊用的是同一份 Noto Sans TC（再帶一份等寬中文字型太大），
   有底色標示但字寬不對齊。
 * **去背** — ONNX 模型加上執行環境要 +15MB，手機上一張還要跑好幾秒，評估後沒做。
+* **中文 OCR** — v3.26.0 的裝置端 OCR **只有英文與數字**。中文語言包大一個量級，辨識率也不如後端的 PaddleOCR，之後要做會做成使用者自己選要不要下載。
+* **只有掃描型 PDF 會走 OCR** — 圖片工具那一側還沒有「這張圖轉成文字」的入口，引擎（`SMOcrLite.recognize`）已經吃任何 canvas，缺的是介面。
 * **文字圖層不能調順序** — v3.24.0 起一張圖疊得下最多 6 層文字（標題、日期、浮水印
   各一層），但畫的順序就是新增的順序，要改只能刪掉重打。另外一般文字一律水平，
   角度是浮水印專屬的設定。
@@ -624,7 +626,8 @@ Release asset 是直接下載，**免登入、手機點連結就進安裝畫面*
 | 步驟 | 說明 |
 |------|------|
 | 複製 | `static/` → `mobile/www/`（`mobile/www/` 是產物，不進版控）；缺少 PDF 內嵌字型會直接中止 |
-| 換掉 CDN | React / pdf.js / 字型改成打包在 App 內的檔案，手機沒網路也開得起來 |
+| 換掉 CDN | React / pdf.js / 字型 / OCR 引擎改成打包在 App 內的檔案，手機沒網路也開得起來 |
+| OCR 資產 | tesseract.js 的 worker、SIMD-LSTM wasm core（2.9MB）與英文語言包（2.9MB）複製到 `vendor/`，共 +6.1MB。`window.SM_OCR_PATHS` 的三個位址一併換成本地路徑 ——它們是 JS 字串不是 `src` 屬性，漏掉的話 App 會裝好之後才在使用者按下轉檔時失敗 |
 | 預編譯 JSX | 用 esbuild 先把 `.jsx` 轉成 `.js`，App 內不必再載 3MB 的 Babel 即時編譯 |
 | 橋接 | 打包 `mobile/src/bridge.js` → `window.SMCap`（存檔、分享、狀態列） |
 | 注入旗標 | `window.SM_NATIVE = true`，讓前端知道要用絕對位址呼叫 API；加 `--offline` 時另外注入 `window.SM_OFFLINE = true` |

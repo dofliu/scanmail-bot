@@ -627,14 +627,83 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
   }
 
   /**
+   * 掃描頁 render 成圖再送去 OCR 的目標寬度（像素）。
+   *
+   * PDF 的一點是 1/72 吋，所以 scale 1 render 出來的 A4 只有 595px 寬 ——
+   * 10pt 的內文在那個尺寸下大寫字高只剩 7px。**量出來的結果**
+   * （`npm run test:ocr` 那一頁 10pt 內文的合成掃描件，跨五種寬度各認一次）：
+   *
+   *      595px → 信心 84，而且會多讀出一個原文沒有的句點
+   *     1000px → 信心 95，全對
+   *     1500px → 信心 95，全對
+   *     2000px → 信心 95，全對，但時間是 1000px 的兩倍（298ms → 625ms）
+   *
+   * 也就是說**乾淨的合成頁面在 1000px 就到頂了**，再放大只是多花時間。
+   * 這裡取 1600 而不是 1000，是**留餘裕、不是量出來的**：合成的頁面沒有雜點、
+   * 沒有歪斜、沒有壓過頭的 JPEG，真實的掃描件三樣都有，而那些正是靠解析度換回來的。
+   * 真機拿幾份實際的掃描 PDF 跑過之後，這個數字應該回來重訂 ——
+   * 往下調到 1200 每頁大概省三成時間。
+   *
+   * 倍率夾在 4 倍以內，避免本來就很大的頁面開出一張手機吃不下的 canvas。
+   */
+  const OCR_RENDER_WIDTH = 1600;
+
+  /**
+   * 行的 bbox 高度 ÷ 字級。OCR 只知道「這一行框起來有多高」，
+   * 而下游的標題判斷吃的是**字級**；同一份文件裡全部用同一套量法本來就不影響比較，
+   * 但一份 PDF 可以前幾頁是電子檔、後幾頁是掃描的，兩種來源的數字要能對得起來。
+   * 0.72 是量出來的（48px 的字，一行沒有下伸部的 bbox 高 34px），
+   * 有下伸部的行會偏高一些 —— 這是近似值，只用來排序大小，不是拿來排版的。
+   */
+  const OCR_CAP_RATIO = 0.72;
+
+  /**
+   * 把一頁 render 成圖、送去 OCR，回傳跟「抽得出文字」那條路**一模一樣格式**的行。
+   *
+   * 這是整件事最省力的地方：`fromPdf` 底下那一大段還原標題 / 段落 / 項目符號的邏輯
+   * 吃的就是「一堆帶座標的行」，而 OCR 給的也正是這個。座標換算成 PDF 的
+   * 左下原點、單位點之後，下游根本分不出這一頁是抽出來的還是認出來的 ——
+   * 也就不必為 OCR 再寫一套段落還原。
+   */
+  async function ocrPage(page, onProgress) {
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(4, Math.max(1, OCR_RENDER_WIDTH / base.width));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+
+    const res = await window.SMOcrLite.recognize(canvas, { onProgress });
+    return res.lines.map((l) => ({
+      text: l.text,
+      size: (l.h / scale) / OCR_CAP_RATIO,
+      // 影像是左上原點、PDF 是左下原點，而且要除回 render 的倍率
+      y: base.height - (l.y + l.h) / scale,
+      x: l.x / scale,
+    }));
+  }
+
+  /**
    * PDF 裡沒有「段落」這種東西，只有一堆帶座標的文字片段。
    * 這裡靠三件事還原結構：字級（比內文大就是標題）、
    * 行距（跳太多行就是新段落）、行首符號（項目符號 / 編號）。
+   *
+   * 抽不到文字的頁面會**逐頁**改走 OCR（`opts.ocr`，預設 auto）。
+   * 判斷放在每一頁而不是整份文件上 —— 一份 PDF 完全可以前面幾頁是電子檔、
+   * 後面附件是掃描的，整份一起判會讓那些附件跟以前一樣讀不到。
    */
-  async function fromPdf(buffer, onProgress) {
+  async function fromPdf(buffer, onProgress, opts = {}) {
     const pdfjs = window.pdfjsLib;
     if (!pdfjs) throw new Error('缺少 pdf.js，無法讀取 PDF');
     const pdf = await pdfjs.getDocument({ data: pdfBytes(buffer) }).promise;
+
+    const ocrWanted = opts.ocr !== 'off';
+    const ocrReady = ocrWanted && !!(window.SMOcrLite && window.SMOcrLite.available);
+    const ocred = [];
 
     const lines = [];
     for (let n = 1; n <= pdf.numPages; n++) {
@@ -655,17 +724,39 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
         }
       }
       buckets.sort((p, q) => q.y - p.y);
+      const pageLines = [];
       for (const b of buckets) {
         b.parts.sort((p, q) => p.x - q.x);
         const text = b.parts.reduce((acc, p) => joinText(acc, p.str), '').trim();
-        if (text) lines.push({ text, size: b.size, y: b.y, page: n, x: Math.min(...b.parts.map((p) => p.x)) });
+        if (text) pageLines.push({ text, size: b.size, y: b.y, page: n, x: Math.min(...b.parts.map((p) => p.x)) });
       }
+
+      if (!pageLines.length && ocrReady) {
+        const span = 60 / pdf.numPages;
+        const done = (n - 1) * span;
+        // 引擎是**第一頁真的需要**的時候才叫起來，而它要抓 6MB（網頁版是現載的）。
+        // 沒有這一句，使用者會盯著一個不動的進度條好幾秒，不知道是當掉還是在忙。
+        if (!window.SMOcrLite.running && onProgress) {
+          onProgress(Math.round(done), '載入 OCR 引擎…');
+        }
+        await window.SMOcrLite.ready();
+        if (onProgress) onProgress(Math.round(done), `辨識第 ${n}/${pdf.numPages} 頁（OCR）`);
+        const found = await ocrPage(page, (frac) => {
+          if (onProgress) onProgress(Math.round(done + span * frac), `辨識第 ${n}/${pdf.numPages} 頁（OCR）`);
+        });
+        for (const l of found) pageLines.push({ ...l, page: n });
+        if (found.length) ocred.push(n);
+      }
+
+      lines.push(...pageLines);
       lines.push(null); // 換頁
     }
 
     const real = lines.filter(Boolean);
     if (!real.length) {
-      throw new Error('這份 PDF 抽不到文字 —— 可能是掃描的圖片檔，需要 OCR 才讀得出來');
+      throw new Error(ocrReady
+        ? '這份 PDF 抽不到文字，OCR 也認不出來 —— 可能是掃描品質太差，或整份都是圖表'
+        : '這份 PDF 抽不到文字 —— 可能是掃描的圖片檔，需要 OCR 才讀得出來');
     }
 
     // 內文字級 = 出現最多的字級（四捨五入到 0.5pt）
@@ -719,7 +810,9 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
     flushList();
 
     const first = blocks.find((b) => b.type === 'heading');
-    return { title: first ? plain(first.spans) : '', blocks, pages: pdf.numPages };
+    // `ocred` 讓呼叫端說得出「第 2、3 頁是認出來的」——
+    // OCR 的字本來就可能有錯，使用者知道哪幾頁要多看一眼，跟給不給文字一樣重要。
+    return { title: first ? plain(first.spans) : '', blocks, pages: pdf.numPages, ocred };
   }
 
   // ── PDF 產生 ────────────────────────────────────────────
@@ -1081,10 +1174,10 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
     return 'md';
   }
 
-  async function parse(file, onProgress) {
+  async function parse(file, onProgress, opts = {}) {
     const kind = detect(file);
     if (kind === 'docx') return { doc: await fromDocx(await file.arrayBuffer()), kind };
-    if (kind === 'pdf') return { doc: await fromPdf(await file.arrayBuffer(), onProgress), kind };
+    if (kind === 'pdf') return { doc: await fromPdf(await file.arrayBuffer(), onProgress, opts), kind };
     const text = await file.text();
     return { doc: kind === 'txt' ? fromMarkdown(text) : fromMarkdown(text), kind };
   }
@@ -1102,7 +1195,7 @@ ${links.map((url, i) => `<Relationship Id="rIdL${i + 1}" Type="http://schemas.op
   async function convert(file, target, opts = {}, onProgress) {
     const step = onProgress || (() => {});
     step(5, '讀取檔案');
-    const { doc } = await parse(file, step);
+    const { doc } = await parse(file, step, opts);
     step(70, '產生' + (FORMATS[target] ? FORMATS[target].label : target));
     const result = await render(doc, target, opts);
     step(100, '完成');
